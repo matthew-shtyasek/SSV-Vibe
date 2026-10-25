@@ -1,3 +1,19 @@
+*** Changes from SSV v1.16 (development version 1.17-dev) ***
+RMS: modes, panel A8U and displays according to the PDRS documents (MODE with ENTER, PL and ORB LD with POR, TEST, RATE HOLD, BRAKES, SAFING, AUTO SEQ, soft stops, backup control, RMS POWER)
+added SPEC 94 items, DISP 95 PDRS OVERRIDE, DISP 96 PDRS FAULTS and DISP 169 PDRS STATUS
+RMS: operator commanded (OPR CMD) and automatic (AUTO 1-4) modes, with sequences read from Config\SSV\RMS\AutoSequences.txt
+added the overlay and grapple hint to the menu of the CTVM monitors (OVRLY)
+added option RMSPayloadMassEffect (arm rates depend on the mass of the payload, off by default)
+payload bay doors, radiators, MPMs and RMS can not be moved on the ground
+game controllers: any number of DirectInput devices (configuration files like the Vesim module of NASSP) for RHC, THC, RMS functions, rudder pedals, speedbrake/throttle controller, toe brakes and for switches and pushbuttons of the panels
+recording and replay of the clicks on the panels and of the keys in playback
+UNIV PTG: TRK for TGT ID 3 (LAT, LON, ALT), 4 (Sun) and 5 (RA, DEC)
+corrected the left-right direction of the aft THC for the keyboard and the controllers
+Earth cloud resolution level set to 11
+build, package and test scripts (tools), unit tests and a GitHub Actions pipeline
+
+
+
 *** Changes from SSV v1.15 ***
 fixed number parsing to handle different cultures in Mission Editor
 corrected ET vents

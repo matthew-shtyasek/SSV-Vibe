@@ -9,6 +9,8 @@ Space Shuttle Vessel (SSV) is an addon for Orbiter Space Flight Simulator (https
 
 This release of SSV is for use in Orbiter 2024.
 
+**This branch is a development version (1.17-dev)** with the PDRS (RMS) and game controller work: see [DEV_BUILD.md](DEV_BUILD.md) (English) or [DEV_BUILD_RU.md](DEV_BUILD_RU.md) (Russian) for what is new, how to test it and the builds.
+
 
 # Installation
 1. Install Orbiter 2024.

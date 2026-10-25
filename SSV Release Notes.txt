@@ -1,3 +1,11 @@
+*** Release notes for SSV v1.17-dev ***
+- Development version, see DEV_BUILD.md.
+- The delays of the brakes and of the safing of the RMS, auto safing, auto brakes and the failures of the RMS are not simulated.
+- The failure branches of the RSLS (countdown sequence) are not implemented.
+- UNIV PTG: TRK is not available for the orbiting vehicle (TGT ID 1) and the stars.
+
+
+
 *** Release notes for SSV v1.16 ***
 - Alert tone timers in SPEC 2 are only available for MET, and their state is not saved on scenario exit.
 - I-Load GMO_I can now have the correct value of 4.
