@@ -10,6 +10,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Attach the build to the release of this existing tag (for example v1.17-dev.1); leave empty to only build'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -41,8 +46,11 @@ jobs:
       - name: Version
         id: ver
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.release_tag }}
         run: |
           if ($env:GITHUB_REF -like 'refs/tags/*') { $v = $env:GITHUB_REF_NAME }
+          elseif ($env:RELEASE_TAG) { $v = $env:RELEASE_TAG }
           else { $v = "v1.17-dev.$($env:GITHUB_RUN_NUMBER)" }
           "version=$v" >> $env:GITHUB_OUTPUT
           Write-Host "Version $v"
@@ -77,6 +85,14 @@ jobs:
           name: Space Shuttle Vessel ${{ steps.ver.outputs.version }}
           prerelease: ${{ contains(github.ref_name, '-dev') }}
           body_path: DEV_BUILD.md
+          files: dist/SSV-${{ steps.ver.outputs.version }}.zip
+
+      - name: Attach the build to an existing release (manual run)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.release_tag }}
+          prerelease: ${{ contains(github.event.inputs.release_tag, '-dev') }}
           files: dist/SSV-${{ steps.ver.outputs.version }}.zip
 
       - name: Move the tag of the rolling development release
