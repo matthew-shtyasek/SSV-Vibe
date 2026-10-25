@@ -1,0 +1,105 @@
+name: Build
+
+# Builds the modules of SSV (Orbiter 2024, x86), runs the unit tests and makes the zip of the build.
+#  - every push and pull request: build, tests, zip as an artifact of the run (it is kept 30 days, a GitHub login is needed to download it)
+#  - push to a branch "dev/*": the zip is also published in the pre-release "dev-latest" (public link, easy to send to others)
+#  - push of a tag "v*" (for example v1.17-dev.1): a release with the zip
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache the Orbiter SDK
+        id: sdk
+        uses: actions/cache@v4
+        with:
+          path: orbiter-sdk
+          key: orbiter-sdk-2024-x86-1
+
+      - name: Get the Orbiter SDK
+        if: steps.sdk.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: ./tools/get-orbiter-sdk.ps1 -Out orbiter-sdk
+
+      - name: Version
+        id: ver
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/*') { $v = $env:GITHUB_REF_NAME }
+          else { $v = "v1.17-dev.$($env:GITHUB_RUN_NUMBER)" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Version $v"
+
+      - name: Build the modules and run the tests
+        shell: pwsh
+        run: ./tools/build.ps1 -Orbiter "$PWD/orbiter-sdk" -Threads $env:NUMBER_OF_PROCESSORS -Priority Normal -Toolset v143 -WinSdk 10.0 -Tests
+
+      - name: Package
+        shell: pwsh
+        run: ./tools/package.ps1 -Version ${{ steps.ver.outputs.version }}
+
+      - name: Upload the build
+        uses: actions/upload-artifact@v4
+        with:
+          name: SSV-${{ steps.ver.outputs.version }}
+          path: dist/SSV-${{ steps.ver.outputs.version }}.zip
+          retention-days: 30
+
+      - name: Upload the build logs of a failed build
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: build/*.out
+          retention-days: 7
+
+      - name: Release of a tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Space Shuttle Vessel ${{ steps.ver.outputs.version }}
+          prerelease: ${{ contains(github.ref_name, '-dev') }}
+          body_path: DEV_BUILD.md
+          files: dist/SSV-${{ steps.ver.outputs.version }}.zip
+
+      - name: Move the tag of the rolling development release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/dev/')
+        shell: pwsh
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git tag -f dev-latest
+          git push -f origin dev-latest
+
+      - name: Name of the zip of the rolling release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/dev/')
+        shell: pwsh
+        run: Copy-Item dist/SSV-${{ steps.ver.outputs.version }}.zip dist/SSV-dev-latest.zip
+
+      - name: Rolling development release (dev-latest)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/dev/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev-latest
+          name: Development build (${{ github.ref_name }}, ${{ steps.ver.outputs.version }})
+          prerelease: true
+          make_latest: false
+          body_path: DEV_BUILD.md
+          files: dist/SSV-dev-latest.zip

@@ -1895,3 +1895,11 @@ lib
 
 ## XRSound ##
 /XRSound/*
+
+## build, package and local files ##
+/build
+/dist
+/orbiter-sdk
+/Config/SSV/Controllers/DetectedDevices.txt
+/Config/SSV/Controllers/Joystick[0-9]*.cfg
+/Config/SSV/LaunchTime.txt
