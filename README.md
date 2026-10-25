@@ -1,3 +1,11 @@
+> **Unofficial fork of [GLS-SSV/SSV](https://github.com/GLS-SSV/SSV), development version 1.17-dev (based on SSV v1.16).** This is not an official release of Space Shuttle Vessel and it is not made by the GLS-SSV team.
+>
+> - **What is added:** the Payload Deployment and Retrieval System (the RMS arm: modes, panel A8U, displays, camera overlay), game controllers (any number of sticks, pedals, gamepads, FPV radios), UNIV PTG tracking, playback of panel events, build scripts, unit tests and a build pipeline. Details, the test list and the builds: [DEV_BUILD.md](DEV_BUILD.md), the builds are in the *Releases* of this repository.
+> - **Part of the code was written with the help of AI** (Claude Code). It was built and unit-tested, but not tested for long in the simulator yet. Please report what you find.
+> - **License:** GNU GPL v2, as the original (see [SSV-LICENSE.txt](SSV-LICENSE.txt)). The credits of the original are kept below.
+>
+> **Неофициальный форк [GLS-SSV/SSV](https://github.com/GLS-SSV/SSV), тестовая версия 1.17-dev (на основе SSV v1.16).** Это не официальный релиз Space Shuttle Vessel и не продукт команды GLS-SSV. Что добавлено: рука RMS (режимы, панель A8U, дисплеи, накладка на мониторе), игровые контроллеры, наведение UNIV PTG, запись нажатий в playback, скрипты сборки, тесты и конвейер. Подробности, список проверок и сборки: [DEV_BUILD_RU.md](DEV_BUILD_RU.md), сборки лежат в *Releases*. **Часть кода написана с помощью ИИ** (Claude Code), собрана и покрыта юнит-тестами, в симуляторе пока проверена мало: сообщайте о найденном. Лицензия GPL v2, как у оригинала, авторы оригинала указаны ниже.
+
 ![SSV logo](./Doc/Space%20Shuttle%20Vessel/Images/logo1000.png)
 
 # Space Shuttle Vessel
