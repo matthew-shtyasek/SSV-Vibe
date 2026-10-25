@@ -121,6 +121,7 @@ namespace vc
 			unsigned short usCover;
 			UINT grpIndex_U;
 			UINT grpIndex_L;
+			bool flagInLower;// the state of the input is shown in the lower segment, the upper one is the cover
 
 			void UpdateUV( void );
 
@@ -134,6 +135,7 @@ namespace vc
 			void SetInitialState( unsigned short _usFlag );
 			void SetInput( DiscreteBundle* pBundle, unsigned short usLine, unsigned short usFlag );
 			void SetCoverSegment( unsigned short _usFlag );
+			void SetFlagInLowerSegment( bool _flagInLower );
 			void VisualCreated( void )override;
 
 			unsigned short flags;

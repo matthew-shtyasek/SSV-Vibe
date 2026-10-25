@@ -88,6 +88,7 @@ namespace vc
 			StdSwitch3* pPortRMS;
 			StdSwitch3* pStbdRMS;
 			StdSwitch3* pRMSSelect;
+			StdSwitch3* pRMSPower;
 
 			StandardSwitchCover* pPortRMSCover;
 			StandardSwitchCover* pStbdRMSCover;

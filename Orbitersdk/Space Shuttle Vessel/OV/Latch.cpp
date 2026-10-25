@@ -335,6 +335,74 @@ int LatchSystem::FindAttachment( void ) const
 	return -1;
 }
 
+bool LatchSystem::GetNearestAttachment( double& distance, double& angle ) const
+{
+	VECTOR3 pos;
+	VECTOR3 dir;
+	VECTOR3 rot;
+	VECTOR3 gposAttach;// global position of (local) attachment
+	VECTOR3 gdirAttach;// global direction of (local) attachment
+	STS()->GetAttachmentParams( hAttach, pos, dir, rot );
+	STS()->Local2Global( pos, gposAttach );
+	STS()->GlobalRot( dir, gdirAttach );
+
+	bool found = false;
+	for (unsigned int i = 0; i < vctVessels.size(); i++)
+	{
+		VECTOR3 gpos;
+		vctVessels[i]->GetAttachmentParams( vctAttachments[i], pos, dir, rot );
+		vctVessels[i]->Local2Global( pos, gpos );
+
+		double d = dist( gpos, gposAttach );
+		if (!found || (d < distance))
+		{
+			VECTOR3 gdir;
+			vctVessels[i]->GlobalRot( dir, gdir );
+			distance = d;
+			angle = fabs( PI - acos( range( -1.0, dotp( gdir, gdirAttach ), 1.0 ) ) );
+			found = true;
+		}
+	}
+	return found;
+}
+
+bool LatchSystem::GetViewedAttachment( double halfFov, double& distAlong, double& angle ) const
+{
+	VECTOR3 pos;
+	VECTOR3 dir;
+	VECTOR3 rot;
+	VECTOR3 gposAttach;// global position of (local) attachment
+	VECTOR3 gdirAttach;// global direction of (local) attachment
+	STS()->GetAttachmentParams( hAttach, pos, dir, rot );
+	STS()->Local2Global( pos, gposAttach );
+	STS()->GlobalRot( dir, gdirAttach );
+
+	bool found = false;
+	double bestoffaxis = halfFov;
+	for (unsigned int i = 0; i < vctVessels.size(); i++)
+	{
+		VECTOR3 gpos;
+		vctVessels[i]->GetAttachmentParams( vctAttachments[i], pos, dir, rot );
+		vctVessels[i]->Local2Global( pos, gpos );
+
+		const VECTOR3 v = gpos - gposAttach;
+		const double d = length( v );
+		const double along = dotp( v, gdirAttach );
+		if ((d < 1e-6) || (along <= 0.0)) continue;// at the same place or behind the camera
+		const double offaxis = acos( range( -1.0, along / d, 1.0 ) );
+		if (offaxis <= bestoffaxis)
+		{
+			VECTOR3 gdir;
+			vctVessels[i]->GlobalRot( dir, gdir );
+			bestoffaxis = offaxis;
+			distAlong = along;
+			angle = fabs( PI - acos( range( -1.0, dotp( gdir, gdirAttach ), 1.0 ) ) );
+			found = true;
+		}
+	}
+	return found;
+}
+
 void LatchSystem::SetDoubleAttachment( bool attached )
 {
 	MPM* mpm = dynamic_cast<MPM*>(STS()->GetPortMPM());

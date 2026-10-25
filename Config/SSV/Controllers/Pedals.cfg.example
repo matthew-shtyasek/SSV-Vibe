@@ -1,0 +1,10 @@
+# Rudder pedals with toe brakes as the RPTA and the brakes of the orbiter (for the landing). Copy to "Joystick<N>.cfg" or "<device name>.cfg".
+# The names of the axes are the usual ones for pedals (rudder = Axis RZ, toe brakes = Axis X and Axis Y): check them with Ctrl+J and change SUBDEVID.
+# RPTA: +1 = right pedal forward (yaw right). The rudder pedals work in the left or right seat (commander or pilot), in the atmosphere.
+# BRAKE_LEFT and BRAKE_RIGHT use the whole range of the axis (released = one end, pressed = the other end): set DEADZONE to 0 and REVERSE
+# so that the pressed pedal gives the higher value. SBTC (speedbrake and thrust controller) works the same way (+1 = lever forward).
+INPUT	SUBDEVID	REVERSE	DEADZONE	EXPO	CENTER
+RPTA	Axis RZ	false	0.03	0	0
+BRAKE_LEFT	Axis X	true	0	0	0
+BRAKE_RIGHT	Axis Y	true	0	0	0
+# SBTC	Slider 0	true	0	0	0

@@ -66,6 +66,7 @@ namespace vc
 		grpIndex_U = 0;
 		grpIndex_L = 0;
 		usCover = TB_GRAY;
+		flagInLower = false;
 		flags = TB_BARBERPOLE;
 	}
 
@@ -80,8 +81,16 @@ namespace vc
 
 		if (input.IsSet())
 		{
-			tmp_U = flags;
-			tmp_L = usCover;
+			if (flagInLower)
+			{
+				tmp_U = usCover;
+				tmp_L = flags;
+			}
+			else
+			{
+				tmp_U = flags;
+				tmp_L = usCover;
+			}
 		}
 		else
 		{
@@ -96,6 +105,8 @@ namespace vc
 
 			tkbk_next_state_U = tmp_U;
 			tkbk_next_state_L = tmp_L;
+			// the indicators of the panel A8U ("BRAKES TB", "SAFING TB") are logged, to check them
+			if ((GetQualifiedIdentifier().find( "BRAKES TB" ) != std::string::npos) || (GetQualifiedIdentifier().find( "SAFING TB" ) != std::string::npos)) oapiWriteLogV( "(SSV_OV) [INFO] Talkback \"%s\": upper %d, lower %d", GetQualifiedIdentifier().c_str(), tmp_U, tmp_L );
 			UpdateUV();
 		}
 		return;
@@ -169,6 +180,12 @@ namespace vc
 	void StandardTalkback2::SetCoverSegment( unsigned short _usFlag )
 	{
 		usCover = _usFlag;
+		return;
+	}
+
+	void StandardTalkback2::SetFlagInLowerSegment( bool _flagInLower )
+	{
+		flagInLower = _flagInLower;
 		return;
 	}
 

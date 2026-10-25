@@ -308,7 +308,7 @@ void MPM::OnPreStep( double simt, double simdt, double mjd )
 
 	if (!doubleAttached)// don't allow MPM movement when payload is attached to something else
 	{
-		double dpos = simdt * MPM_DEPLOY_SPEED * (MPM_MOTOR_1_PWR.GetVoltage() + MPM_MOTOR_2_PWR.GetVoltage());
+		double dpos = simdt * MPM_DEPLOY_SPEED * (MPM_MOTOR_1_PWR.GetVoltage() + MPM_MOTOR_2_PWR.GetVoltage()) * (STS()->GravityLoaded() ? 0.0 : 1.0);// the MPMs are designed for zero g and can not be moved on the ground
 		if (dpos != 0.0)
 		{
 			Rollout = range( 0.0, Rollout + dpos, 1.0 );

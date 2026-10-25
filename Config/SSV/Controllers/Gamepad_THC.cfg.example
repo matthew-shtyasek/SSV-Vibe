@@ -1,0 +1,15 @@
+# Gamepad (Xbox type through DirectInput) as the THC (translation). Copy to "Joystick<N>.cfg" or "<device name>.cfg".
+# Left stick: forward/back = THC X, left/right = THC Y. Right stick up/down = THC Z. Buttons A/B/X/Y = Button 0/1/2/3.
+# PlayStation pads: the right stick is usually Axis Z and Axis RZ instead of Axis RX and Axis RY; check with Ctrl+J.
+# The THC of the orbiter is on or off (out of detent): beyond 25% of the deflection the thrust is full.
+INPUT	SUBDEVID	REVERSE	DEADZONE	EXPO	CENTER
+THC_X	Axis Y	false	0.15	0	0
+THC_Y	Axis X	false	0.15	0	0
+THC_Z	Axis RY	true	0.15	0	0
+RMS_CONTROL_TOGGLE	Button 7	false
+# Panel examples (remove the # to use): BRAKES, SAFING, AUTO SEQ and the ENTER button of panel A8U
+# PANEL A8A1/BRAKES:TOGGLE	Button 4
+# PANEL A8A1/SAFING:UP	Button 5
+# PANEL A8A1/SAFING:HOLD_DOWN	Button 6
+# PANEL A8A1/AUTO SEQ:TOGGLE	Button 2
+# PANEL A8A1/ENTER:PRESS	Button 3

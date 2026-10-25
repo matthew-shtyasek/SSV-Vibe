@@ -78,6 +78,7 @@ Date         Developer
   **************************************************************************/
 #include "PanelA8A1.h"
 #include "StandardSwitch.h"
+#include "PushButton.h"
 #include "StandardRotarySwitch.h"
 #include "Talkback.h"
 #include "StandardLight.h"
@@ -109,6 +110,39 @@ namespace vc
 		pRMSMode->SetLabel( 10, "DIRECT" );
 		pRMSMode->SetLabel( 11, "TEST" );
 
+		Add( pBackupJoint = new RotaryDemuxSwitch( _sts, "BACKUP JOINT", 6 ) );
+		pBackupJoint->SetLabel( 0, "SHOULDER YAW" );
+		pBackupJoint->SetLabel( 1, "SHOULDER PITCH" );
+		pBackupJoint->SetLabel( 2, "ELBOW PITCH" );
+		pBackupJoint->SetLabel( 3, "WRIST PITCH" );
+		pBackupJoint->SetLabel( 4, "WRIST YAW" );
+		pBackupJoint->SetLabel( 5, "WRIST ROLL" );
+
+		Add( pPayloadRelease = new StdSwitch2( _sts, "PAYLOAD RELEASE" ) );
+		pPayloadRelease->SetLabel( 0, "OFF" );
+		pPayloadRelease->SetLabel( 1, "ON" );
+		pPayloadRelease->SetInitialPosition( 0 );
+
+		Add( pBackupDirectDrive = new StdSwitch3( _sts, "BACKUP DIRECT DRIVE" ) );
+
+		Add( pBrakes = new StdSwitch2( _sts, "BRAKES" ) );
+		pBrakes->SetLabel( 0, "OFF" );
+		pBrakes->SetLabel( 1, "ON" );
+		pBrakes->SetInitialPosition( 0 );
+
+		Add( pSafing = new StdSwitch3( _sts, "SAFING" ) );
+		pSafing->SetLabel( 2, "SAFE" );
+		pSafing->SetLabel( 1, "AUTO" );
+		pSafing->SetLabel( 0, "CANCEL" );// "AUTO CANCEL" of the old two position switch is not read, so it does not leave the switch in CANCEL
+		pSafing->SetInitialPosition( 1 );
+
+		Add( pAutoSeq = new StdSwitch2( _sts, "AUTO SEQ" ) );
+		pAutoSeq->SetLabel( 0, "STOP" );
+		pAutoSeq->SetLabel( 1, "PROCEED" );
+		pAutoSeq->SetInitialPosition( 0 );
+
+		Add( pEnter = new PushButton( _sts, "ENTER" ) );
+
 		Add( pEEMode = new StdSwitch3( _sts, "END EFFECTOR MODE" ) );
 		pEEMode->SetLabel( 2, "AUTO" );
 		pEEMode->SetLabel( 1, "OFF" );
@@ -117,6 +151,10 @@ namespace vc
 		Add( pEEManContr = new StdSwitch3( _sts, "END EFFECTOR MAN CONTR" ) );
 
 		Add( pSoftStopTB = new StandardTalkback2( _sts, "SOFTWARE STOP" ) );
+
+		Add( pBrakesTB = new StandardTalkback2( _sts, "BRAKES TB" ) );
+
+		Add( pSafingTB = new StandardTalkback2( _sts, "SAFING TB" ) );
 
 		Add( pRateMinTB = new StandardTalkback2( _sts, "RATE MIN" ) );
 
@@ -195,7 +233,7 @@ namespace vc
 		AtlantisPanel::RegisterVC();
 
 		VECTOR3 ofs = STS()->GetOrbiterCoGOffset() + VC_OFFSET;
-		oapiVCRegisterArea( AID_A8A1, PANEL_REDRAW_NEVER, PANEL_MOUSE_LBDOWN | PANEL_MOUSE_LBPRESSED | PANEL_MOUSE_LBUP );
+		oapiVCRegisterArea( AID_A8A1, PANEL_REDRAW_NEVER, PANEL_MOUSE_ONREPLAY | PANEL_MOUSE_LBDOWN | PANEL_MOUSE_LBPRESSED | PANEL_MOUSE_LBUP );
 		oapiVCSetAreaClickmode_Quadrilateral( AID_A8A1,
 			_V( -0.270182, 2.89189, 12.2793 ) + ofs, _V( -0.791144, 2.89189, 12.2793 ) + ofs,
 			_V( -0.270182, 2.35742, 12.448 ) + ofs, _V( -0.791144, 2.35742, 12.448 ) + ofs );
@@ -220,6 +258,43 @@ namespace vc
 		pRMSMode->SetWraparound( true );
 		pRMSMode->DefineRotationAngle( 330.0f );
 		pRMSMode->SetOffset( -150.0f );
+
+		pBackupJoint->SetMouseRegion( AID_A8A1, 0.1426f, 0.6787f, 0.2207f, 0.7568f );
+		pBackupJoint->SetReference( _V( -0.358, 2.5079, 12.4029 ), rotary_switch_rot );
+		pBackupJoint->DefineGroup( GRP_S9_A8A1_VC );
+		pBackupJoint->SetInitialAnimState( 0.0f );
+		pBackupJoint->DefineRotationAngle( 150.0f );
+		pBackupJoint->SetOffset( -75.0f );
+
+		pPayloadRelease->SetMouseRegion( AID_A8A1, 0.1074f, 0.8086f, 0.1436f, 0.8467f );
+		pPayloadRelease->SetReference( _V( -0.323, 2.4515, 12.4183 ), switch_rot_vert );
+		pPayloadRelease->DefineGroup( GRP_S12_A8A1_VC );
+		pPayloadRelease->SetInitialAnimState( 0.5f );
+
+		pBackupDirectDrive->SetMouseRegion( AID_A8A1, 0.2197f, 0.8086f, 0.2559f, 0.8467f );
+		pBackupDirectDrive->SetReference( _V( -0.3865, 2.4485, 12.41925 ), switch_rot_vert );
+		pBackupDirectDrive->DefineGroup( GRP_S13_A8A1_VC );
+		pBackupDirectDrive->SetInitialAnimState( 0.5f );
+		pBackupDirectDrive->SetSpringLoaded( true );
+
+		pBrakes->SetMouseRegion( AID_A8A1, 0.2871f, 0.1201f, 0.3232f, 0.1582f );
+		pBrakes->SetReference( _V( -0.4235, 2.8185, 12.30247 ), switch_rot_vert );
+		pBrakes->DefineGroup( GRP_S1_A8A1_VC );
+		pBrakes->SetInitialAnimState( 0.5f );
+
+		pSafing->SetMouseRegion( AID_A8A1, 0.3423f, 0.1230f, 0.3784f, 0.1611f );
+		pSafing->SetReference( _V( -0.453, 2.817, 12.30294 ), switch_rot_vert );
+		pSafing->DefineGroup( GRP_S2_A8A1_VC );
+		pSafing->SetInitialAnimState( 0.5f );
+		pSafing->SetSpringLoaded( true, 0 );
+
+		pAutoSeq->SetMouseRegion( AID_A8A1, 0.3149f, 0.3228f, 0.3511f, 0.3608f );
+		pAutoSeq->SetReference( _V( -0.4385, 2.7095, 12.33687 ), switch_rot_vert );
+		pAutoSeq->DefineGroup( GRP_S5_A8A1_VC );
+		pAutoSeq->SetInitialAnimState( 0.5f );
+
+		// the ENTER pushbutton is part of the panel texture, it has no animation
+		pEnter->SetMouseRegion( AID_A8A1, 0.1621f, 0.3691f, 0.2109f, 0.4121f );
 
 		pEEMode->SetMouseRegion( AID_A8A1, 0.659563f, 0.320469f, 0.695801f, 0.358964f );
 		pEEMode->SetReference( _V( -0.627639, 2.710755, 12.3365 ), switch_rot_vert );
@@ -275,6 +350,14 @@ namespace vc
 		pEEDerigid->DefineMeshGroups( GetVCMeshIndex(), GRP_DS10_U_A8A1_VC, GRP_DS10_L_A8A1_VC );
 
 		pSoftStopTB->DefineMeshGroups( GetVCMeshIndex(), GRP_DS3_U_A8A1_VC, GRP_DS3_L_A8A1_VC );
+
+		// BRAKES: ON or OFF; SAFING: gray, barberpole while safing is in progress
+		pBrakesTB->DefineMeshGroups( GetVCMeshIndex(), GRP_DS1_U_A8A1_VC, GRP_DS1_L_A8A1_VC );
+		pBrakesTB->SetInactiveSegment( TB_OFF );
+
+		pSafingTB->DefineMeshGroups( GetVCMeshIndex(), GRP_DS2_U_A8A1_VC, GRP_DS2_L_A8A1_VC );
+		pSafingTB->SetInactiveSegment( TB_GRAY );
+		pSafingTB->SetFlagInLowerSegment( true );// the barberpole is in the lower half of the window, like the other talkbacks of the panel
 
 		pRateMinTB->DefineMeshGroups( GetVCMeshIndex(), GRP_DS4_U_A8A1_VC, GRP_DS4_L_A8A1_VC );
 		pRateMinTB->SetInactiveSegment( TB_OFF );
@@ -391,6 +474,21 @@ namespace vc
 		pBundle = STS()->BundleManager()->CreateBundle( "RMS_MODE", 16 );
 		for (unsigned short i = 0; i < 12 ;i++) pRMSMode->ConnectOutputSignal( i, pBundle, i );
 
+		pBundle = STS()->BundleManager()->CreateBundle( "RMS_BACKUP", 16 );
+		for (unsigned short i = 0; i < 6; i++) pBackupJoint->ConnectOutputSignal( i, pBundle, i );
+		pBackupDirectDrive->ConnectPort( 2, pBundle, 6 );
+		pBackupDirectDrive->ConnectPort( 0, pBundle, 7 );
+		pPayloadRelease->ConnectPort( 1, pBundle, 8 );
+
+		pBundle = STS()->BundleManager()->CreateBundle( "RMS_PANEL", 16 );
+		pBrakes->ConnectPort( 1, pBundle, 0 );
+		pBrakesTB->SetInput( pBundle, 11, TB_ON );
+		pSafingTB->SetInput( pBundle, 9, TB_BARBERPOLE );
+		pSafing->ConnectPort( 2, pBundle, 1 );
+		pSafing->ConnectPort( 0, pBundle, 10 );
+		pAutoSeq->ConnectPort( 1, pBundle, 2 );
+		pEnter->Connect( pBundle, 3 );
+
 		pBundle=STS()->BundleManager()->CreateBundle("RMS_EE", 16);
 		pEEMode->ConnectPort( 2, pBundle, 2 );
 		pEEMode->ConnectPort( 0, pBundle, 3 );
@@ -413,7 +511,7 @@ namespace vc
 		pSingleDirectDrive->ConnectPort( 0, pBundle, 9 );
 
 		pBundle = STS()->BundleManager()->CreateBundle( "RMS_MODELIGHTS", 16 );
-		for (int i = 0; i < 12; i++) lightcmd[i].Connect( pBundle, i );
+		for (int i = 0; i < 14; i++) lightcmd[i].Connect( pBundle, i );// 12 and 13: READY and IN PROG
 
 		pBundle=STS()->BundleManager()->CreateBundle( "RMS_CWLIGHTS_TB", 16 );
 		for (int i = 14; i < 26; i++) lightcmd[i].Connect( pBundle, i - 14 );

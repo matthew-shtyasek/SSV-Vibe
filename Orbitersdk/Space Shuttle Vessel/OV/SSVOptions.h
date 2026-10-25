@@ -55,10 +55,11 @@ class SSVOptions
 		double dRPTARate;
 		double dBrakeRate;
 		bool bAlarm1x;
+		bool bRMSPayloadMassEffect;
 
 	public:
 		SSVOptions(void):
-			bEIUDataRecorder(false), usPositionLabelTime(3), bAutoActionLandingGear(true), bAutoActionDragChute(true), dRHCRate(RHC_RATE), dRPTARate(RPTA_RATE), dBrakeRate(BRAKE_RATE), bAlarm1x(true)
+			bEIUDataRecorder(false), usPositionLabelTime(3), bAutoActionLandingGear(true), bAutoActionDragChute(true), dRHCRate(RHC_RATE), dRPTARate(RPTA_RATE), dBrakeRate(BRAKE_RATE), bAlarm1x(true), bRMSPayloadMassEffect(false)
 		{
 		}
 
@@ -86,6 +87,8 @@ class SSVOptions
 			oapiReadItem_float( cfg, "BrakeRate", dBrakeRate );
 
 			oapiReadItem_bool( cfg, "Alarm1x", bAlarm1x );
+
+			oapiReadItem_bool( cfg, "RMSPayloadMassEffect", bRMSPayloadMassEffect );
 			return;
 		}
 
@@ -127,6 +130,11 @@ class SSVOptions
 		bool Alarm1x( void ) const
 		{
 			return bAlarm1x;
+		}
+
+		bool RMSPayloadMassEffect( void ) const
+		{
+			return bRMSPayloadMassEffect;
 		}
 };
 

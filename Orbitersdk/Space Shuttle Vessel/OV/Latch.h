@@ -128,6 +128,21 @@ protected:
 	 */
 	int FindAttachment( void ) const;
 
+	/**
+	 * Gets the distance and the angle error to the closest compatible attachment of the vessels nearby.
+	 * @return false if there is none
+	 */
+	bool GetNearestAttachment( double& distance, double& angle ) const;
+
+	/**
+	 * Finds the attachment (grapple fixture) closest to the axis of the attachment point of this latch, within a cone (the field of view of the wrist camera).
+	 * @param[in] halfFov half angle of the cone [rad]
+	 * @param[out] distAlong distance of the attachment along the axis [m]
+	 * @param[out] angle misalignment of the attachment axis with this attachment axis [rad]
+	 * @return true if an attachment is in the cone
+	 */
+	bool GetViewedAttachment( double halfFov, double& distAlong, double& angle ) const;
+
 	bool PayloadIsFree() const;
 
 	inline bool IsLatched() const { return attachedPayload != NULL; };

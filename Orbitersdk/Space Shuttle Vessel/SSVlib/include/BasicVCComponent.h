@@ -163,6 +163,11 @@ public:
 
 
 	bool IsOwnRegion(UINT aid) const;
+	/**
+	 * Gets the area and the rectangle of the mouse region of the component.
+	 * @return false if the component has no mouse region
+	 */
+	bool GetMouseRegion( UINT& aid, float& xmin, float& ymin, float& xmax, float& ymax ) const;
 	UINT GetMouseRegionID( void ) const;
 	bool IsPointOver(float x, float y) const;
 	bool ProjectMouse(float x, float y, float &mx, float &my) const;
@@ -228,6 +233,17 @@ template <class TVessel>
 BasicVCComponent<TVessel>::~BasicVCComponent()
 {
 
+}
+
+template <class TVessel>
+bool BasicVCComponent<TVessel>::GetMouseRegion( UINT& aid, float& xmin, float& ymin, float& xmax, float& ymax ) const
+{
+	aid = mouseregionID;
+	xmin = p_a.x;
+	ymin = p_a.y;
+	xmax = p_d.x;
+	ymax = p_d.y;
+	return (xmax > xmin) && (ymax > ymin);
 }
 
 template <class TVessel>

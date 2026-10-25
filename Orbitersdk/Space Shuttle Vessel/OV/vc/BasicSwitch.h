@@ -99,6 +99,9 @@ public:
 	*/
 	void SetInitialPosition(unsigned short usPos);
 	void SetOrientation(bool bHorizontal);
+	unsigned short GetPosition( void ) const { return usCurrentPosition; }
+	unsigned short GetNumPositions( void ) const { return usNumPositions; }
+	bool IsHorizontal( void ) const { return bOrientation; }
 	/**
 	 * Fully spring loaded switch
 	 */

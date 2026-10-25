@@ -49,6 +49,7 @@ namespace dps
 			void OnPaint_SM_PLBAYDOORS_PASS( vc::MDU* pMDU ) const;
 
 			bool ItemInput_SM_SPEC94_PASS( int item, const char* Data );
+			bool ItemInput_SM_DISP95_PASS( int item, const char* Data );
 			bool ItemInput_SM_ANTENNA_PASS( int item, const char* Data );
 			bool ItemInput_SM_PLBAYDOORS_PASS( int item, const char* Data );
 

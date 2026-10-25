@@ -86,6 +86,7 @@ Date         Developer
 
 
 #include "MPM.h"
+#include <vector>
 #include "mission/Mission.h"
 
 
@@ -125,6 +126,100 @@ public:
 	 */
 	bool Movable() const;
 
+	/**
+	 * Data entered in the PDRS CONTROL display (SPEC 94).
+	 */
+	struct PDRSControl
+	{
+		int plid;// PL ID (item 3): POR used by ORB LD and PL modes (0 = EE tip, unloaded arm)
+		int eeid;// END EFF ID (item 4)
+		bool io;// I/O ON (item 5) / OFF (item 6)
+		bool softstop_ena;// SOFT STOP ENA (item 7) / INH (item 8)
+		bool autobrake_ena;// AUTO BRAKE ENA (item 9) / INH (item 10)
+		bool posenc_ena;// POS ENC CK ENA (item 11) / INH (item 12)
+		bool pohs_ena;// POHS CNTL ENA (item 28) / INH (item 29)
+		int autoseq[4];// sequence ID assigned to AUTO 1 to AUTO 4 (items 13 to 16)
+		int startpt;// START PT (item 17), 0 = blank
+		int lastpt;// LAST PT, 0 = blank
+		bool endpos_valid[3];// OPR CMD END POS X, Y, Z entered (items 18 to 20)
+		double endpos[3];// [in], in the Orbiter body axes
+		bool endatt_valid[3];// OPR CMD END ATT P, Y, R entered (items 21 to 23)
+		double endatt[3];// [deg]
+		int plinitid;// PL INIT ID (item 24)
+		int cmdck;// CMD CK (item 25): 0 = blank, 1 = GOOD, 2 = FAIL
+		int wrrange;// WR RANGE (item 26)
+		int orbldref;// ORB LD CMD REF (items 31 to 33): 0 = NORM, 1 = FLY-CAMR, 2 = FLY-PL
+	};
+	const PDRSControl& GetPDRSControl() const {return pdrs;}
+
+	/**
+	 * Data of the PDRS OVERRIDE display (DISP 95): overrides of the switches of panel A8U.
+	 */
+	struct PDRSOverride
+	{
+		bool mode_ena;// MODE SW OVRD (item 1)
+		int mode;// mode selected with the items 2 to 12 (RMS_MODE), -1 = none
+		bool enter;// ENTER (item 13), one time step
+		bool loaded_rate;// LOADED RATE (item 14)
+		bool stowed_ops;// STOWED OPS (item 15)
+		bool joint_ena;// JNT SW OVRD (item 17)
+		int joint;// joint selected with the items 18 to 23, -1 = none
+		bool rate_ena;// RATE SW OVRD (item 26)
+		bool rate_coarse;// COARSE (item 28), VERNIER (item 27)
+		bool auto_ena;// AUTO SW OVRD (item 29)
+		bool auto_proceed;// PROCEED (item 30), STOP (item 31)
+		bool hc_ena;// HC AXIS CHG (item 32)
+		bool safing_cancel;// SAFING CAN (item 35)
+	};
+	const PDRSOverride& GetPDRSOverride() const {return ovr;}
+
+	/**
+	 * Handles an item entry in the PDRS OVERRIDE display (DISP 95).
+	 * @return false if the entry is not valid
+	 */
+	bool PDRSOverrideItem( int item, const char* data );
+
+	/**
+	 * Data of the PDRS STATUS display (DISP 169) and PDRS FAULTS display (DISP 96).
+	 */
+	struct PDRSStatus
+	{
+		bool selected;// RMS SELECT in PORT
+		int power;// RMS POWER: 0 = OFF, 1 = PRIMARY, 2 = BACKUP
+		double jointangle[6];// [deg]
+		int reachlimit[6];// -1 or +1 if the joint is beyond a reach limit
+		double pos[3];// POR position X, Y, Z (BACS) [in]
+		double att[3];// POR attitude P, Y, R [deg]
+		double trans_act[3], trans_cmd[3];// translation rates (BACS) [ft/s]
+		double rot_act[3], rot_cmd[3];// rotation rates (pitch, yaw, roll) [deg/s]
+		bool ee_rigid, ee_close, ee_capture, ee_derigid, ee_open, ee_extend;
+	};
+	void GetPDRSStatus( PDRSStatus& st ) const;
+
+	/**
+	 * Gets the distance [m] and the angle error [rad] to the closest grapple fixture, if the EE is empty.
+	 * @return false if there is none
+	 */
+	bool GetGrappleHint( double& distance, double& angle ) const;
+
+	/**
+	 * Handles an item entry in the PDRS CONTROL display (SPEC 94).
+	 * @param item item number
+	 * @param data entered data (empty for an EXEC without data)
+	 * @return false if the entry is not valid
+	 */
+	bool PDRSItemInput( int item, const char* data );
+
+	/**
+	 * Number of points loaded for an auto sequence (ID 1 to 20).
+	 */
+	int GetAutoSequenceSize( int id ) const;
+
+	/**
+	 * Writes the current POR position and attitude to the log, in the format of the auto sequence file (Config\SSV\RMS\AutoSequences.txt).
+	 */
+	void LogPOR( void ) const;
+
 protected:
 	void OnMRLLatched( void ) override;
 	void OnMRLReleased( void ) override;
@@ -145,10 +240,11 @@ private:
 	/**
 	 * Calculates new EE rotation parameters (in IK frame) for given Euler angles.
 	 * @param dAngles YZX Euler angles (around RMS control frame) in radians
+	 * @param newPos EE position in IK frame (in/out), changes when the rotation is about a POR different from the EE tip
 	 * @param newDir new direction vector of EE after rotation in IK frame
 	 * @param newRot new rot vector of EE after rotation in IK frame
 	 */
-	void Rotate(const VECTOR3 &dAngles, VECTOR3& newDir, VECTOR3& newRot); // angles in radians
+	void Rotate(const VECTOR3 &dAngles, VECTOR3& newPos, VECTOR3& newDir, VECTOR3& newRot); // angles in radians
 	bool MoveEE(const VECTOR3 &newPos, const VECTOR3 &newDir, const VECTOR3 &newRot, double simdt);
 	void SetJointAngle(RMS_JOINT joint, double angle); //angle in degrees
 	/**
@@ -161,6 +257,84 @@ private:
 	}
 
 	int GetSelectedJoint() const;
+
+	/** Indices of the MODE rotary switch positions (RMS_MODE bundle). */
+	enum RMS_MODE {MODE_OPR_CMD = 0, MODE_AUTO_1, MODE_AUTO_2, MODE_AUTO_3, MODE_AUTO_4, MODE_ORB_UNL, MODE_END_EFF, MODE_ORB_LD, MODE_PL, MODE_SINGLE, MODE_DIRECT, MODE_TEST};
+
+	/** True if one of the 4 manual augmented modes (ORB UNL, END EFF, ORB LD, PL) is selected. */
+	bool ManualAugmentedMode() const;
+
+	/**
+	 * Gets the Point Of Resolution (POR) of a captured payload.
+	 * The POR is the payload origin (c.g.), like PL ID 1 in the real system. With no payload captured the POR is the EE tip (PL ID 0).
+	 * @param porOffset vector from the EE tip to the POR, in Orbiter body axes
+	 * @param axes unit vectors of the payload axes, in Orbiter body axes (the identity if the payload has the orientation of the Orbiter)
+	 * @return false if no payload is captured
+	 */
+	bool GetPayloadPOR( VECTOR3& porOffset, VECTOR3 axes[3] ) const;
+
+	/** Drives one joint in SINGLE or DIRECT mode, dir = +1 or -1. */
+	void DriveSingleJoint( int joint, int dir, double simdt );
+
+	/** RMS selected and powered (RMS POWER in PRIMARY or BACKUP). */
+	bool Powered( void ) const;
+
+	/** True if the coarse rates are selected (RATE switch of the RHC, or the override). */
+	bool RateCoarse( void ) const;
+
+	/** Factor for the rates of a loaded arm, 1 for the unloaded arm. */
+	double GetLoadScale( void ) const;
+
+	/** Updates the actual rates of the POR (for the PDRS STATUS display). */
+	void UpdateRates( double dt );
+
+	/** True if the effective operating mode (selected with MODE and accepted with ENTER) is the given one. */
+	bool ModeIs( int mode ) const {return effMode == mode;}
+
+	struct AutoPoint
+	{
+		double pos[3];// POR position X, Y, Z in the Orbiter body axes [in]
+		double att[3];// POR attitude P, Y, R [deg]
+		bool pause;// programmed pause: the arm comes to rest at this point
+	};
+	enum AUTO_STATE {AUTO_IDLE = 0, AUTO_READY, AUTO_RUN};
+
+	/** Reads the auto sequences from Config\SSV\RMS\AutoSequences.txt. */
+	void LoadAutoSequences( void );
+
+	/** Gets the position (BACS, [in]) and attitude (RACS, matrix) of the EE tip. */
+	void GetEEState( VECTOR3& pos, MATRIX3& att ) const;
+
+	/**
+	 * Gets the POR used by the auto modes (the one of the payload for PL ID > 0 and a captured payload, the EE tip otherwise), as the vector from the EE tip.
+	 * @return true if the POR is not the EE tip
+	 */
+	bool GetAutoPOR( VECTOR3& porOffset ) const;
+
+	/**
+	 * Calculates the movement from the current POR state to the target POR state.
+	 * @param tgtpos target position [in]
+	 * @param tgtatt target attitude P, Y, R [deg]
+	 * @param dB position error in Orbiter body axes [m]
+	 * @param axis axis of the rotation error (Orbiter body axes)
+	 * @param angle rotation error [rad]
+	 */
+	void GetPORError( const double tgtpos[3], const double tgtatt[3], VECTOR3& dB, VECTOR3& axis, double& angle ) const;
+
+	/** Checks if the OPR CMD end position and attitude can be reached (CMD CK, item 25). */
+	bool CheckOPRCMD( void ) const;
+
+	/** Gets the target point of the active auto mode. @return false if there is none */
+	bool GetAutoTarget( double tgtpos[3], double tgtatt[3], bool& pause ) const;
+
+	/** Runs the OPR CMD and AUTO 1-4 modes. */
+	void RunAutoModes( double simdt, bool armfree );
+
+	/** Rotates about the POR (axes in Orbiter body axes), see Rotate() */
+	void RotateAboutPOR( const VECTOR3& angles, const VECTOR3 axes[3], bool usePOR, const VECTOR3& porOffset, VECTOR3& newPos, VECTOR3& newDir, VECTOR3& newRot );
+
+	/** Calculates the joint angles for the given EE position and orientation, without moving the arm. */
+	bool ComputeJointAngles( const VECTOR3 &newPos, const VECTOR3 &newDir, const VECTOR3 &newRot, double new_joint_angles[6] ) const;
 
 	/**
 	 * Updates the EE spotlight position/direction. To be called when the RMS moves and also from the Atlantis c.g. change member.
@@ -230,6 +404,52 @@ private:
 	DiscInPort RHCInput[3], THCInput[3];
 	DiscInPort RMSMode[12];
 	DiscInPort RMSCoarseRateCMD;
+	DiscInPort RateHoldPB;// RATE HOLD pushbutton on the RHC grip
+
+	// RATE HOLD state (manual augmented modes only)
+	bool bRateHold;
+	bool bRateHoldArmed;// hand controllers have been in detent since RATE HOLD was engaged
+	bool bRateHoldPBPrev;
+	double heldRHC[3], heldTHC[3];// held hand controller commands (volts)
+
+	// mode change detection and SINGLE mode soft stop logic
+	int lastRMSMode;
+	bool bSingleSoftStopIdle;// SINGLE mode drove a joint into a soft stop: idle until the mode is selected again
+	bool singleSoftStopDisabled[6];// joint was inside a soft stop when SINGLE was selected
+	bool bAutoModeLogged;
+
+	// panel A8U controls
+	DiscInPort BrakesOn;// BRAKES switch in ON
+	DiscInPort SafingOn;// SAFING switch in SAFE
+	DiscInPort SafingCancel;// SAFING switch in CANCEL (momentary)
+	DiscOutPort BrakesApplied;// BRAKES talkback: the brakes hold the joints (switch ON, or no power)
+	bool safingLatched;// safing is maintained until it is cancelled
+	DiscInPort AutoSeqProceed;// AUTO SEQ switch in PROCEED
+	DiscInPort EnterPB;// ENTER pushbutton
+	DiscOutPort ReadyLight, InProgLight;
+	DiscOutPort SafingActive;// SAFING talkback: safing in progress (RMS_PANEL line 9)
+	int acceptedMode;// mode accepted with ENTER (-2 = not defined yet)
+	int effMode;// mode in effect (-1 = idle)
+	bool bEnterPrev;
+	bool bAutoProceedPrev;
+
+	PDRSControl pdrs;
+	PDRSOverride ovr;
+
+	// RMS POWER switch and BACKUP CONTROL (panel A8U)
+	DiscInPort PowerPrimary, PowerBackup, PowerOff;// the switch only drives its lines after it has been loaded or operated; if none is set, PRIMARY is assumed
+	DiscInPort BackupJoint[6], BackupDirectPlus, BackupDirectMinus, BackupPayloadRelease;
+	bool backupDrive;
+
+	// rates of the POR
+	bool ratesvalid;
+	VECTOR3 lastPos;
+	MATRIX3 lastAtt;
+	VECTOR3 transRateAct, rotRateAct;// actual rates, Orbiter body axes [ft/s], [deg/s]
+	VECTOR3 transRateCmd, rotRateCmd;// commanded rates [ft/s], [deg/s]
+	std::vector<AutoPoint> autoseq[20];
+	int autoState;
+	int autoPt;// last point reached (1 = first point of the sequence); the OPR CMD mode has only a start and an end point
 
 	double shoulder_brace;
 	DiscInPort ShoulderBrace;

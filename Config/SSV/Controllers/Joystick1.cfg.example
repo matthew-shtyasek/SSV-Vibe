@@ -1,0 +1,14 @@
+# Example: first controller as the RHC (rotation) with the trigger, RATE HOLD and RATE buttons. Copy to Joystick1.cfg or to <name>.cfg
+INPUT	SUBDEVID	REVERSE	DEADZONE	EXPO	CENTER
+RHC_PITCH	Axis Y	false	0.05	0	0
+RHC_ROLL	Axis X	false	0.05	0	0
+RHC_YAW	Axis RZ	false	0.05	0	0
+RMS_CAPTURE	Button 0	false			
+RMS_RELEASE	Button 1	false			
+RMS_RATE_HOLD	Button 2	false			
+RMS_RATE_TOGGLE	Button 3	false			
+RMS_CONTROL_TOGGLE	Button 4	false			
+# Panel example (disabled): BRAKES switch up/down and ENTER button
+# PANEL A8A1/BRAKES:UP	Button 5
+# PANEL A8A1/BRAKES:DOWN	Button 6
+# PANEL A8A1/ENTER:PRESS	Button 7

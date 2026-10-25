@@ -1133,6 +1133,9 @@ void PayloadBay::CreateAttachments( void )
 
 void PayloadBay::OnPostStep( double simt, double simdt, double mjd )
 {
+	// the doors and radiators are designed for zero g, they can not be moved on the ground
+	const double gravity_lock = STS()->GravityLoaded() ? 0.0 : 1.0;
+
 	// payload bay doors
 	posplbd_latch_cl_1_4 = range( 0.0, posplbd_latch_cl_1_4 + (simdt * PLBD_CENTERLINE_LATCH_OPERATING_SPEED * (CENTERLINE_ACTUATOR_1_4_MOTOR_1_PWR.GetVoltage() + CENTERLINE_ACTUATOR_1_4_MOTOR_2_PWR.GetVoltage())), 1.0 );
 	posplbd_latch_cl_5_8 = range( 0.0, posplbd_latch_cl_5_8 + (simdt * PLBD_CENTERLINE_LATCH_OPERATING_SPEED * (CENTERLINE_ACTUATOR_5_8_MOTOR_1_PWR.GetVoltage() + CENTERLINE_ACTUATOR_5_8_MOTOR_2_PWR.GetVoltage())), 1.0 );
@@ -1166,7 +1169,7 @@ void PayloadBay::OnPostStep( double simt, double simdt, double mjd )
 			if (posplbd_stbd < 0.008) range_min = max(range_min,0.025);
 		}
 
-		posplbd_port = range( range_min, posplbd_port + (simdt * PLBD_OPERATING_SPEED * (PORT_DOOR_POWER_DRIVE_UNIT_MOTOR_1_PWR.GetVoltage() + PORT_DOOR_POWER_DRIVE_UNIT_MOTOR_2_PWR.GetVoltage())), range_max );
+		posplbd_port = range( range_min, posplbd_port + (simdt * PLBD_OPERATING_SPEED * (PORT_DOOR_POWER_DRIVE_UNIT_MOTOR_1_PWR.GetVoltage() + PORT_DOOR_POWER_DRIVE_UNIT_MOTOR_2_PWR.GetVoltage()) * gravity_lock), range_max );
 		SetPayloadBayDoorPosition( 0, posplbd_port );
 	}
 	if ((posplbd_stbd != 0.0) || ((posplbd_latch_blkd_stbd_fwd > 0.5) && (posplbd_latch_blkd_stbd_aft > 0.5) && (posplbd_latch_cl_1_4 > 0.5) && (posplbd_latch_cl_5_8 > 0.5) && (posplbd_latch_cl_9_12 > 0.5) && (posplbd_latch_cl_13_16 > 0.5)))// only run if free or latches open enough
@@ -1177,7 +1180,7 @@ void PayloadBay::OnPostStep( double simt, double simdt, double mjd )
 		if ((posplbd_latch_blkd_stbd_fwd < 0.5) || (posplbd_latch_blkd_stbd_aft < 0.5)) range_min = 0.025;// just outside RFL
 		if ((posplbd_latch_cl_1_4 < 0.5) || (posplbd_latch_cl_5_8 < 0.5) || (posplbd_latch_cl_9_12 < 0.5) || (posplbd_latch_cl_13_16 < 0.5)) range_min = max(range_min,0.0135);// just outside RFL
 
-		posplbd_stbd = range( range_min, posplbd_stbd + (simdt * PLBD_OPERATING_SPEED * (STARBOARD_DOOR_POWER_DRIVE_UNIT_MOTOR_1_PWR.GetVoltage() + STARBOARD_DOOR_POWER_DRIVE_UNIT_MOTOR_2_PWR.GetVoltage())), 1.0 );
+		posplbd_stbd = range( range_min, posplbd_stbd + (simdt * PLBD_OPERATING_SPEED * (STARBOARD_DOOR_POWER_DRIVE_UNIT_MOTOR_1_PWR.GetVoltage() + STARBOARD_DOOR_POWER_DRIVE_UNIT_MOTOR_2_PWR.GetVoltage()) * gravity_lock), 1.0 );
 		SetPayloadBayDoorPosition( 1, posplbd_stbd );
 	}
 
@@ -1195,7 +1198,7 @@ void PayloadBay::OnPostStep( double simt, double simdt, double mjd )
 		// limit range if latches are in the way
 		if ((posradiator_latch_port_1_6 < 0.5) || (posradiator_latch_port_7_12 < 0.5)) range_min = 0.02;
 
-		posradiator_port = range( range_min, posradiator_port + (simdt * RAD_OPERATING_SPEED * (PORT_RAD_DEPLOYMENT_MOTOR_1_PWR.GetVoltage() + PORT_RAD_DEPLOYMENT_MOTOR_2_PWR.GetVoltage())), 1.0 );
+		posradiator_port = range( range_min, posradiator_port + (simdt * RAD_OPERATING_SPEED * (PORT_RAD_DEPLOYMENT_MOTOR_1_PWR.GetVoltage() + PORT_RAD_DEPLOYMENT_MOTOR_2_PWR.GetVoltage()) * gravity_lock), 1.0 );
 	}
 
 	if ((posradiator_stbd != 0.0) || ((posradiator_latch_stbd_1_6 > 0.5) && (posradiator_latch_stbd_7_12 > 0.5)))// only run if free or latches open enough
@@ -1205,7 +1208,7 @@ void PayloadBay::OnPostStep( double simt, double simdt, double mjd )
 		// limit range if latches are in the way
 		if ((posradiator_latch_stbd_1_6 < 0.5) || (posradiator_latch_stbd_7_12 < 0.5)) range_min = 0.02;
 
-		posradiator_stbd = range( range_min, posradiator_stbd + (simdt * RAD_OPERATING_SPEED * (STARBOARD_RAD_DEPLOYMENT_MOTOR_1_PWR.GetVoltage() + STARBOARD_RAD_DEPLOYMENT_MOTOR_2_PWR.GetVoltage())), 1.0 );
+		posradiator_stbd = range( range_min, posradiator_stbd + (simdt * RAD_OPERATING_SPEED * (STARBOARD_RAD_DEPLOYMENT_MOTOR_1_PWR.GetVoltage() + STARBOARD_RAD_DEPLOYMENT_MOTOR_2_PWR.GetVoltage()) * gravity_lock), 1.0 );
 	}
 
 	// cameras
@@ -1231,7 +1234,7 @@ void PayloadBay::OnPostStep( double simt, double simdt, double mjd )
 void PayloadBay::SetIndications( void )
 {
 	// doors
-	if (posplbd_port == 0.0)// HACK CL indications should be set at <2บ
+	if (posplbd_port == 0.0)// HACK CL indications should be set at <2ยบ
 	{
 		if (MNB_MMC4) PORT_DOOR_CLOSE_1.SetLine();
 		else PORT_DOOR_CLOSE_1.ResetLine();
@@ -1256,7 +1259,7 @@ void PayloadBay::SetIndications( void )
 		PORT_DOOR_OPEN_1.ResetLine();
 		PORT_DOOR_OPEN_2.ResetLine();
 	}
-	if (posplbd_port <= (4.0 / 175.5))// 4บ
+	if (posplbd_port <= (4.0 / 175.5))// 4ยบ
 	{
 		if (MNA_MMC1) PORT_FWD_RDY_LATCH_1.SetLine();
 		else PORT_FWD_RDY_LATCH_1.ResetLine();
@@ -1273,7 +1276,7 @@ void PayloadBay::SetIndications( void )
 		PORT_FWD_88.ResetLine();
 		PORT_AFT_88.ResetLine();
 	}
-	else if (posplbd_port > (88.0 / 175.5))// 88บ
+	else if (posplbd_port > (88.0 / 175.5))// 88ยบ
 	{
 		PORT_FWD_RDY_LATCH_1.ResetLine();
 		PORT_FWD_RDY_LATCH_2.ResetLine();
@@ -1298,7 +1301,7 @@ void PayloadBay::SetIndications( void )
 		PORT_AFT_88.ResetLine();
 	}
 
-	if (posplbd_stbd == 0.0)// HACK CL indications should be set at <2บ
+	if (posplbd_stbd == 0.0)// HACK CL indications should be set at <2ยบ
 	{
 		if (MNB_MMC2) STBD_DOOR_CLOSE_1.SetLine();
 		else STBD_DOOR_CLOSE_1.ResetLine();
@@ -1323,7 +1326,7 @@ void PayloadBay::SetIndications( void )
 		STBD_DOOR_OPEN_1.ResetLine();
 		STBD_DOOR_OPEN_2.ResetLine();
 	}
-	if (posplbd_stbd <= (4.0 / 175.5))// 4บ
+	if (posplbd_stbd <= (4.0 / 175.5))// 4ยบ
 	{
 		if (MNA_MMC1) STBD_FWD_RDY_LATCH_1.SetLine();
 		else STBD_FWD_RDY_LATCH_1.ResetLine();
@@ -1340,7 +1343,7 @@ void PayloadBay::SetIndications( void )
 		STBD_FWD_88.ResetLine();
 		STBD_AFT_88.ResetLine();
 	}
-	else if (posplbd_stbd > (88.0 / 175.5))// 88บ
+	else if (posplbd_stbd > (88.0 / 175.5))// 88ยบ
 	{
 		STBD_FWD_RDY_LATCH_1.ResetLine();
 		STBD_FWD_RDY_LATCH_2.ResetLine();

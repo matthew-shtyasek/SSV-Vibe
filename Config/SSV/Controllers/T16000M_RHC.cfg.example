@@ -1,0 +1,13 @@
+# Thrustmaster T16000M (stick alone) as the RHC of the shuttle. Copy to "Joystick<N>.cfg" or "<device name>.cfg" (see DetectedDevices.txt).
+# Axis names are the usual ones for this stick: check them with Ctrl+J in the simulation and change the SUBDEVID column if needed.
+# Stick forward = pitch down, stick back = pitch up (like an aircraft), stick right = roll right, twist clockwise = yaw right.
+# If a direction is wrong, change true to false (or false to true) in the REVERSE column of that line.
+INPUT	SUBDEVID	REVERSE	DEADZONE	EXPO	CENTER
+RHC_PITCH	Axis Y	false	0.03	0.3	0
+RHC_ROLL	Axis X	false	0.03	0.3	0
+RHC_YAW	Axis RZ	false	0.05	0.4	0
+RMS_CAPTURE	Button 0	false
+RMS_RELEASE	Button 1	false
+RMS_RATE_HOLD	Button 2	false
+RMS_RATE_TOGGLE	Button 3	false
+RMS_CONTROL_TOGGLE	Button 4	false

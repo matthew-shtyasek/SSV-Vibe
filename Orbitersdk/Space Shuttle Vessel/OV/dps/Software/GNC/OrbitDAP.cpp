@@ -37,6 +37,7 @@ Date         Developer
 #include "THC_SOP.h"
 #include "StateVectorSoftware.h"
 #include "GNCUtilities.h"
+#include "../../../PTGMath.h"
 #include "../../../Atlantis.h"
 
 namespace dps
@@ -112,6 +113,7 @@ pStateVector(NULL)
 	ActiveManeuver.IsValid = false;
 	CurManeuver.IsValid = false;
 	FutManeuver.IsValid = false;
+	ActiveManeuver.track = CurManeuver.track = FutManeuver.track = false;
 
 	Torque.data[PITCH]=ORBITER_PITCH_TORQUE;
 	Torque.data[YAW]=ORBITER_YAW_TORQUE;
@@ -263,6 +265,7 @@ void OrbitDAP::LoadCurLVLHManeuver(const MATRIX3& tgtMatrixLVLH)
 	CurManeuver.IsValid = true;
 	CurManeuver.tgtMatrix = tgtMatrixLVLH;
 	CurManeuver.Type = AttManeuver::TRK;
+	CurManeuver.track = false;
 	if(DAPControlMode == AUTO) StartCurManeuver();
 }
 
@@ -271,6 +274,7 @@ void OrbitDAP::LoadFutLVLHManeuver(const MATRIX3& tgtMatrixLVLH)
 	FutManeuver.IsValid = true;
 	FutManeuver.tgtMatrix = tgtMatrixLVLH;
 	FutManeuver.Type = AttManeuver::TRK;
+	FutManeuver.track = false;
 }
 
 void OrbitDAP::LoadCurINRTLManeuver(const MATRIX3& tgtMatrixM50)
@@ -278,6 +282,7 @@ void OrbitDAP::LoadCurINRTLManeuver(const MATRIX3& tgtMatrixM50)
 	CurManeuver.IsValid = true;
 	CurManeuver.tgtMatrix = tgtMatrixM50;
 	CurManeuver.Type = AttManeuver::MNVR;
+	CurManeuver.track = false;
 	if(DAPControlMode == AUTO) StartCurManeuver();
 }
 
@@ -286,6 +291,24 @@ void OrbitDAP::LoadFutINRTLManeuver(const MATRIX3& tgtMatrixM50)
 	FutManeuver.IsValid = true;
 	FutManeuver.tgtMatrix = tgtMatrixM50;
 	FutManeuver.Type = AttManeuver::MNVR;
+	FutManeuver.track = false;
+}
+
+void OrbitDAP::LoadCurTrackManeuver(const MATRIX3& tgtMatrixM50)
+{
+	CurManeuver.IsValid = true;
+	CurManeuver.tgtMatrix = tgtMatrixM50;
+	CurManeuver.Type = AttManeuver::MNVR;
+	CurManeuver.track = true;
+	if(DAPControlMode == AUTO) StartCurManeuver();
+}
+
+void OrbitDAP::LoadFutTrackManeuver(const MATRIX3& tgtMatrixM50)
+{
+	FutManeuver.IsValid = true;
+	FutManeuver.tgtMatrix = tgtMatrixM50;
+	FutManeuver.Type = AttManeuver::MNVR;
+	FutManeuver.track = true;
 }
 
 void OrbitDAP::StartCurManeuver()
@@ -294,6 +317,7 @@ void OrbitDAP::StartCurManeuver()
 		//if(CurManeuver.Type == AttManeuver::MNVR) StartINRTLManeuver(CurManeuver.radTargetAttOrbiter);
 		//else if(CurManeuver.Type == AttManeuver::TRK) StartLVLHManeuver(CurManeuver.radTargetLVLHAtt);
 		StartManeuver(CurManeuver.tgtMatrix, CurManeuver.Type);
+		ActiveManeuver.track = CurManeuver.track;
 	}
 }
 
@@ -302,6 +326,7 @@ void OrbitDAP::StartManeuver(const MATRIX3& tgtAtt, AttManeuver::TYPE type)
 	ActiveManeuver.tgtMatrix = tgtAtt;
 	ActiveManeuver.Type = type;
 	ActiveManeuver.IsValid = true;
+	ActiveManeuver.track = false;
 
 	ManeuverStatus = MNVR_IN_PROGRESS;
 
@@ -772,6 +797,20 @@ void OrbitDAP::OnPreStep(double simt, double simdt, double mjd)
 		ATT_ERR = _V(0.0, 0.0, 0.0);
 	}
 	else if(DAPControlMode != FREE) { // if DAP is in FREE, we only care about RHC input; otherwise, we want to maintain target attitude
+		if (ActiveManeuver.IsValid && ActiveManeuver.track && (ActiveManeuver.Type == AttManeuver::MNVR))
+		{
+			// tracking of a target (UNIV PTG): the target attitude moves
+			MATRIX3 trkAtt;
+			if (GetTrackAttitude( trkAtt ))
+			{
+				ActiveManeuver.tgtMatrix = trkAtt;
+				REQD_ATT = GetYZX_PYRAnglesFromMatrix( trkAtt ) * DEG;
+				if (REQD_ATT.x < 0.0) REQD_ATT.x += 360.0;
+				if (REQD_ATT.y < 0.0) REQD_ATT.y += 360.0;
+				if (REQD_ATT.z < 0.0) REQD_ATT.z += 360.0;
+			}
+			else ActiveManeuver.track = false;
+		}
 		MATRIX3 tgtM50Matrix;  // target M50 attitude for this timestep
 		if(ActiveManeuver.Type == AttManeuver::TRK) { // get (instantaneous) target M50 attitude
 			MATRIX3 curLVLHMatrix = GetCurrentLVLHRefMatrix();
@@ -946,7 +985,7 @@ bool OrbitDAP::ItemInput_UNIVPTG( int item, const char* Data )
 						RA_DEC_flash = false;
 						LAT_LON_ALT_flash = false;
 					}
-					/*else if (nNew == 3)// Earth relative target
+					else if (nNew == 3)// Earth relative target
 					{
 						TGT_ID = nNew;
 						RA_DEC_flash = false;
@@ -964,7 +1003,7 @@ bool OrbitDAP::ItemInput_UNIVPTG( int item, const char* Data )
 						RA_DEC_flash = true;
 						LAT_LON_ALT_flash = false;
 					}
-					else if ((nNew >= 11) && (nNew <= 60))// Navigation stars, OPS 2, 3, and 8
+					/*else if ((nNew >= 11) && (nNew <= 60))// Navigation stars, OPS 2, 3, and 8
 					{
 						TGT_ID = nNew;
 						RA_DEC_flash = false;
@@ -1172,13 +1211,18 @@ bool OrbitDAP::ItemInput_UNIVPTG( int item, const char* Data )
 							LoadFutLVLHManeuver(tgtAtt);
 						}
 					}
-					else if (TGT_ID == 3)
+					else if ((TGT_ID == 3) || (TGT_ID == 4) || (TGT_ID == 5))
 					{
-						// TODO LAT, LON, ALT
-					}
-					else if (TGT_ID == 5)
-					{
-						// TODO RA, DEC
+						// track an Earth fixed point, the Sun or a celestial point
+						MATRIX3 tgtAtt;
+						if (!GetTrackAttitude( tgtAtt )) return false;
+						double startTime = START_TIME[0]*86400.0 + START_TIME[1]*3600.0 + START_TIME[2]*60.0 + START_TIME[3];
+						if (startTime <= STS()->GetMET()) LoadCurTrackManeuver(tgtAtt);
+						else
+						{
+							FutMnvrStartTime = startTime;
+							LoadFutTrackManeuver(tgtAtt);
+						}
 					}
 
 					RA_DEC_flash = false;
@@ -2722,6 +2766,52 @@ double OrbitDAP::CalcManeuverCompletionTime(const MATRIX3& curM50Matrix, const M
 		mnvrTime=(Angle*DEG)/degRotRate;
 	} while(abs(mnvrTime-lastMnvrTime)>0.05 && counter<50);
 	return max(mnvrTime, 0.0);
+}
+
+bool OrbitDAP::GetTrackAttitude( MATRIX3& tgtMatrixM50 ) const
+{
+	// direction to the target in the DAP (M50) frame
+	VECTOR3 u;
+	VECTOR3 vesselGlobalPos;
+	STS()->GetGlobalPos( vesselGlobalPos );
+	if (TGT_ID == 3)
+	{
+		// LAT, LON and ALT (nautical miles) of a point of the Earth
+		OBJHANDLE hEarth = STS()->GetSurfaceRef();
+		if (hEarth == NULL) return false;
+		VECTOR3 local;
+		VECTOR3 global;
+		oapiEquToLocal( hEarth, LON * RAD, LAT * RAD, oapiGetSize( hEarth ) + (_ALT * 1852.0), &local );
+		oapiLocalToGlobal( hEarth, &local, &global );
+		const VECTOR3 d = global - vesselGlobalPos;
+		if (length( d ) < 1.0) return false;
+		u = ptg::GlobalToDAPFrame( d / length( d ), M_J2000_to_M50 );
+	}
+	else if (TGT_ID == 4)
+	{
+		// center of the Sun
+		VECTOR3 sunGlobalPos;
+		oapiGetGlobalPos( oapiGetGbodyByIndex( 0 ), &sunGlobalPos );
+		const VECTOR3 d = sunGlobalPos - vesselGlobalPos;
+		if (length( d ) < 1.0) return false;
+		u = ptg::GlobalToDAPFrame( d / length( d ), M_J2000_to_M50 );
+	}
+	else if (TGT_ID == 5)
+	{
+		// RA and DEC (M50)
+		OBJHANDLE hEarth = STS()->GetSurfaceRef();
+		if (hEarth == NULL) return false;
+		MATRIX3 obliquity;
+		oapiGetPlanetObliquityMatrix( hEarth, &obliquity );
+		u = ptg::CelestialToDAPFrame( ptg::DirectionFromRADec( RA, DEC ), M_J2000_to_M50, obliquity );
+	}
+	else return false;
+
+	// roll reference: Y axis of the LVLH frame (like for the center of the Earth)
+	const MATRIX3 lvlh = GetCurrentLVLHRefMatrix();
+	const VECTOR3 yref = _V( lvlh.m12, lvlh.m22, lvlh.m32 );
+	tgtMatrixM50 = ptg::PointingAttitude( u, yref, ConvertPYOMToLVLH( P * RAD, Y * RAD, OM * RAD ) );
+	return true;
 }
 
 MATRIX3 OrbitDAP::GetCurrentLVLHRefMatrix() const

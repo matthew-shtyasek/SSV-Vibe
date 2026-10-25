@@ -332,6 +332,7 @@
     <ClCompile Include="AirDataProbes.cpp" />
     <ClCompile Include="APU.cpp" />
     <ClCompile Include="Atlantis.cpp" />
+    <ClCompile Include="HandControllers.cpp" />
     <ClCompile Include="AtlantisSubsystem.cpp" />
     <ClCompile Include="AtlantisSubsystemDirector.cpp" />
     <ClCompile Include="gnc\ATVC.cpp" />
@@ -666,6 +667,7 @@
     <ClInclude Include="vc\AftMDU.h" />
     <ClInclude Include="APU.h" />
     <ClInclude Include="Atlantis.h" />
+    <ClInclude Include="HandControllers.h" />
     <ClInclude Include="Atlantis_vc_defs.h" />
     <ClInclude Include="AtlantisSubsystem.h" />
     <ClInclude Include="AtlantisSubsystemDirector.h" />

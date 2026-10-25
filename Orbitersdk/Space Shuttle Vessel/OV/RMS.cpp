@@ -58,6 +58,10 @@ Date         Developer
 2026/02/22   GLS
 ********************************************/
 #include "RMS.h"
+#include "RMSMath.h"
+#include <fstream>
+#include <sstream>
+#include <string>
 #include "ParameterValues.h"
 #include "meshres_RMS_Port.h"
 #include "../CommonDefs.h"
@@ -204,6 +208,60 @@ RMS::RMS( AtlantisSubsystemDirector *_director, const std::string& _ident, bool 
 	for(int i=0;i<3;i++) ee_translation[i]=0;
 
 	bSoftStop = false;
+	bRateHold = false;
+	bRateHoldArmed = false;
+	bRateHoldPBPrev = false;
+	for (int i = 0; i < 3; i++) heldRHC[i] = heldTHC[i] = 0.0;
+	lastRMSMode = -1;
+	bSingleSoftStopIdle = false;
+	for (int i = 0; i < 6; i++) singleSoftStopDisabled[i] = false;
+	bAutoModeLogged = false;
+	acceptedMode = -2;
+	effMode = -1;
+	bEnterPrev = false;
+	bAutoProceedPrev = false;
+	autoState = AUTO_IDLE;
+	autoPt = 0;
+	pdrs.plid = 0;
+	pdrs.eeid = 1;
+	pdrs.io = true;// the real software starts with I/O OFF, ON is kept so existing scenarios keep working
+	pdrs.softstop_ena = true;
+	pdrs.autobrake_ena = true;
+	pdrs.posenc_ena = true;
+	pdrs.pohs_ena = true;
+	for (int i = 0; i < 4; i++) pdrs.autoseq[i] = i + 1;
+	pdrs.startpt = 0;
+	pdrs.lastpt = 0;
+	for (int i = 0; i < 3; i++)
+	{
+		pdrs.endpos_valid[i] = false;
+		pdrs.endpos[i] = 0.0;
+		pdrs.endatt_valid[i] = false;
+		pdrs.endatt[i] = 0.0;
+	}
+	pdrs.plinitid = 0;
+	pdrs.cmdck = 0;
+	pdrs.wrrange = 4;
+	pdrs.orbldref = 0;
+	ovr.mode_ena = false;
+	ovr.mode = -1;
+	ovr.enter = false;
+	ovr.loaded_rate = false;
+	ovr.stowed_ops = false;
+	ovr.joint_ena = false;
+	ovr.joint = -1;
+	ovr.rate_ena = false;
+	ovr.rate_coarse = false;
+	ovr.auto_ena = false;
+	ovr.auto_proceed = false;
+	ovr.hc_ena = false;
+	ovr.safing_cancel = false;
+	safingLatched = false;
+	backupDrive = false;
+	ratesvalid = false;
+	lastPos = _V( 0.0, 0.0, 0.0 );
+	lastAtt = _M( 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0 );
+	transRateAct = rotRateAct = transRateCmd = rotRateCmd = _V( 0.0, 0.0, 0.0 );
 
 	bEECapture = false;
 	bEEExtended = false;
@@ -252,6 +310,27 @@ void RMS::Realize()
 	EEOpened.Connect(pBundle, 9);
 	EERigidized.Connect(pBundle, 10);
 	EEDerigidized.Connect(pBundle, 11);
+	RateHoldPB.Connect(pBundle, 12);
+
+	pBundle = BundleManager()->CreateBundle( "RMS_PANEL", 16 );
+	BrakesOn.Connect( pBundle, 0 );
+	SafingOn.Connect( pBundle, 1 );
+	AutoSeqProceed.Connect( pBundle, 2 );
+	EnterPB.Connect( pBundle, 3 );
+	PowerPrimary.Connect( pBundle, 4 );
+	PowerBackup.Connect( pBundle, 5 );
+	PowerOff.Connect( pBundle, 6 );
+	SafingActive.Connect( pBundle, 9 );
+	SafingCancel.Connect( pBundle, 10 );
+	BrakesApplied.Connect( pBundle, 11 );
+
+	pBundle = BundleManager()->CreateBundle( "RMS_BACKUP", 16 );
+	for (int i = 0; i < 6; i++) BackupJoint[i].Connect( pBundle, i );
+	BackupDirectPlus.Connect( pBundle, 6 );
+	BackupDirectMinus.Connect( pBundle, 7 );
+	BackupPayloadRelease.Connect( pBundle, 8 );
+
+	LoadAutoSequences();
 
 	pBundle=BundleManager()->CreateBundle("RMS", 16);
 	ShoulderBrace.Connect(pBundle, 4);
@@ -291,6 +370,8 @@ void RMS::Realize()
 
 	pBundle = BundleManager()->CreateBundle( "RMS_MODELIGHTS", 16 );
 	for (int i = 0; i < 12; i++) ModeLights[i].Connect( pBundle, i );
+	ReadyLight.Connect( pBundle, 12 );
+	InProgLight.Connect( pBundle, 13 );
 
 	AddMesh();
 
@@ -471,7 +552,7 @@ void RMS::ShiftCG( const VECTOR3& shift )
 
 bool RMS::Movable( void ) const
 {
-	return (RMSSelect && Eq( shoulder_brace, 0.0, 0.01 ) && !stowed_and_latched)
+	return (Powered() && Eq( shoulder_brace, 0.0, 0.01 ) && !stowed_and_latched && !STS()->GravityLoaded())
 		&& (hPayloadAttachment == NULL || (!doubleAttached && PayloadIsFree()));
 }
 
@@ -487,101 +568,200 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 	if (bFirstStep) CheckRFL();
 
 	// make sure RMS is powered and can be operated
-	if(!RMSSelect) return;
+	if(!Powered()) return;
+
+	// MODE switch position
+	int curmode = -1;
+	for (int i = 0; i < 12; i++)
+	{
+		if (RMSMode[i].IsSet()) curmode = i;
+	}
+	if (ovr.mode_ena && (ovr.mode >= 0)) curmode = ovr.mode;// MODE SW OVRD
+	// the mode selected with MODE is entered with ENTER (not needed for DIRECT); if the MODE switch is moved, the software is idle until ENTER is pushed
+	bool enter = EnterPB.IsSet() || ovr.enter;
+	ovr.enter = false;
+	if (acceptedMode == -2) acceptedMode = curmode;// nothing stored in the scenario
+	if (enter && !bEnterPrev) acceptedMode = curmode;
+	bEnterPrev = enter;
+	if (curmode == MODE_DIRECT) effMode = MODE_DIRECT;
+	else if (curmode == acceptedMode) effMode = curmode;
+	else effMode = -1;
+
+	// with RMS POWER in BACKUP, only the BACKUP CONTROL switches work (no computer supported modes)
+	const bool backup = PowerBackup.IsSet() && !PowerPrimary.IsSet();
+	if (backup) effMode = -1;
+
+	// detect mode changes: RATE HOLD is cancelled and the soft stop logic of SINGLE mode is initialized
+	if (effMode != lastRMSMode)
+	{
+		lastRMSMode = effMode;
+		autoState = AUTO_IDLE;
+		autoPt = 0;
+		bRateHold = false;
+		bSingleSoftStopIdle = false;
+		bAutoModeLogged = false;
+		// soft stops are disabled for the joints that are already in a soft stop when SINGLE mode is selected
+		for (int i = SHOULDER_YAW; i <= WRIST_ROLL; i++)
+		{
+			singleSoftStopDisabled[i] = (joint_angle[i] < RMS_JOINT_SOFTSTOPS[0][i]) || (joint_angle[i] > RMS_JOINT_SOFTSTOPS[1][i]);
+		}
+	}
+
+	// the brakes hold the arm; SAFING brings the arm to rest until it is cancelled
+	// SAFING: the switch in SAFE brings the arm to rest, and the safing is maintained when the switch goes back to AUTO until it is cancelled
+	// with the switch momentarily in CANCEL (or SAFING CAN of the PDRS OVERRIDE display)
+	safingLatched = RMSMath::SafingLatch( safingLatched, SafingOn.IsSet(), SafingCancel.IsSet(), ovr.safing_cancel );
+	if (!SafingOn.IsSet()) ovr.safing_cancel = false;
+	const bool safing = safingLatched;
+	if (safing) SafingActive.SetLine();
+	else SafingActive.ResetLine();
+	// the brakes are released with power on: without power they clamp the joints
+	if (RMSMath::BrakesApplied( BrakesOn.IsSet(), Powered() )) BrakesApplied.SetLine();
+	else BrakesApplied.ResetLine();
+	bool armfree = Movable() && !BrakesOn.IsSet() && !safing;
+	if (!armfree) bRateHold = false;
+
+	// RATE HOLD pushbutton (RHC grip): push to hold the commanded rates, push again to release
+	bool ratehold_pb = RateHoldPB.IsSet();
+	if (ratehold_pb && !bRateHoldPBPrev)
+	{
+		if (bRateHold) bRateHold = false;
+		else if (armfree && ManualAugmentedMode())
+		{
+			for (int i = 0; i < 3; i++)
+			{
+				heldRHC[i] = RHCInput[i].GetVoltage();
+				heldTHC[i] = THCInput[i].GetVoltage();
+			}
+			bRateHoldArmed = false;
+			bRateHold = true;
+		}
+	}
+	bRateHoldPBPrev = ratehold_pb;
+
+	transRateCmd = rotRateCmd = _V( 0.0, 0.0, 0.0 );
+
+	// BACKUP CONTROL: the selected joint is driven with the DIRECT DRIVE switch
+	if (backup && armfree)
+	{
+		int dir = BackupDirectPlus.IsSet() ? 1 : (BackupDirectMinus.IsSet() ? -1 : 0);
+		int joint = -1;
+		for (int i = 0; i < 6; i++)
+		{
+			if (BackupJoint[i].IsSet()) joint = i;
+		}
+		if ((dir != 0) && (joint != -1))
+		{
+			backupDrive = true;
+			DriveSingleJoint( joint, dir, simdt );
+			backupDrive = false;
+			update_vectors = true;
+		}
+	}
 
 	//rotate joints
-	if(Movable()) {
-		// single joint rotation
-		if(RMSMode[9] || RMSMode[10]) { // make sure RMS is in SINGLE or DIRECT mode
-			if(DirectDrivePlus) {
+	if(armfree) {
+		if(ModeIs(MODE_SINGLE) || ModeIs(MODE_DIRECT)) { // joint-by-joint drive
+			int dir = 0;
+			if(DirectDrivePlus) dir = 1;
+			else if(DirectDriveMinus) dir = -1;
+			if(dir != 0) {
 				int joint=GetSelectedJoint();
-				if(joint!=-1) {
-					if (joint == 0)
-					{
-						// HACK fix the wrong sign in the shoulder yaw joint (without touching the IK part)
-						// a fix for the display angle exists in 7SegDisp_RMS.cpp:425
-						if (RMSCoarseRateCMD) SetJointAngle(SHOULDER_YAW, joint_angle[0]-RMS_JOINT_COARSE_ROTATION_SPEEDS[0]*simdt);
-						else SetJointAngle(SHOULDER_YAW, joint_angle[0]-RMS_JOINT_VERN_ROTATION_SPEEDS[0]*simdt);
-					}
-					else
-					{
-						if (RMSCoarseRateCMD) SetJointAngle((RMS_JOINT)joint, joint_angle[joint]+RMS_JOINT_COARSE_ROTATION_SPEEDS[joint]*simdt);
-						else SetJointAngle((RMS_JOINT)joint, joint_angle[joint]+RMS_JOINT_VERN_ROTATION_SPEEDS[joint]*simdt);
-					}
-				}
-				update_vectors=true;
-			}
-			else if(DirectDriveMinus) {
-				int joint=GetSelectedJoint();
-				if(joint!=-1) {
-					if (joint == 0)
-					{
-						// HACK fix the wrong sign in the shoulder yaw joint (without touching the IK part)
-						// a fix for the display angle exists in PanelA8.cpp:214
-						if (RMSCoarseRateCMD) SetJointAngle(SHOULDER_YAW, joint_angle[0]+RMS_JOINT_COARSE_ROTATION_SPEEDS[0]*simdt);
-						else SetJointAngle(SHOULDER_YAW, joint_angle[0]+RMS_JOINT_VERN_ROTATION_SPEEDS[0]*simdt);
-					}
-					else
-					{
-						if (RMSCoarseRateCMD) SetJointAngle((RMS_JOINT)joint, joint_angle[joint]-RMS_JOINT_COARSE_ROTATION_SPEEDS[joint]*simdt);
-						else SetJointAngle((RMS_JOINT)joint, joint_angle[joint]-RMS_JOINT_VERN_ROTATION_SPEEDS[joint]*simdt);
-					}
-				}
+				if(joint!=-1) DriveSingleJoint(joint, dir, simdt);
 				update_vectors=true;
 			}
 		}
-		else { // not in single joint mode
+		else if(ModeIs(MODE_TEST)) {
+			// TEST is equivalent to ORB LD, but with zero joint rates: the hand controllers can be checked out and the arm is limp
+		}
+		else if(ManualAugmentedMode()) {
 			VECTOR3 newPos = arm_ik_pos;
 			VECTOR3 newDir = arm_ik_dir;
 			VECTOR3 newRot = arm_ik_rot;
 			bool rotateEE=false, translateEE=false;
+			const double loadscale = GetLoadScale();
+
+			// hand controller commands (volts, 5V = full deflection); the rates are proportional to the deflection
+			double rhc[3], thc[3];
+			bool detent = true;
+			for(int i=0;i<3;i++) {
+				rhc[i] = RHCInput[i].GetVoltage();
+				thc[i] = THCInput[i].GetVoltage();
+				if(!Eq(rhc[i], 0.0, 0.05) || !Eq(thc[i], 0.0, 0.05)) detent = false;
+			}
+			if(bRateHold) {
+				if(detent) bRateHoldArmed = true;
+				for(int i=0;i<3;i++) {
+					// after the hand controllers return to detent, further deflection biases the held rates
+					double rhc_bias = bRateHoldArmed ? rhc[i] : 0.0;
+					double thc_bias = bRateHoldArmed ? thc[i] : 0.0;
+					rhc[i] = max(-5.0, min(5.0, heldRHC[i] + rhc_bias));
+					thc[i] = max(-5.0, min(5.0, heldTHC[i] + thc_bias));
+				}
+			}
 
 			// EE rotation
 			VECTOR3 change=_V(0.0, 0.0, 0.0);
 			for(int i=0;i<3;i++) {
-				if(!Eq(RHCInput[i].GetVoltage(), 0.0, 0.05)) {
-					if (RMSCoarseRateCMD) change.data[i]+=(RHCInput[i].GetVoltage()/5.0)*simdt*RMS_EE_COARSE_ROTATION_SPEED;
-					else change.data[i]+=(RHCInput[i].GetVoltage()/5.0)*simdt*RMS_EE_VERN_ROTATION_SPEED;
+				if(!Eq(rhc[i], 0.0, 0.05)) {
+					if (RateCoarse()) change.data[i]+=(rhc[i]/5.0)*simdt*RMS_EE_COARSE_ROTATION_SPEED*loadscale;
+					else change.data[i]+=(rhc[i]/5.0)*simdt*RMS_EE_VERN_ROTATION_SPEED*loadscale;
 					rotateEE=true;
 				}
 			}
-			if(rotateEE) Rotate(change, newDir, newRot);
+			if(rotateEE)
+			{
+				Rotate(change, newPos, newDir, newRot);
+				if (!ModeIs(MODE_END_EFF)) rotRateCmd = _V( change.data[ROLL], change.data[PITCH], change.data[YAW] ) * (DEG / simdt);
+			}
 
 			// EE translation
 			change=_V(0.0, 0.0, 0.0);
 			for(int i=0;i<3;i++) {
-				if(!Eq(THCInput[i].GetVoltage(), 0.0, 0.05)) {
-					if (RMSCoarseRateCMD) change.data[i]+=(THCInput[i].GetVoltage()/5.0)*simdt*RMS_EE_COARSE_TRANSLATION_SPEED;
-					else change.data[i]+=(THCInput[i].GetVoltage()/5.0)*simdt*RMS_EE_VERN_TRANSLATION_SPEED;
+				if(!Eq(thc[i], 0.0, 0.05)) {
+					if (RateCoarse()) change.data[i]+=(thc[i]/5.0)*simdt*RMS_EE_COARSE_TRANSLATION_SPEED*loadscale;
+					else change.data[i]+=(thc[i]/5.0)*simdt*RMS_EE_VERN_TRANSLATION_SPEED*loadscale;
 					translateEE=true;
 				}
 				else if(ee_translation[i]!=0) {
-					if (RMSCoarseRateCMD) change.data[i]+=ee_translation[i]*simdt*RMS_EE_COARSE_TRANSLATION_SPEED;
-					else change.data[i]+=ee_translation[i]*simdt*RMS_EE_VERN_TRANSLATION_SPEED;
+					if (RateCoarse()) change.data[i]+=ee_translation[i]*simdt*RMS_EE_COARSE_TRANSLATION_SPEED*loadscale;
+					else change.data[i]+=ee_translation[i]*simdt*RMS_EE_VERN_TRANSLATION_SPEED*loadscale;
 					ee_translation[i]=0;
 					translateEE=true;
 				}
 			}
-			if(translateEE) Translate(change, newPos);
+			if(translateEE)
+			{
+				Translate(change, newPos);
+				if (!ModeIs(MODE_END_EFF)) transRateCmd = change / (simdt * 0.3048);
+			}
 
 			if(translateEE || rotateEE) MoveEE(newPos, newDir, newRot, simdt);
 		}
 	}
 
-	CheckSoftwareStop();
+	// OPR CMD, AUTO 1-4
+	RunAutoModes( simdt, armfree );
 
-	if(EEAuto || EEMan) {
+	CheckSoftwareStop();
+	// the software drops out of mode (idle) when a joint reaches a soft stop, which cancels RATE HOLD
+	if (bSoftStop) bRateHold = false;
+
+	const bool backuprelease = backup && BackupPayloadRelease.IsSet();
+	const bool eeAuto = EEAuto.IsSet() || backuprelease;
+	const bool eeRelease = EERelease.IsSet() || backuprelease;
+	if(eeAuto || EEMan) {
 		if(Grapple_State.Moving()) {
 			Grapple_State.Move(simdt*RMS_GRAPPLE_SPEED);
 
 			if(Grapple_State.Closed()) {
 				if(!STS()->GetAttachmentStatus(hAttach)) AttachPayload();
 				bEEClosed = true;
-				if(EEAuto) AutoGrappleSequence();
+				if(eeAuto) AutoGrappleSequence();
 			}
 			else if(Grapple_State.Open()) {
 				bEEOpened = true;
-				if(EEAuto) AutoReleaseSequence();
+				if(eeAuto) AutoReleaseSequence();
 			}
 			else {
 				if(IsLatched()) DetachPayload();
@@ -593,20 +773,20 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 			Extend_State.Move(simdt*RMS_EXTEND_SPEED);
 			if(Extend_State.Open()) {
 				bEEExtended = true;
-				if(EEAuto) AutoReleaseSequence();
+				if(eeAuto) AutoReleaseSequence();
 			}
-			else if(Extend_State.Closed() && EEAuto) AutoGrappleSequence();
+			else if(Extend_State.Closed() && eeAuto) AutoGrappleSequence();
 			else bEEExtended = false;
 		}
 		if(Rigid_State.Moving()) {
 			Rigid_State.Move(simdt*RMS_RIGID_SPEED);
 			if(Rigid_State.Open()) {
 				bEEDerigidized = true;
-				if(EEAuto) AutoReleaseSequence();
+				if(eeAuto) AutoReleaseSequence();
 			}
 			else if(Rigid_State.Closed()) {
 				bEERigidized = true;
-				if(EEAuto) AutoGrappleSequence();
+				if(eeAuto) AutoGrappleSequence();
 			}
 			else {
 				bEEDerigidized = false;
@@ -614,13 +794,13 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 			}
 		}
 
-		if(EEAuto) {
+		if(eeAuto) {
 			if(EEGrapple) {
 				bAutoGrapple=true;
 				bAutoRelease=false;
 				AutoGrappleSequence();
 			}
-			else if(EERelease) {
+			else if(eeRelease) {
 				bAutoRelease=true;
 				bAutoGrapple=false;
 				AutoReleaseSequence();
@@ -628,7 +808,7 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 		}
 		else { //EEMan must be set
 			if(EEGrapple) Grapple_State.action=AnimState::CLOSING;
-			else if(EERelease) Grapple_State.action=AnimState::OPENING;
+			else if(eeRelease) Grapple_State.action=AnimState::OPENING;
 			else if(Grapple_State.Moving()) Grapple_State.action=AnimState::STOPPED;
 
 			if(EERigid) {
@@ -674,7 +854,7 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 		else if(Rigid_State.Open()) bEEDerigidized = true;
 
 		SoftStopTB.SetLine( (int)bSoftStop * 5.0f );
-		RateMinTB.SetLine( (int)RMSCoarseRateCMD * 5.0f );
+		RateMinTB.SetLine( (int)RateCoarse() * 5.0f );
 
 		EECapture.SetLine( (int)bEECapture * 5.0f );
 		EEExtended.SetLine( (int)bEEExtended * 5.0f );
@@ -747,6 +927,8 @@ void RMS::OnPostStep(double simt, double simdt, double mjd)
 		if(!bFirstStep) arm_moved=false;
 	}
 
+	UpdateRates( simdt );
+
 	cameraElbow->TimeStep( simdt );
 	cameraWrist->TimeStep( simdt );
 
@@ -756,7 +938,7 @@ void RMS::OnPostStep(double simt, double simdt, double mjd)
 
 	// handle light and talkback outputs
 	// HACK most things here should be powered by the RMS Power and not the RMS Select switch
-	if (RMSSelect)
+	if (Powered())
 	{
 		if(Eq(shoulder_brace, 0.0, 0.01)) ShoulderBraceReleased.SetLine();
 
@@ -784,10 +966,12 @@ void RMS::OnPostStep(double simt, double simdt, double mjd)
 		CWLights[9].SetLine( (int)ReachLimit * 5.0f );// reach lim light
 		CWLights[11].SetLine( (int)MasterAlarmOn * 5.0f );// master alarm light
 
-		for (int i = 0; i < 12; i++) ModeLights[i].SetLine( (int)RMSMode[i] * 5.0f );
+		for (int i = 0; i < 12; i++) ModeLights[i].SetLine( (int)(effMode == i) * 5.0f );
+		ReadyLight.SetLine( (int)(autoState == AUTO_READY) * 5.0f );
+		InProgLight.SetLine( (int)(autoState == AUTO_RUN) * 5.0f );
 
 		SoftStopTB.SetLine( (int)bSoftStop * 5.0f );
-		RateMinTB.SetLine( (int)!RMSCoarseRateCMD * 5.0f );
+		RateMinTB.SetLine( (int)!RateCoarse() * 5.0f );
 
 		EECapture.SetLine( (int)bEECapture * 5.0f );
 		EEExtended.SetLine( (int)bEEExtended * 5.0f );
@@ -800,6 +984,8 @@ void RMS::OnPostStep(double simt, double simdt, double mjd)
 	{
 		ShoulderBraceReleased.ResetLine();
 
+		ReadyLight.ResetLine();
+		InProgLight.ResetLine();
 		for (int i = 0; i < 12; i++)
 		{
 			ModeLights[i].ResetLine();
@@ -862,6 +1048,14 @@ bool RMS::OnParseLine(const char* line)
 		sscanf_s(line+14, "%lf", &shoulder_brace);
 		return true;
 	}
+	else if(!_strnicmp(line, "ACCEPTED_MODE", 13)) {
+		sscanf_s(line+13, "%d", &acceptedMode);
+		return true;
+	}
+	else if(!_strnicmp(line, "PDRS_ID", 7)) {
+		sscanf_s(line+7, "%d %d", &pdrs.plid, &pdrs.eeid);
+		return true;
+	}
 
 	return MPM::OnParseLine(line);
 }
@@ -876,6 +1070,9 @@ void RMS::OnSaveState(FILEHANDLE scn) const
 		joint_angle[WRIST_PITCH], joint_angle[WRIST_YAW], joint_angle[WRIST_ROLL] );
 	oapiWriteScenario_string( scn, "ANGLES", cbuf );
 	oapiWriteScenario_float(scn, "SHOULDER_BRACE", shoulder_brace);
+	oapiWriteScenario_int( scn, "ACCEPTED_MODE", acceptedMode );
+	sprintf_s( cbuf, 256, "%d %d", pdrs.plid, pdrs.eeid );
+	oapiWriteScenario_string( scn, "PDRS_ID", cbuf );
 	WriteScenario_state(scn, "GRAPPLE", Grapple_State);
 	WriteScenario_state(scn, "RIGIDIZE", Rigid_State);
 	WriteScenario_state(scn, "EXTEND", Extend_State);
@@ -988,9 +1185,651 @@ void RMS::CreateCCTV( void )
 	return;
 }
 
+void RMS::LoadAutoSequences( void )
+{
+	for (int i = 0; i < 20; i++) autoseq[i].clear();
+
+	std::ifstream file( ".\\Config\\SSV\\RMS\\AutoSequences.txt" );
+	if (!file.is_open())
+	{
+		oapiWriteLog( "(SSV_OV) [INFO] RMS: Config\\SSV\\RMS\\AutoSequences.txt not found, no auto sequences loaded" );
+		return;
+	}
+
+	// format: "SEQ n" starts sequence n (1 to 20); "PT X Y Z P Y R [PAUSE]" adds a point (BACS position in inches, attitude in degrees); "#" starts a comment
+	std::string line;
+	int cur = -1;
+	while (std::getline( file, line ))
+	{
+		size_t comment = line.find( '#' );
+		if (comment != std::string::npos) line.erase( comment );
+
+		std::istringstream iss( line );
+		std::string key;
+		if (!(iss >> key)) continue;
+
+		if (!_stricmp( key.c_str(), "SEQ" ))
+		{
+			int id;
+			if ((iss >> id) && (id >= 1) && (id <= 20)) cur = id - 1;
+			else cur = -1;
+		}
+		else if (!_stricmp( key.c_str(), "PT" ) && (cur >= 0))
+		{
+			AutoPoint pt;
+			pt.pause = false;
+			if (iss >> pt.pos[0] >> pt.pos[1] >> pt.pos[2] >> pt.att[0] >> pt.att[1] >> pt.att[2])
+			{
+				std::string flag;
+				if ((iss >> flag) && !_stricmp( flag.c_str(), "PAUSE" )) pt.pause = true;
+				if (autoseq[cur].size() < 200) autoseq[cur].push_back( pt );
+			}
+		}
+	}
+
+	int count = 0;
+	for (int i = 0; i < 20; i++) if (!autoseq[i].empty()) count++;
+	oapiWriteLogV( "(SSV_OV) [INFO] RMS: %d auto sequence(s) loaded", count );
+	return;
+}
+
+int RMS::GetAutoSequenceSize( int id ) const
+{
+	if ((id < 1) || (id > 20)) return 0;
+	return (int)autoseq[id - 1].size();
+}
+
+void RMS::GetEEState( VECTOR3& pos, MATRIX3& att ) const
+{
+	// position, same calculation as for the LED displays: BACS, in inches
+	VECTOR3 ee = (posEE - RMS_SP_JOINT) / IN2M;
+	pos = _V( ee.z, ee.x, -ee.y ) + _V( -679.5, -108.0, -444.77 );
+
+	// attitude: reference frame defined by the EE direction, in the Orbiter body axes
+	VECTOR3 x = ConvertVectorToRMSFrame( dirEE );
+	VECTOR3 z = ConvertVectorToRMSFrame( -rotEE );
+	VECTOR3 y = crossp( z, x );
+	att = _M( x.x, y.x, z.x,
+			  x.y, y.y, z.y,
+			  x.z, y.z, z.z );
+	return;
+}
+
+bool RMS::GetAutoPOR( VECTOR3& porOffset ) const
+{
+	porOffset = _V( 0.0, 0.0, 0.0 );
+	if (pdrs.plid <= 0) return false;
+	VECTOR3 axes[3];
+	return GetPayloadPOR( porOffset, axes );
+}
+
+void RMS::GetPORError( const double tgtpos[3], const double tgtatt[3], VECTOR3& dB, VECTOR3& axis, double& angle ) const
+{
+	VECTOR3 cur;
+	MATRIX3 curM;
+	GetEEState( cur, curM );
+
+	VECTOR3 porOffset;
+	GetAutoPOR( porOffset );// zero for the EE tip
+	RMSMath::PORError( cur, curM, porOffset, tgtpos, tgtatt, dB, axis, angle );
+	return;
+}
+
+bool RMS::CheckOPRCMD( void ) const
+{
+	for (int i = 0; i < 3; i++)
+	{
+		if (!pdrs.endpos_valid[i] || !pdrs.endatt_valid[i]) return false;
+	}
+
+	VECTOR3 dB, axis;
+	double angle;
+	GetPORError( pdrs.endpos, pdrs.endatt, dB, axis, angle );
+
+	VECTOR3 porOffset;
+	bool usepor = GetAutoPOR( porOffset );
+
+	// rotation matrix for the whole attitude error
+	MATRIX3 R = RMSMath::MatrixFromAxisAngle( axis, angle );
+
+	VECTOR3 newDir = RotateVectorX( mul( R, RotateVectorX( arm_ik_dir, -RMS_ROLLOUT_ANGLE ) ), RMS_ROLLOUT_ANGLE );
+	VECTOR3 newRot = RotateVectorX( mul( R, RotateVectorX( arm_ik_rot, -RMS_ROLLOUT_ANGLE ) ), RMS_ROLLOUT_ANGLE );
+	VECTOR3 newPos = arm_ik_pos + RotateVectorX( dB, RMS_ROLLOUT_ANGLE );
+	if (usepor) newPos += RotateVectorX( porOffset - mul( R, porOffset ), RMS_ROLLOUT_ANGLE );
+
+	double angles[6];
+	if (!ComputeJointAngles( newPos, newDir, newRot, angles )) return false;
+	for (int i = SHOULDER_YAW; i <= WRIST_ROLL; i++)
+	{
+		if ((angles[i] < RMS_JOINT_REACHLIMITS[0][i]) || (angles[i] > RMS_JOINT_REACHLIMITS[1][i])) return false;
+	}
+	return true;
+}
+
+bool RMS::GetAutoTarget( double tgtpos[3], double tgtatt[3], bool& pause ) const
+{
+	pause = false;
+	if (ModeIs( MODE_OPR_CMD ))
+	{
+		for (int i = 0; i < 3; i++)
+		{
+			tgtpos[i] = pdrs.endpos[i];
+			tgtatt[i] = pdrs.endatt[i];
+		}
+		return true;
+	}
+
+	int idx = effMode - MODE_AUTO_1;
+	if ((idx < 0) || (idx > 3)) return false;
+	const std::vector<AutoPoint>& seq = autoseq[pdrs.autoseq[idx] - 1];
+	int next = autoPt + 1;// the points are numbered from 1
+	if ((next < 1) || (next > (int)seq.size())) return false;
+	const AutoPoint& pt = seq[next - 1];
+	for (int i = 0; i < 3; i++)
+	{
+		tgtpos[i] = pt.pos[i];
+		tgtatt[i] = pt.att[i];
+	}
+	pause = pt.pause;
+	return true;
+}
+
+void RMS::RunAutoModes( double simdt, bool armfree )
+{
+	const bool automode = ModeIs( MODE_OPR_CMD ) || ModeIs( MODE_AUTO_1 ) || ModeIs( MODE_AUTO_2 ) || ModeIs( MODE_AUTO_3 ) || ModeIs( MODE_AUTO_4 );
+	const bool proceed = ovr.auto_ena ? ovr.auto_proceed : AutoSeqProceed.IsSet();
+
+	if (!automode)
+	{
+		autoState = AUTO_IDLE;
+		bAutoProceedPrev = proceed;
+		return;
+	}
+
+	if (!bAutoModeLogged)
+	{
+		// mode just entered
+		bAutoModeLogged = true;
+		autoState = AUTO_IDLE;
+		if (!ModeIs( MODE_OPR_CMD ))
+		{
+			// AUTO 1-4: the arm must be at the start point of the sequence selected with the items 13-16 of the PDRS CONTROL display
+			int idx = effMode - MODE_AUTO_1;
+			const std::vector<AutoPoint>& seq = autoseq[pdrs.autoseq[idx] - 1];
+			int start = (pdrs.startpt > 0) ? pdrs.startpt : 1;
+			if (((int)seq.size() >= 2) && (start < (int)seq.size()))
+			{
+				autoPt = start;
+				pdrs.lastpt = start;
+				autoState = AUTO_READY;
+			}
+			else oapiWriteLogV( "(SSV_OV) [INFO] RMS: auto sequence %d has no points to fly (see Config\\SSV\\RMS\\AutoSequences.txt)", pdrs.autoseq[idx] );
+		}
+	}
+
+	if (ModeIs( MODE_OPR_CMD ) && (autoState != AUTO_RUN))
+	{
+		// OPR CMD is ready when the command check (item 25) is GOOD and PL INIT ID (item 24) matches PL ID (item 3)
+		autoState = ((pdrs.cmdck == 1) && (pdrs.plinitid == pdrs.plid)) ? AUTO_READY : AUTO_IDLE;
+	}
+
+	// AUTO SEQ switch: PROCEED starts or continues the sequence, STOP brings the arm to rest
+	if (proceed && !bAutoProceedPrev && (autoState == AUTO_READY) && armfree) autoState = AUTO_RUN;
+	else if (!proceed && (autoState == AUTO_RUN)) autoState = AUTO_READY;
+	bAutoProceedPrev = proceed;
+
+	if (autoState != AUTO_RUN) return;
+	if (!armfree || bSoftStop)
+	{
+		autoState = AUTO_READY;
+		return;
+	}
+
+	double tgtpos[3], tgtatt[3];
+	bool pause;
+	if (!GetAutoTarget( tgtpos, tgtatt, pause ))
+	{
+		autoState = AUTO_IDLE;
+		return;
+	}
+
+	VECTOR3 dB, axis;
+	double angle;
+	GetPORError( tgtpos, tgtatt, dB, axis, angle );
+	const double dist = length( dB );
+
+	if ((dist < 0.003) && (angle < (0.1 * RAD)))
+	{
+		// target point reached
+		if (ModeIs( MODE_OPR_CMD ))
+		{
+			pdrs.cmdck = 0;
+			autoState = AUTO_IDLE;
+		}
+		else
+		{
+			const int idx = effMode - MODE_AUTO_1;
+			const int size = (int)autoseq[pdrs.autoseq[idx] - 1].size();
+			autoPt++;
+			pdrs.lastpt = autoPt;
+			if (autoPt >= size) autoState = AUTO_IDLE;// end of the sequence
+			else if (pause) autoState = AUTO_READY;// programmed pause, PROCEED must be selected again
+		}
+		return;
+	}
+
+	const double vt = (RateCoarse() ? RMS_EE_COARSE_TRANSLATION_SPEED : RMS_EE_VERN_TRANSLATION_SPEED) * GetLoadScale();
+	const double vr = (RateCoarse() ? RMS_EE_COARSE_ROTATION_SPEED : RMS_EE_VERN_ROTATION_SPEED) * GetLoadScale();
+
+	VECTOR3 newPos = arm_ik_pos;
+	VECTOR3 newDir = arm_ik_dir;
+	VECTOR3 newRot = arm_ik_rot;
+
+	if (angle > 1e-6)
+	{
+		VECTOR3 porOffset;
+		bool usepor = GetAutoPOR( porOffset );
+		const VECTOR3 axes[3] = {_V( 1.0, 0.0, 0.0 ), _V( 0.0, 1.0, 0.0 ), _V( 0.0, 0.0, 1.0 )};
+		double w = min( vr, max( angle, 0.002 ) );
+		double step = min( angle, w * simdt );
+		RotateAboutPOR( axis * step, axes, usepor, porOffset, newPos, newDir, newRot );
+		update_angles = true;
+		rotRateCmd = axis * (step * DEG / simdt);
+	}
+	if (dist > 1e-6)
+	{
+		double v = min( vt, max( dist, 0.002 ) );
+		double step = min( dist, v * simdt );
+		newPos += RotateVectorX( (dB / dist) * step, RMS_ROLLOUT_ANGLE );
+		transRateCmd = (dB / dist) * (step / (simdt * 0.3048));
+	}
+
+	if (!MoveEE( newPos, newDir, newRot, simdt ))
+	{
+		oapiWriteLog( "(SSV_OV) [INFO] RMS: auto sequence stopped, the arm can not reach the next position" );
+		autoState = AUTO_READY;
+	}
+	return;
+}
+
+void RMS::RotateAboutPOR( const VECTOR3& angles, const VECTOR3 axes[3], bool usePOR, const VECTOR3& porOffset, VECTOR3& newPos, VECTOR3& newDir, VECTOR3& newRot )
+{
+	RMSMath::RotateAboutPOR( angles, axes, usePOR, porOffset, RMS_ROLLOUT_ANGLE, arm_ik_dir, arm_ik_rot, newPos, newDir, newRot );
+	return;
+}
+
+void RMS::LogPOR( void ) const
+{
+	VECTOR3 pos;
+	MATRIX3 att;
+	GetEEState( pos, att );
+	VECTOR3 angles = GetYZX_PYRAnglesFromMatrix( att );
+	for (int i = 0; i < 3; i++)
+	{
+		angles.data[i] *= DEG;
+		if (angles.data[i] < 0.0) angles.data[i] += 360.0;
+	}
+	oapiWriteLogV( "(SSV_OV) [INFO] RMS point: PT %.1f %.1f %.1f %.1f %.1f %.1f", pos.x, pos.y, pos.z, angles.data[PITCH], angles.data[YAW], angles.data[ROLL] );
+	return;
+}
+
+bool RMS::PDRSItemInput( int item, const char* data )
+{
+	int n;
+	double d;
+	const bool nodata = (strlen( data ) == 0);
+
+	switch (item)
+	{
+		case 3:// PL ID
+			if (sscanf_s( data, "%d", &n ) != 1 || (n < 0) || (n > 5)) return false;
+			pdrs.plid = n;
+			pdrs.cmdck = 0;
+			return true;
+		case 4:// END EFF ID
+			if (sscanf_s( data, "%d", &n ) != 1 || (n < 1) || (n > 2)) return false;
+			pdrs.eeid = n;
+			return true;
+		case 5:
+		case 6:// I/O ON/OFF
+			if (!nodata) return false;
+			pdrs.io = (item == 5);
+			return true;
+		case 7:
+		case 8:// SOFT STOP ENA/INH
+			if (!nodata) return false;
+			pdrs.softstop_ena = (item == 7);
+			return true;
+		case 9:
+		case 10:// AUTO BRAKE ENA/INH
+			if (!nodata) return false;
+			pdrs.autobrake_ena = (item == 9);
+			return true;
+		case 11:
+		case 12:// POS ENC CK ENA/INH
+			if (!nodata) return false;
+			pdrs.posenc_ena = (item == 11);
+			return true;
+		case 13:
+		case 14:
+		case 15:
+		case 16:// AUTO 1-4 sequence ID
+			if (sscanf_s( data, "%d", &n ) != 1 || (n < 1) || (n > 20)) return false;
+			pdrs.autoseq[item - 13] = n;
+			return true;
+		case 17:// START PT
+			if (sscanf_s( data, "%d", &n ) != 1 || (n < 1) || (n > 199)) return false;
+			pdrs.startpt = n;
+			return true;
+		case 18:
+		case 19:
+		case 20:// OPR CMD END POS X, Y, Z
+			if (sscanf_s( data, "%lf", &d ) != 1 || (fabs( d ) > 5000.0)) return false;
+			pdrs.endpos[item - 18] = d;
+			pdrs.endpos_valid[item - 18] = true;
+			pdrs.cmdck = 0;
+			return true;
+		case 21:
+		case 23:// OPR CMD END ATT P, R
+			if (sscanf_s( data, "%lf", &d ) != 1 || (d < 0.0) || (d >= 360.0)) return false;
+			pdrs.endatt[(item == 21) ? 0 : 2] = d;
+			pdrs.endatt_valid[(item == 21) ? 0 : 2] = true;
+			pdrs.cmdck = 0;
+			return true;
+		case 22:// OPR CMD END ATT Y
+			if (sscanf_s( data, "%lf", &d ) != 1 || (d < 0.0) || (d >= 360.0) || ((d > 90.0) && (d < 270.0))) return false;
+			pdrs.endatt[1] = d;
+			pdrs.endatt_valid[1] = true;
+			pdrs.cmdck = 0;
+			return true;
+		case 24:// PL INIT ID
+			if (sscanf_s( data, "%d", &n ) != 1 || (n < 0) || (n > 5)) return false;
+			pdrs.plinitid = n;
+			pdrs.cmdck = 0;
+			return true;
+		case 25:// CMD CK
+			if (!nodata) return false;
+			pdrs.cmdck = CheckOPRCMD() ? 1 : 2;
+			return true;
+		case 26:// WR RANGE
+			if (sscanf_s( data, "%d", &n ) != 1 || (n < 1) || (n > 6)) return false;
+			pdrs.wrrange = n;
+			return true;
+		case 27:// AUTO BRAKE CK
+		case 30:// POR DISPLAY
+			return nodata;
+		case 28:
+		case 29:// POHS CNTL ENA/INH
+			if (!nodata) return false;
+			pdrs.pohs_ena = (item == 28);
+			return true;
+		case 31:
+		case 32:
+		case 33:// ORB LD CMD REF NORM/FLY-CAMR/FLY-PL
+			if (!nodata) return false;
+			pdrs.orbldref = item - 31;
+			return true;
+		case 34:// RMS S/N
+			return (sscanf_s( data, "%d", &n ) == 1);
+		default:
+			return false;
+	}
+}
+
+bool RMS::Powered( void ) const
+{
+	return RMSSelect.IsSet() && !PowerOff.IsSet();
+}
+
+bool RMS::RateCoarse( void ) const
+{
+	// the RATE switch of the RHC, or the override of the PDRS OVERRIDE display
+	return ovr.rate_ena ? ovr.rate_coarse : RMSCoarseRateCMD.IsSet();
+}
+
+double RMS::GetLoadScale( void ) const
+{
+	// the joint rates are reduced as the mass of the captured payload increases (up to 29500 kg); the unloaded arm is the reference
+	// the effect of the mass is an option of the vessel configuration (RMSPayloadMassEffect, off by default)
+	if (attachedPayload == NULL) return 1.0;
+	// LOADED RATE override: the loaded rate limits are in effect even for light payloads
+	return RMSMath::LoadScale( attachedPayload->GetMass(), STS()->GetOptions()->RMSPayloadMassEffect(), ovr.loaded_rate );
+}
+
+void RMS::UpdateRates( double dt )
+{
+	VECTOR3 pos;
+	MATRIX3 att;
+	GetEEState( pos, att );
+
+	if (!ratesvalid || (dt <= 0.0))
+	{
+		lastPos = pos;
+		lastAtt = att;
+		ratesvalid = true;
+		return;
+	}
+
+	// translation rates in BACS, ft/s
+	const VECTOR3 vel = (pos - lastPos) / dt / 12.0;
+	// rotation rates: the rotation from the last to the current attitude, in the Orbiter body axes
+	VECTOR3 axis;
+	double angle;
+	RMSMath::AxisAngleFromMatrix( mul( att, Transpose( lastAtt ) ), axis, angle );
+	const VECTOR3 w = axis * (angle * DEG / dt);// x = roll axis, y = pitch axis, z = yaw axis
+
+	// smoothing, so the display is readable
+	const double k = min( 1.0, dt / 0.25 );
+	transRateAct = transRateAct + ((vel - transRateAct) * k);
+	rotRateAct = rotRateAct + ((w - rotRateAct) * k);
+
+	lastPos = pos;
+	lastAtt = att;
+	return;
+}
+
+void RMS::GetPDRSStatus( PDRSStatus& st ) const
+{
+	st.selected = RMSSelect.IsSet();
+	st.power = PowerOff.IsSet() ? 0 : ((PowerBackup.IsSet() && !PowerPrimary.IsSet()) ? 2 : 1);
+	for (int i = 0; i < 6; i++)
+	{
+		st.jointangle[i] = joint_angle[i];
+		st.reachlimit[i] = 0;
+		if (joint_angle[i] < RMS_JOINT_REACHLIMITS[0][i]) st.reachlimit[i] = -1;
+		else if (joint_angle[i] > RMS_JOINT_REACHLIMITS[1][i]) st.reachlimit[i] = 1;
+	}
+	st.jointangle[SHOULDER_YAW] = -st.jointangle[SHOULDER_YAW];// HACK the sign of the shoulder yaw joint is inverted (see CalcVectors)
+
+	VECTOR3 pos;
+	MATRIX3 att;
+	GetEEState( pos, att );
+	VECTOR3 angles = GetYZX_PYRAnglesFromMatrix( att );
+	for (int i = 0; i < 3; i++)
+	{
+		st.pos[i] = pos.data[i];
+		double a = angles.data[i] * DEG;
+		if (a < 0.0) a += 360.0;
+		st.att[i] = a;
+	}
+
+	// rates: the Orbiter body axes (tail, port, down) are converted to BACS (forward, starboard, down); rotations are pitch, yaw and roll
+	st.trans_act[0] = -transRateAct.x;
+	st.trans_act[1] = -transRateAct.y;
+	st.trans_act[2] = transRateAct.z;
+	st.trans_cmd[0] = -transRateCmd.x;
+	st.trans_cmd[1] = -transRateCmd.y;
+	st.trans_cmd[2] = transRateCmd.z;
+	st.rot_act[PITCH] = rotRateAct.y;
+	st.rot_act[YAW] = rotRateAct.z;
+	st.rot_act[ROLL] = rotRateAct.x;
+	st.rot_cmd[PITCH] = rotRateCmd.y;
+	st.rot_cmd[YAW] = rotRateCmd.z;
+	st.rot_cmd[ROLL] = rotRateCmd.x;
+
+	st.ee_rigid = bEERigidized;
+	st.ee_close = bEEClosed;
+	st.ee_capture = bEECapture;
+	st.ee_derigid = bEEDerigidized;
+	st.ee_open = bEEOpened;
+	st.ee_extend = bEEExtended;
+	return;
+}
+
+bool RMS::GetGrappleHint( double& distance, double& angle ) const
+{
+	// the grapple fixture that is in the field of view of the wrist camera (34 degrees), nearest to its axis; distance is along the axis
+	if (!Powered() || (attachedPayload != NULL)) return false;
+	return GetViewedAttachment( 17.0 * RAD, distance, angle );
+}
+
+bool RMS::PDRSOverrideItem( int item, const char* data )
+{
+	if (strlen( data ) != 0) return false;
+
+	switch (item)
+	{
+		case 1:// MODE SW OVRD
+			ovr.mode_ena = !ovr.mode_ena;
+			return true;
+		case 2: ovr.mode = MODE_ORB_UNL; return true;
+		case 3: ovr.mode = MODE_SINGLE; return true;
+		case 4: ovr.mode = MODE_END_EFF; return true;
+		case 5: ovr.mode = MODE_ORB_LD; return true;
+		case 6: ovr.mode = MODE_PL; return true;
+		case 7: ovr.mode = MODE_OPR_CMD; return true;
+		case 8: ovr.mode = MODE_AUTO_1; return true;
+		case 9: ovr.mode = MODE_AUTO_2; return true;
+		case 10: ovr.mode = MODE_AUTO_3; return true;
+		case 11: ovr.mode = MODE_AUTO_4; return true;
+		case 12: ovr.mode = MODE_TEST; return true;
+		case 13:// ENTER
+			ovr.enter = true;
+			return true;
+		case 14:// LOADED RATE
+			ovr.loaded_rate = !ovr.loaded_rate;
+			return true;
+		case 15:// STOWED OPS
+			ovr.stowed_ops = !ovr.stowed_ops;
+			return true;
+		case 16:// REASSIGN
+			return true;
+		case 17:// JNT SW OVRD
+			ovr.joint_ena = !ovr.joint_ena;
+			return true;
+		case 18:
+		case 19:
+		case 20:
+		case 21:
+		case 22:
+		case 23:// SH YAW, SH PITCH, EL PITCH, WR PITCH, WR YAW, WR ROLL
+			ovr.joint = item - 18;
+			return true;
+		case 24:
+		case 25:// EE TEMP, CRIT TEMP
+			return true;
+		case 26:// RATE SW OVRD
+			ovr.rate_ena = !ovr.rate_ena;
+			return true;
+		case 27:
+			ovr.rate_coarse = false;
+			return true;
+		case 28:
+			ovr.rate_coarse = true;
+			return true;
+		case 29:// AUTO SW OVRD
+			ovr.auto_ena = !ovr.auto_ena;
+			return true;
+		case 30:
+			ovr.auto_proceed = true;
+			return true;
+		case 31:
+			ovr.auto_proceed = false;
+			return true;
+		case 32:// HC AXIS CHG
+			ovr.hc_ena = !ovr.hc_ena;
+			return true;
+		case 33:
+		case 34:
+			return true;
+		case 35:// SAFING CAN
+			ovr.safing_cancel = true;
+			return true;
+		case 36:
+		case 37:
+		case 38:// ABE OVRD A, B, C
+			return true;
+		default:
+			return false;
+	}
+}
+
+
+bool RMS::ManualAugmentedMode() const
+{
+	return ModeIs(MODE_ORB_UNL) || ModeIs(MODE_END_EFF) || ModeIs(MODE_ORB_LD) || ModeIs(MODE_PL);
+}
+
+bool RMS::GetPayloadPOR( VECTOR3& porOffset, VECTOR3 axes[3] ) const
+{
+	if (attachedPayload == NULL) return false;
+
+	// position of the payload origin in Orbiter local coordinates
+	MATRIX3 Rs, Rp;
+	STS()->GetRotationMatrix( Rs );
+	attachedPayload->GetRotationMatrix( Rp );
+	VECTOR3 payload_gpos, orbiter_gpos;
+	attachedPayload->GetGlobalPos( payload_gpos );
+	STS()->GetGlobalPos( orbiter_gpos );
+	VECTOR3 payload_pos = tmul( Rs, payload_gpos - orbiter_gpos );
+
+	// position of the EE tip in Orbiter local coordinates
+	VECTOR3 ee_pos = STS()->GetOrbiterCoGOffset() + posEE + RMS_MESH_OFFSET;
+
+	porOffset = ConvertVectorToRMSFrame( payload_pos - ee_pos );
+
+	// payload axes (tail, port and down, as in the Orbiter body axes), from payload to Orbiter local coordinates and then to body axes
+	const VECTOR3 payload_axes[3] = {_V( 0.0, 0.0, -1.0 ), _V( -1.0, 0.0, 0.0 ), _V( 0.0, -1.0, 0.0 )};
+	for (int i = 0; i < 3; i++) axes[i] = ConvertVectorToRMSFrame( tmul( Rs, mul( Rp, payload_axes[i] ) ) );
+	return true;
+}
+
+void RMS::DriveSingleJoint( int joint, int dir, double simdt )
+{
+	// SINGLE and DIRECT drive the joint at a fixed rate, selected by the RATE switch
+	const double rate = ((RateCoarse() && !backupDrive) ? RMS_JOINT_COARSE_ROTATION_SPEEDS[joint] : RMS_JOINT_VERN_ROTATION_SPEEDS[joint]) * GetLoadScale();
+	// HACK the sign of the shoulder yaw joint is inverted (see CalcVectors)
+	const double sign = (joint == SHOULDER_YAW) ? -dir : dir;
+	double newangle = joint_angle[joint] + (sign * rate * simdt);
+
+	if (ModeIs(MODE_SINGLE))
+	{
+		// in SINGLE mode the GPC stops the joint at the soft stop and drops to idle, SINGLE must be selected again;
+		// soft stops are disabled for a joint that is in a soft stop when SINGLE is selected
+		if (bSingleSoftStopIdle) return;
+		if (!singleSoftStopDisabled[joint])
+		{
+			if (newangle < RMS_JOINT_SOFTSTOPS[0][joint])
+			{
+				newangle = RMS_JOINT_SOFTSTOPS[0][joint];
+				bSingleSoftStopIdle = true;
+			}
+			else if (newangle > RMS_JOINT_SOFTSTOPS[1][joint])
+			{
+				newangle = RMS_JOINT_SOFTSTOPS[1][joint];
+				bSingleSoftStopIdle = true;
+			}
+		}
+	}
+	// DIRECT bypasses the GPC, so there are no soft stops
+
+	SetJointAngle( (RMS_JOINT)joint, newangle );
+	return;
+}
+
 void RMS::Translate(const VECTOR3 &dPos, VECTOR3& newPos)
 {
-	if (RMSMode[6].IsSet())// END EFF
+	if (ModeIs(MODE_END_EFF))
 	{
 		// Reference Frame:
 		// X: in direction of EE Z: opposite to camera direction Y: completes RH frame
@@ -1001,18 +1840,26 @@ void RMS::Translate(const VECTOR3 &dPos, VECTOR3& newPos)
 							   arm_ik_dir.z, y_axis.z, arm_ik_rot.z);
 		// matrix to convert vector from EE frame to IK frame
 		MATRIX3 IKRotMatrix = mul(EERotMatrix, Transpose(GetRotationMatrix(_V(1, 0, 0), RMS_Z_AXIS_ANGLE)));
-		newPos = arm_ik_pos+mul(IKRotMatrix, dPos);
+		newPos += mul(IKRotMatrix, dPos);
 	}
-	else if (RMSMode[5].IsSet() || RMSMode[7].IsSet())// ORB UNL or ORB LD
+	else if (ModeIs(MODE_ORB_UNL) || ModeIs(MODE_ORB_LD) || ModeIs(MODE_PL))
 	{
-		newPos = arm_ik_pos+RotateVectorX(dPos, RMS_ROLLOUT_ANGLE);
+		VECTOR3 dPosB = dPos;// translation in Orbiter body axes
+		VECTOR3 porOffset;
+		VECTOR3 axes[3];
+		if (ModeIs(MODE_PL) && (pdrs.plid > 0) && GetPayloadPOR( porOffset, axes ))
+		{
+			// PL mode translates along the payload axes
+			dPosB = (axes[0] * dPos.x) + (axes[1] * dPos.y) + (axes[2] * dPos.z);
+		}
+		newPos += RotateVectorX(dPosB, RMS_ROLLOUT_ANGLE);
 	}
 	return;
 }
 
-void RMS::Rotate(const VECTOR3 &dAngles, VECTOR3& newDir, VECTOR3& newRot)
+void RMS::Rotate(const VECTOR3 &dAngles, VECTOR3& newPos, VECTOR3& newDir, VECTOR3& newRot)
 {
-	if (RMSMode[6].IsSet())// END EFF mode
+	if (ModeIs(MODE_END_EFF))
 	{
 		// NOTE: EE mode rotates relative to camera orientation
 		// we do not need to compensate for angle with RMS and shuttle frames
@@ -1040,26 +1887,31 @@ void RMS::Rotate(const VECTOR3 &dAngles, VECTOR3& newDir, VECTOR3& newRot)
 
 		update_angles=true;
 	}
-	else if (RMSMode[5].IsSet() || RMSMode[7].IsSet())// ORB UNL or ORB LD
+	else if (ModeIs(MODE_ORB_UNL) || ModeIs(MODE_ORB_LD) || ModeIs(MODE_PL))
 	{
-		newDir=RotateVectorX(arm_ik_dir, -RMS_ROLLOUT_ANGLE);
-		newRot=RotateVectorX(arm_ik_rot, -RMS_ROLLOUT_ANGLE);
-		RotateVector(newDir, _V(dAngles.data[ROLL], dAngles.data[PITCH], dAngles.data[YAW]), newDir);
-		RotateVector(newRot, _V(dAngles.data[ROLL], dAngles.data[PITCH], dAngles.data[YAW]), newRot);
-		newDir=RotateVectorX(newDir, RMS_ROLLOUT_ANGLE);
-		newRot=RotateVectorX(newRot, RMS_ROLLOUT_ANGLE);
-
+		// ORB UNL rotates about the EE tip; ORB LD and PL rotate about the POR of the payload selected with PL ID
+		// (the Orbiter body axes for ORB LD, the payload axes for PL)
+		VECTOR3 porOffset = _V( 0.0, 0.0, 0.0 );
+		VECTOR3 axes[3];
+		bool payload = false;
+		if ((ModeIs(MODE_ORB_LD) || ModeIs(MODE_PL)) && (pdrs.plid > 0)) payload = GetPayloadPOR( porOffset, axes );
+		if (!payload || !ModeIs(MODE_PL))
+		{
+			axes[0] = _V( 1.0, 0.0, 0.0 );
+			axes[1] = _V( 0.0, 1.0, 0.0 );
+			axes[2] = _V( 0.0, 0.0, 1.0 );
+		}
+		RotateAboutPOR( _V( dAngles.data[ROLL], dAngles.data[PITCH], dAngles.data[YAW] ), axes, payload, porOffset, newPos, newDir, newRot );
 		update_angles=true;
 	}
 	return;
 }
 
-bool RMS::MoveEE(const VECTOR3 &newPos, const VECTOR3 &newDir, const VECTOR3 &newRot, double simdt)
+bool RMS::ComputeJointAngles(const VECTOR3 &newPos, const VECTOR3 &newDir, const VECTOR3 &newRot, double new_joint_angles[6]) const
 {
 	// NOTE: for cross products, |a x b|=|a||b|sin(theta)
 	// all vectors obtained as cross products should be normalized
-
-	double new_joint_angles[6]; // angles in degrees
+	// new_joint_angles in degrees
 
 	VECTOR3 arm_wy_cpos=newPos-newDir*RMS_WY_EE_DIST;
 	double yaw_angle=atan2(arm_wy_cpos.y, arm_wy_cpos.x);
@@ -1120,6 +1972,14 @@ bool RMS::MoveEE(const VECTOR3 &newPos, const VECTOR3 &newDir, const VECTOR3 &ne
 		new_joint_angles[WRIST_ROLL] -= 360.0;
 	}
 
+	return true;
+}
+
+bool RMS::MoveEE(const VECTOR3 &newPos, const VECTOR3 &newDir, const VECTOR3 &newRot, double simdt)
+{
+	double new_joint_angles[6]; // angles in degrees
+	if (!ComputeJointAngles( newPos, newDir, newRot, new_joint_angles )) return false;
+
 	// check values are within bounds
 	// make sure speed of each joint is within limits
 	bool move = true;
@@ -1161,6 +2021,7 @@ void RMS::SetJointAngle(RMS_JOINT joint, double angle)
 
 int RMS::GetSelectedJoint() const
 {
+	if (ovr.joint_ena && (ovr.joint >= 0)) return ovr.joint;// JNT SW OVRD
 	for(int i=0;i<6;i++) {
 		if(JointSelect[i]) return i;
 	}
@@ -1252,7 +2113,7 @@ void RMS::AutoReleaseSequence()
 
 void RMS::CheckSoftwareStop( void )
 {
-	bSoftStop = false;
+	bSoftStop = bSingleSoftStopIdle;
 
 	for (int i = SHOULDER_YAW; i <= WRIST_ROLL; i++)
 	{

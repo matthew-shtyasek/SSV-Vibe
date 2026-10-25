@@ -289,7 +289,7 @@ namespace vc
 		AtlantisPanel::RegisterVC();
 		VECTOR3 ofs = STS()->GetOrbiterCoGOffset() + VC_OFFSET + OFFSET_PANEL;
 
-		oapiVCRegisterArea( AID_C2, PANEL_REDRAW_NEVER, PANEL_MOUSE_LBDOWN | PANEL_MOUSE_LBUP );
+		oapiVCRegisterArea( AID_C2, PANEL_REDRAW_NEVER, PANEL_MOUSE_ONREPLAY | PANEL_MOUSE_LBDOWN | PANEL_MOUSE_LBUP );
 		oapiVCSetAreaClickmode_Quadrilateral( AID_C2,
 			_V( 0.000043, 0.16275, 0.155399 ) + ofs, _V( 0.542334, 0.16275, 0.155399 ) + ofs,
 			_V( 0.0, 0.0, 0.0 ) + ofs, _V( 0.542321, 0.0, 0.0 ) + ofs );

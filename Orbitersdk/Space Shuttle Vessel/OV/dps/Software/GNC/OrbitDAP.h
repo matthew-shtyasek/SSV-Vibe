@@ -59,6 +59,7 @@ struct AttManeuver
 	bool IsValid;
 	MATRIX3 tgtMatrix; // target attitude (rotation matrix) in right-handed frame (LVLH or M50, as appropriate)
 	TYPE Type; // at the moment, ROT is not supported
+	bool track; // MNVR maneuver that points a body vector at a target (UNIV PTG TRK for TGT ID 3, 4 and 5): the target attitude is updated every step
 };
 
 struct DAPConfig
@@ -255,6 +256,9 @@ private:
 	void LoadFutLVLHManeuver(const MATRIX3& tgtMatrixLVLH);
 	void LoadCurINRTLManeuver(const MATRIX3& tgtMatrixM50);
 	void LoadFutINRTLManeuver(const MATRIX3& tgtMatrixM50);
+	void LoadCurTrackManeuver(const MATRIX3& tgtMatrixM50);
+	void LoadFutTrackManeuver(const MATRIX3& tgtMatrixM50);
+	bool GetTrackAttitude( MATRIX3& tgtMatrixM50 ) const;// attitude that points the body vector of UNIV PTG at the target (TGT ID 3, 4 or 5)
 	void StartCurManeuver();
 	void StartManeuver(const MATRIX3& tgtAtt, AttManeuver::TYPE type);
 

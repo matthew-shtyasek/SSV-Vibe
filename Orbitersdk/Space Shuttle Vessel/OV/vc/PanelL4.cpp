@@ -40,7 +40,7 @@ namespace vc
 
 		VECTOR3 ofs = STS()->GetOrbiterCoGOffset() + VC_OFFSET;
 
-		oapiVCRegisterArea( AID_L4, PANEL_REDRAW_NEVER, PANEL_MOUSE_LBDOWN | PANEL_MOUSE_LBUP | PANEL_MOUSE_LBPRESSED );
+		oapiVCRegisterArea( AID_L4, PANEL_REDRAW_NEVER, PANEL_MOUSE_ONREPLAY | PANEL_MOUSE_LBDOWN | PANEL_MOUSE_LBUP | PANEL_MOUSE_LBPRESSED );
 		oapiVCSetAreaClickmode_Quadrilateral( AID_L4,
 			_V( -1.44342, 2.60918, 13.8059 ) + ofs, _V( -1.44342, 1.95123, 13.8059 ) + ofs,
 			_V( -1.15403, 2.60918, 13.8059 ) + ofs, _V( -1.15403, 1.95123, 13.8059 ) + ofs );

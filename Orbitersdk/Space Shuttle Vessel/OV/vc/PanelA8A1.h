@@ -74,7 +74,9 @@ Date         Developer
 
 namespace vc
 {
+	class StdSwitch2;
 	class StdSwitch3;
+	class PushButton;
 	class LockableLever3;
 	class StandardTalkback2;
 	class RotaryDemuxSwitch;
@@ -87,6 +89,13 @@ namespace vc
 
 	class PanelA8A1 : public AtlantisPanel
 	{
+			RotaryDemuxSwitch* pBackupJoint;
+			StdSwitch2* pPayloadRelease;
+			StdSwitch3* pBackupDirectDrive;
+			StdSwitch2* pBrakes;
+			StdSwitch3* pSafing;// SAFE, AUTO, CANCEL (momentary)
+			StdSwitch2* pAutoSeq;
+			PushButton* pEnter;
 			StdSwitch3* pEEMode;
 			StdSwitch3* pEEManContr;
 			LockableLever3* pShoulderBrace;
@@ -100,6 +109,8 @@ namespace vc
 			StandardTalkback2* pEEDerigid;
 			StandardTalkback2* pShoulderBraceTb;
 			StandardTalkback2* pSoftStopTB;
+			StandardTalkback2* pBrakesTB;
+			StandardTalkback2* pSafingTB;
 			StandardTalkback2* pRateMinTB;
 
 			RotaryDemuxSwitch* pLEDParameter;

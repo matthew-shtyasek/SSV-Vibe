@@ -173,12 +173,12 @@ typedef struct {
 
 typedef struct
 {
-	double Elevator;// [-33.0บ, +18.0บ]
-	double Aileron;// [-33.0บ, +18.0บ]
-	double BodyFlap;// [-11.7บ, +22.55บ]
-	double Speedbrake;// [0บ, 87.2บ]
-	double Rudder;// [-27.1บ, +27.1บ]
-	double LandingGear;// [0บ, 98.0บ]
+	double Elevator;// [-33.0ยบ, +18.0ยบ]
+	double Aileron;// [-33.0ยบ, +18.0ยบ]
+	double BodyFlap;// [-11.7ยบ, +22.55ยบ]
+	double Speedbrake;// [0ยบ, 87.2ยบ]
+	double Rudder;// [-27.1ยบ, +27.1ยบ]
+	double LandingGear;// [0ยบ, 98.0ยบ]
 	bool SILTSPOD;
 } AerosurfacePositions;
 
@@ -186,6 +186,7 @@ typedef struct
 class AtlantisSubsystemDirector;
 class MPM_Base;
 class RMS;
+class HandControllers;
 class Payload_MPM;
 class SPDS;
 class ASE_IUS;
@@ -650,7 +651,7 @@ class Atlantis: public VESSEL4
 		// "manual" tilt/pan commands from camera vc
 		DiscOutPort PLBCamPanLeft_Man, PLBCamPanRight_Man, PLBCamTiltUp_Man, PLBCamTiltDown_Man;
 
-		DiscOutPort RMSGrapple, RMSRelease; // used by RMS dialog
+		DiscOutPort RMSGrapple, RMSRelease, RMSRateHold; // used by RMS dialog (RMSRateHold: RATE HOLD pushbutton of the RHC grip)
 		DiscOutPort RMS_RHCInput[3], RMS_THCInput[3], RMSDrivePlus, RMSDriveMinus;
 		DiscInPort RMSCoarseRateIn;
 		DiscOutPort RMSCoarseRateOut;
@@ -689,6 +690,23 @@ class Atlantis: public VESSEL4
 
 		double simTtwang;// SSME ignition simT time for twang
 		double met;
+
+		// hand controllers read with DirectInput (RHC and THC axes, RMS buttons)
+		HandControllers* pHC = NULL;
+		bool hcButtonPrev[5] = {false, false, false, false, false};
+		double HCAxis( int input, double fallback ) const;
+		void UpdateHCButtons( void );
+		bool PerformPanelAction( const std::string& panel, const std::string& component, int action, bool press );
+		void UpdateHCView( void );
+		NOTEHANDLE hcNote = NULL;
+		double hcNoteT = 0.0;
+		bool hcView = false;
+		void ApplyHCRotation( double& pitch, double& roll, double& yaw ) const;
+		void ApplyHCTranslation( short& x, short& y, short& z ) const;
+
+		// recording of VC mouse events (continuous events are recorded every 0.1 s)
+		int lastVCPressedID = -1;
+		double lastVCPressedT = -1.0;
 
 		double SRBpc;
 
@@ -776,6 +794,15 @@ class Atlantis: public VESSEL4
 
 
 		Atlantis( OBJHANDLE hVessel, int fmodel );
+
+		/**
+		 * True if the vehicle is on the ground or still in the launch configuration (1 g).
+		 * The payload bay doors, the radiators and the MPMs (RMS) are designed for zero g and can not be operated.
+		 */
+		bool GravityLoaded( void ) const { return (status < 3/*STATE_ORBITER*/) || GroundContact(); }
+
+		RMS* GetRMS( void ) const { return pRMS; }
+
 		~Atlantis();
 
 		// Overloaded callback functions

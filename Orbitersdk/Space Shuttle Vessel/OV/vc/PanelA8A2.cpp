@@ -99,6 +99,12 @@ namespace vc
 		pRMSSelect->SetLabel( 1, "OFF" );
 		pRMSSelect->SetLabel( 2, "STBD" );
 
+		Add( pRMSPower = new StdSwitch3( _sts, "RMS POWER" ) );
+		pRMSPower->SetLabel( 2, "PRIMARY" );
+		pRMSPower->SetLabel( 1, "OFF" );
+		pRMSPower->SetLabel( 0, "BACKUP" );
+		pRMSPower->SetInitialPosition( 2 );
+
 		Add( pStbdRMSCover = new StandardSwitchCover( _sts, "STARBOARD RMS COVER" ) );
 
 		Add( pStbdRMS = new StdSwitch3( _sts, "STARBOARD RMS" ) );
@@ -148,7 +154,7 @@ namespace vc
 		AtlantisPanel::RegisterVC();
 
 		VECTOR3 ofs = STS()->GetOrbiterCoGOffset() + VC_OFFSET;
-		oapiVCRegisterArea( AID_A8A2, PANEL_REDRAW_NEVER, PANEL_MOUSE_LBDOWN | PANEL_MOUSE_LBPRESSED | PANEL_MOUSE_LBUP );
+		oapiVCRegisterArea( AID_A8A2, PANEL_REDRAW_NEVER, PANEL_MOUSE_ONREPLAY | PANEL_MOUSE_LBDOWN | PANEL_MOUSE_LBPRESSED | PANEL_MOUSE_LBUP );
 		oapiVCSetAreaClickmode_Quadrilateral( AID_A8A2,
 			_V( -0.270182, 2.35742, 12.448 ) + ofs, _V( -0.791144, 2.35742, 12.448 ) + ofs,
 			_V( -0.270182, 2.12317, 12.5214 ) + ofs, _V( -0.791144, 2.12317, 12.5214 ) + ofs );
@@ -168,6 +174,11 @@ namespace vc
 		pRMSSelect->DefineGroup( GRP_S1_A8A2_VC );
 		pRMSSelect->SetInitialAnimState( 0.5f );
 		pRMSSelect->SetOrientation( true );
+
+		pRMSPower->SetMouseRegion( AID_A8A2, 0.4867f, 0.4416f, 0.5253f, 0.5605f );
+		pRMSPower->SetReference( _V( -0.53, 2.2385, 12.4846 ), switch_rot_vert );
+		pRMSPower->DefineGroup( GRP_S4_A8A2_VC );
+		pRMSPower->SetInitialAnimState( 1.0f );
 
 		pStbdRMSCover->SetMouseRegion( AID_A8A2, 0, 0.098150f, 0.448541f, 0.134312f, 0.563395f );
 		pStbdRMSCover->SetMouseRegion( AID_A8A2, 1, 0.098150f, 0.373877f, 0.134312f, 0.448541f );
@@ -219,6 +230,11 @@ namespace vc
 	{
 		DiscreteBundle* pBundle=STS()->BundleManager()->CreateBundle( "RMS", 16 );
 		pRMSSelect->ConnectPort( 0, pBundle, 6 );
+
+		pBundle = STS()->BundleManager()->CreateBundle( "RMS_PANEL", 16 );
+		pRMSPower->ConnectPort( 2, pBundle, 4 );
+		pRMSPower->ConnectPort( 0, pBundle, 5 );
+		pRMSPower->ConnectPort( 1, pBundle, 6 );
 
 		pBundle = STS()->BundleManager()->CreateBundle( "MPM_D&C", 16 );
 		pPortRMS->ConnectPort( 0, pBundle, 0 );

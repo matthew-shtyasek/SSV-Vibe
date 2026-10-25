@@ -152,6 +152,11 @@ public:
 	virtual const string& GetQualifiedIdentifier() const;
 
 	virtual bool HasSwitch(const string& switchID);
+	/**
+	 * Finds a component by its identifier (not case sensitive).
+	 * @return NULL if there is none
+	 */
+	BasicVCComponent<TVessel>* FindComponentByName( const string& ident ) const;
 
 	bool HasOwnVCMesh() const {return bHasOwnVCMesh;};
 
@@ -267,6 +272,16 @@ bool BasicPanel<TVessel>::FindComponent( UINT aid, const VECTOR3& p, BasicVCComp
 		}
 	}
 	return false;
+}
+
+template <class TVessel>
+BasicVCComponent<TVessel>* BasicPanel<TVessel>::FindComponentByName( const string& ident ) const
+{
+	for (const auto& x : components)
+	{
+		if (_stricmp( x->GetIdentifier().c_str(), ident.c_str() ) == 0) return x;
+	}
+	return NULL;
 }
 
 template <class TVessel>

@@ -1,0 +1,5 @@
+# Example: second controller as the THC (translation). Copy to Joystick2.cfg or to <name>.cfg
+INPUT	SUBDEVID	REVERSE	DEADZONE	EXPO	CENTER
+THC_X	Axis Y	false	0.05	0	0
+THC_Y	Axis X	false	0.05	0	0
+THC_Z	Axis RZ	true	0.05	0	0

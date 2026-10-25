@@ -263,7 +263,7 @@ namespace vc
 
 		VECTOR3 ofs = STS()->GetOrbiterCoGOffset() + VC_OFFSET + OFFSET_PANEL;
 
-		oapiVCRegisterArea( AID_R13U, PANEL_REDRAW_NEVER, PANEL_MOUSE_LBDOWN | PANEL_MOUSE_LBUP | PANEL_MOUSE_LBPRESSED );
+		oapiVCRegisterArea( AID_R13U, PANEL_REDRAW_NEVER, PANEL_MOUSE_ONREPLAY | PANEL_MOUSE_LBDOWN | PANEL_MOUSE_LBUP | PANEL_MOUSE_LBPRESSED );
 		oapiVCSetAreaClickmode_Quadrilateral( AID_R13U,
 			_V( 0.23624, 0.15522, 0.0 ) + ofs, _V( 0.23624, 0.15522, -0.3046 ) + ofs,
 			_V( 0.0, 0.0, 0.0 ) + ofs, _V( 0.0, 0.0, -0.3046 ) + ofs );

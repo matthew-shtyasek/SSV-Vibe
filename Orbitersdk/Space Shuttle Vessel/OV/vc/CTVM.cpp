@@ -1,5 +1,6 @@
 #include "CTVM.h"
 #include "../Atlantis.h"
+#include "../RMS.h"
 #include "../VideoControlUnit.h"
 #include "../../SSVSound.h"
 
@@ -9,7 +10,7 @@ namespace vc
 	constexpr int MENUTOP_NAME_Y = static_cast<int>(IMAGE_SIZE * 0.13);// [px]
 	constexpr int MENUTOP_OPTION_Y = static_cast<int>(IMAGE_SIZE * 0.155);// [px]
 
-	constexpr int MENUTOP_X[3] = {static_cast<int>(IMAGE_SIZE * 0.15), static_cast<int>(IMAGE_SIZE * 0.275), static_cast<int>(IMAGE_SIZE * 0.4)};// [px]
+	constexpr int MENUTOP_X[4] = {static_cast<int>(IMAGE_SIZE * 0.12), static_cast<int>(IMAGE_SIZE * 0.23), static_cast<int>(IMAGE_SIZE * 0.34), static_cast<int>(IMAGE_SIZE * 0.45)};// [px]
 
 	constexpr int MENU_SELECT_LINE_OFFSET_X1 = static_cast<int>(IMAGE_SIZE * 0.06);// [px]
 	constexpr int MENU_SELECT_LINE_OFFSET_X2 = static_cast<int>(IMAGE_SIZE * 0.05);// [px]
@@ -29,11 +30,14 @@ namespace vc
 
 	constexpr double MENU_DISPLAY_TIME = 10.0;// time menu stays visible after last input [s]
 
-	char* MENU_HEADINGS[3] = {"L-DATA", "C-DATA", "XHAIR"};
-	constexpr unsigned int MENU_OPTIONS_MAX_IDX[3] = {1, 2, 2};
-	char* MENU_OPTIONS[3][3] = {{"off", "on", ""},
+	// OVRLY: PDRS target overlay for the grapple (on), with the distance and angle to the grapple fixture in view (hint)
+	constexpr int MENU_ITEMS = 4;
+	char* MENU_HEADINGS[MENU_ITEMS] = {"L-DATA", "C-DATA", "XHAIR", "OVRLY"};
+	constexpr unsigned int MENU_OPTIONS_MAX_IDX[MENU_ITEMS] = {1, 2, 2, 2};
+	char* MENU_OPTIONS[MENU_ITEMS][3] = {{"off", "on", ""},
 				{"off", "grn", "wht"},
-				{"off", "grn", "wht"}};
+				{"off", "grn", "wht"},
+				{"off", "on", "hint"}};
 
 	#define CR_LIGHT_GREEN RGB( 0, 255, 0 )
 
@@ -328,6 +332,11 @@ namespace vc
 				sscanf_s( (char*)(line + 6), "%hu", &menuoptions[2] );
 				if (menuoptions[2] > MENU_OPTIONS_MAX_IDX[2]) menuoptions[2] = MENU_OPTIONS_MAX_IDX[2];
 			}
+			else if (!_strnicmp( line, "OVRLY", 5 ))
+			{
+				sscanf_s( (char*)(line + 6), "%hu", &menuoptions[3] );
+				if (menuoptions[3] > MENU_OPTIONS_MAX_IDX[3]) menuoptions[3] = MENU_OPTIONS_MAX_IDX[3];
+			}
 		}
 		return false;
 	}
@@ -338,6 +347,7 @@ namespace vc
 		oapiWriteScenario_int( scn, "L-DATA", menuoptions[0] );
 		oapiWriteScenario_int( scn, "C-DATA", menuoptions[1] );
 		oapiWriteScenario_int( scn, "XHAIR", menuoptions[2] );
+		oapiWriteScenario_int( scn, "OVRLY", menuoptions[3] );
 		return;
 	}
 
@@ -359,6 +369,7 @@ namespace vc
 			menuoptions[0] = 0;
 			menuoptions[1] = 0;
 			menuoptions[2] = 0;
+			menuoptions[3] = 0;
 
 			oapiClearSurface( hSurf );
 
@@ -382,12 +393,12 @@ namespace vc
 				}
 				else if (functionleft)
 				{
-					if (menuselect == 0) menuselect = 2;
+					if (menuselect == 0) menuselect = MENU_ITEMS - 1;
 					else menuselect--;
 				}
 				else if (functionright)
 				{
-					if (menuselect == 2) menuselect = 0;
+					if (menuselect == (MENU_ITEMS - 1)) menuselect = 0;
 					else menuselect++;
 				}
 			}
@@ -433,7 +444,7 @@ namespace vc
 			skp->SetTextAlign( oapi::Sketchpad::TAlign_horizontal::CENTER );
 			skp->SetFont( skpFontMenu );
 			skp->SetPen( skpThinLightGreenPen );
-			for (int i = 0; i < 3; i++)
+			for (int i = 0; i < MENU_ITEMS; i++)
 			{
 				skp->Text( MENUTOP_X[i], MENUTOP_NAME_Y, MENU_HEADINGS[i], strlen( MENU_HEADINGS[i] ) );
 				skp->Text( MENUTOP_X[i], MENUTOP_OPTION_Y, MENU_OPTIONS[i][menuoptions[i]], strlen( MENU_OPTIONS[i][menuoptions[i]] ) );
@@ -479,6 +490,50 @@ namespace vc
 			skp->Line( IMAGE_SIZE - CROSSHAIR_LENGTH, IMAGE_SIZE2, IMAGE_SIZE, IMAGE_SIZE2 );// right
 			skp->Line( IMAGE_SIZE2, IMAGE_SIZE / 8, IMAGE_SIZE2, (IMAGE_SIZE / 8) + CROSSHAIR_LENGTH );// top
 			skp->Line( IMAGE_SIZE2, IMAGE_SIZE - (IMAGE_SIZE / 8) - CROSSHAIR_LENGTH, IMAGE_SIZE2, IMAGE_SIZE );// bottom
+		}
+
+		//// PDRS target overlay: the transparent overlay that is put over the monitor to grapple with the wrist camera (34 deg FOV), and an optional training hint ////
+		const int overlay = menuoptions[3];
+		if ((overlay > 0) && (name == "RMS") && (pan == 0.0) && (tilt == 0.0))
+		{
+			const int cx = IMAGE_SIZE2;
+			const int cy = IMAGE_SIZE2;
+			const double radii[2] = {IMAGE_SIZE * 0.10, IMAGE_SIZE * 0.20};
+			for (int k = 0; k < 2; k++)
+			{
+				const int segments = 48;
+				int px = cx + static_cast<int>(radii[k]);
+				int py = cy;
+				for (int i = 1; i <= segments; i++)
+				{
+					double a = (2.0 * 3.14159265358979 * i) / segments;
+					int x = cx + static_cast<int>(radii[k] * cos( a ));
+					int y = cy + static_cast<int>(radii[k] * sin( a ));
+					skp->Line( px, py, x, y );
+					px = x;
+					py = y;
+				}
+			}
+			// alignment marks of the outer circle and the center cross
+			for (int i = 0; i < 4; i++)
+			{
+				const int dx = (i == 0) - (i == 1);
+				const int dy = (i == 2) - (i == 3);
+				skp->Line( cx + static_cast<int>(dx * radii[1]), cy + static_cast<int>(dy * radii[1]), cx + static_cast<int>(dx * (radii[1] + 14)), cy + static_cast<int>(dy * (radii[1] + 14)) );
+			}
+			skp->Line( cx - 6, cy, cx + 6, cy );
+			skp->Line( cx, cy - 6, cx, cy + 6 );
+
+			if (overlay > 1)
+			{
+				RMS* pRMS = STS()->GetRMS();
+				double d, a;
+				if ((pRMS != NULL) && pRMS->GetGrappleHint( d, a ))
+				{
+					sprintf_s( cbuf, 32, "GF %.2fm %.1fdeg", d, a * DEG );
+					skp->Text( NAMELABEL_X - 150, TOPLINE_Y, cbuf, strlen( cbuf ) );
+				}
+			}
 		}
 
 		oapiReleaseSketchpad( skp );

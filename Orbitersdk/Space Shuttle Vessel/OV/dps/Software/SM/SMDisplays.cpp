@@ -1,6 +1,8 @@
 #include "SMDisplays.h"
 #include "../../IDP.h"
 #include "../../../vc/MDU.h"
+#include "../../../Atlantis.h"
+#include "../../../RMS.h"
 
 
 namespace dps
@@ -27,6 +29,8 @@ namespace dps
 		{
 			case 94:
 				return ItemInput_SM_SPEC94_PASS( item, Data );
+			case 95:
+				return ItemInput_SM_DISP95_PASS( item, Data );
 			case dps::MODE_UNDEFINED:
 				switch (GetMajorMode())
 				{
@@ -49,8 +53,22 @@ namespace dps
 		{
 			RMS_SEL = 2;
 		}
-		else return false;
+		else
+		{
+			// only the port RMS is simulated
+			if (RMS_SEL != 1) return false;
+			RMS* pRMS = STS()->GetRMS();
+			if (pRMS == NULL) return false;
+			return pRMS->PDRSItemInput( item, Data );
+		}
 		return true;
+	}
+
+	bool SMDisplays::ItemInput_SM_DISP95_PASS( int item, const char* Data )
+	{
+		RMS* pRMS = STS()->GetRMS();
+		if (pRMS == NULL) return false;
+		return pRMS->PDRSOverrideItem( item, Data );
 	}
 
 	bool SMDisplays::ItemInput_SM_ANTENNA_PASS( int item, const char* Data )
@@ -219,10 +237,10 @@ namespace dps
 		pMDU->mvprint( 2, 5, "3 PL ID" );
 		pMDU->mvprint( 2, 6, "4 END EFF" );
 
-		pMDU->mvprint( 18, 2, "RMS PWR" );
-		pMDU->mvprint( 15, 3, "34 RMS S/N" );
-		pMDU->mvprint( 20, 4, "I/O ON 5" );
-		pMDU->mvprint( 23, 5, "OFF 6" );
+		pMDU->mvprint( 20, 2, "RMS PWR" );
+		pMDU->mvprint( 20, 3, "I/O ON 5" );
+		pMDU->mvprint( 23, 4, "OFF 6" );
+		pMDU->mvprint( 20, 6, "34 RMS S/N" );
 		
 		pMDU->mvprint( 43, 2, "ENA INH" );
 		pMDU->mvprint( 32, 3, "SOFT STOP   7   8" );
@@ -384,7 +402,69 @@ namespace dps
 			pMDU->mvprint( 15, 23, (msw_oa2_12_0 & 0x0002) ? "1" : "0" );
 		}
 
-		// TODO
+		// PDRS CONTROL data
+		if (RMS_SEL == 1)
+		{
+			RMS* pRMS = STS()->GetRMS();
+			if (pRMS != NULL)
+			{
+				const RMS::PDRSControl& d = pRMS->GetPDRSControl();
+				char cbuf[32];
+
+				RMS::PDRSStatus st;
+				pRMS->GetPDRSStatus( st );
+				pMDU->mvprint( 28, 2, (st.power == 0) ? "OFF" : ((st.power == 1) ? "PRI" : "BKUP") );
+
+				sprintf_s( cbuf, 32, "%d", d.plid );
+				pMDU->mvprint( 10, 5, cbuf );
+				sprintf_s( cbuf, 32, "%d", d.eeid );
+				pMDU->mvprint( 12, 6, cbuf );
+
+				pMDU->mvprint( 28, d.io ? 3 : 4, "*" );
+				pMDU->mvprint( d.softstop_ena ? 45 : 50, 3, "*" );
+				pMDU->mvprint( d.autobrake_ena ? 45 : 50, 4, "*" );
+				pMDU->mvprint( d.posenc_ena ? 45 : 50, 5, "*" );
+				pMDU->mvprint( d.pohs_ena ? 45 : 50, 6, "*" );
+
+				for (int i = 0; i < 4; i++)
+				{
+					sprintf_s( cbuf, 32, "%2d", d.autoseq[i] );
+					pMDU->mvprint( 6 + (i * 8), 9, cbuf );
+				}
+				if (d.startpt > 0)
+				{
+					sprintf_s( cbuf, 32, "%3d", d.startpt );
+					pMDU->mvprint( 48, 8, cbuf );
+				}
+				if (d.lastpt > 0)
+				{
+					sprintf_s( cbuf, 32, "%3d", d.lastpt );
+					pMDU->mvprint( 48, 9, cbuf );
+				}
+
+				for (int i = 0; i < 3; i++)
+				{
+					if (d.endpos_valid[i])
+					{
+						sprintf_s( cbuf, 32, "%+8.1f", d.endpos[i] );
+						pMDU->mvprint( 5, 13 + i, cbuf );
+					}
+					if (d.endatt_valid[i])
+					{
+						sprintf_s( cbuf, 32, "%6.1f", d.endatt[i] );
+						pMDU->mvprint( 19, 13 + i, cbuf );
+					}
+				}
+				sprintf_s( cbuf, 32, "%d", d.plinitid );
+				pMDU->mvprint( 41, 12, cbuf );
+				if (d.cmdck == 1) pMDU->mvprint( 37, 14, "GOOD" );
+				else if (d.cmdck == 2) pMDU->mvprint( 37, 14, "FAIL" );
+				sprintf_s( cbuf, 32, "%d", d.wrrange );
+				pMDU->mvprint( 39, 22, cbuf );
+				pMDU->mvprint( (d.orbldref == 0) ? 30 : ((d.orbldref == 1) ? 38 : 47), 20, "*" );
+			}
+		}
+
 		return;
 	}
 
@@ -449,7 +529,23 @@ namespace dps
 		pMDU->Line( 170, 196, 340, 196 );
 
 		// dynamic parts
-		// TODO
+		RMS* pRMS = STS()->GetRMS();
+		if (pRMS != NULL)
+		{
+			const RMS::PDRSOverride& o = pRMS->GetPDRSOverride();
+			if (o.mode_ena) pMDU->mvprint( 15, 2, "*" );
+			static const int modeitemrow[12] = {9, 10, 11, 12, 13, 4, 6, 7, 8, 5, 0, 14};// row of each RMS_MODE (OPR CMD to TEST), 0 = not in the list
+			if ((o.mode >= 0) && (o.mode < 12) && (modeitemrow[o.mode] != 0)) pMDU->mvprint( 14, modeitemrow[o.mode], "*" );
+			if (o.loaded_rate) pMDU->mvprint( 16, 17, "*" );
+			if (o.stowed_ops) pMDU->mvprint( 16, 18, "*" );
+			if (o.joint_ena) pMDU->mvprint( 33, 3, "*" );
+			if ((o.joint >= 0) && (o.joint < 6)) pMDU->mvprint( 33, 5 + o.joint, "*" );
+			if (o.rate_ena) pMDU->mvprint( 51, 3, "*" );
+			if (o.rate_ena) pMDU->mvprint( 49, o.rate_coarse ? 5 : 4, "*" );
+			if (o.auto_ena) pMDU->mvprint( 51, 7, "*" );
+			if (o.auto_ena) pMDU->mvprint( 49, o.auto_proceed ? 8 : 9, "*" );
+			if (o.hc_ena) pMDU->mvprint( 51, 11, "*" );
+		}
 		return;
 	}
 
@@ -496,28 +592,33 @@ namespace dps
 		pMDU->mvprint( 41, 19, "TMP CKT" );
 		
 		pMDU->mvprint( 0, 21, "CHECK CRT:" );
-		pMDU->mvprint( 16, 21, "SY" );
-		pMDU->mvprint( 21, 21, "SP" );
-		pMDU->mvprint( 26, 21, "EP" );
-		pMDU->mvprint( 31, 21, "WP" );
-		pMDU->mvprint( 36, 21, "WY" );
-		pMDU->mvprint( 41, 21, "WR" );
+		pMDU->mvprint( 22, 21, "SY SP EP WP WY WR" );
 		pMDU->mvprint( 1, 22, "SPA BITE TEST" );
 
 		// static parts (lines)
-		pMDU->Line( 0, 42, 30, 42 );
+		pMDU->Line( 0, 42, 90, 42 );
 		pMDU->Line( 220, 42, 390, 42 );
 		pMDU->Line( 10, 210, 100, 210 );
 		pMDU->Line( 0, 252, 90, 252 );
 		pMDU->Line( 0, 266, 90, 266 );
-		pMDU->Line( 400, 56, 440, 56 );
-		pMDU->Line( 400, 126, 430, 126 );
-		pMDU->Line( 400, 168, 490, 168 );
-		pMDU->Line( 0, 308, 90, 308 );
-		pMDU->Line( 150, 308, 440, 308 );
+		pMDU->Line( 400, 56, 450, 56 );
+		pMDU->Line( 400, 126, 440, 126 );
+		pMDU->Line( 400, 168, 500, 168 );
+		pMDU->Line( 0, 308, 100, 308 );
+		pMDU->Line( 220, 308, 390, 308 );
 
 		// dynamic parts
-		// TODO
+		RMS* pRMS = STS()->GetRMS();
+		if (pRMS != NULL)
+		{
+			RMS::PDRSStatus st;
+			pRMS->GetPDRSStatus( st );
+			for (int i = 0; i < 6; i++)
+			{
+				if (st.reachlimit[i] > 0) pMDU->mvprint( 22 + (i * 3), 18, "+" );
+				else if (st.reachlimit[i] < 0) pMDU->mvprint( 22 + (i * 3), 18, "-" );
+			}
+		}
 		return;
 	}
 
@@ -776,7 +877,55 @@ namespace dps
 		pMDU->Line( 310, 266, 500, 266 );
 
 		// dynamic parts
-		// TODO
+		RMS* pRMS = STS()->GetRMS();
+		if (pRMS != NULL)
+		{
+			RMS::PDRSStatus st;
+			pRMS->GetPDRSStatus( st );
+			const RMS::PDRSControl& d = pRMS->GetPDRSControl();
+			char cbuf[48];
+
+			pMDU->mvprint( 9, 2, st.selected ? ((st.power == 0) ? "OFF" : "PORT") : "OFF" );
+			sprintf_s( cbuf, 48, "%d", d.plid );
+			pMDU->mvprint( 13, 3, cbuf );
+			if (d.lastpt > 0)
+			{
+				sprintf_s( cbuf, 48, "%3d", d.lastpt );
+				pMDU->mvprint( 46, 3, cbuf );
+			}
+
+			static const int cols[3] = {16, 28, 40};
+			for (int i = 0; i < 3; i++)
+			{
+				sprintf_s( cbuf, 48, "%8.1f", st.pos[i] );
+				pMDU->mvprint( cols[i], 9, cbuf );
+				sprintf_s( cbuf, 48, "%8.1f", st.att[i] );
+				pMDU->mvprint( cols[i], 10, cbuf );
+				sprintf_s( cbuf, 48, "%8.2f", st.trans_act[i] );
+				pMDU->mvprint( cols[i], 12, cbuf );
+				sprintf_s( cbuf, 48, "%8.2f", st.trans_cmd[i] );
+				pMDU->mvprint( cols[i], 13, cbuf );
+				sprintf_s( cbuf, 48, "%8.2f", st.rot_act[i] );
+				pMDU->mvprint( cols[i], 15, cbuf );
+				sprintf_s( cbuf, 48, "%8.2f", st.rot_cmd[i] );
+				pMDU->mvprint( cols[i], 16, cbuf );
+			}
+
+			static const int jcol[6] = {6, 16, 26, 6, 16, 26};
+			static const int jrow[6] = {19, 19, 19, 21, 21, 21};
+			for (int i = 0; i < 6; i++)
+			{
+				sprintf_s( cbuf, 48, "%8.1f", st.jointangle[i] );
+				pMDU->mvprint( jcol[i], jrow[i], cbuf );
+			}
+
+			if (st.ee_rigid) pMDU->mvprint( 31, 20, "*" );
+			if (st.ee_close) pMDU->mvprint( 37, 20, "*" );
+			if (st.ee_capture) pMDU->mvprint( 43, 20, "*" );
+			if (st.ee_derigid) pMDU->mvprint( 31, 22, "*" );
+			if (st.ee_open) pMDU->mvprint( 38, 22, "*" );
+			if (st.ee_extend) pMDU->mvprint( 44, 22, "*" );
+		}
 		return;
 	}
 

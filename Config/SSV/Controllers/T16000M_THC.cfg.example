@@ -1,0 +1,17 @@
+# Thrustmaster T16000M (stick alone) as the THC (translation). Copy to "Joystick<N>.cfg" (two identical sticks are told apart by the number).
+# Stick forward = translate forward, stick back = back, stick left/right = left/right, twist clockwise = up, counter-clockwise = down.
+# The throttle wheel (Slider 0) does not return to the center, so the twist is used for up/down. Change the lines if you prefer.
+# If a direction is wrong, change true to false (or false to true) in the REVERSE column of that line.
+# The THC of the orbiter is on or off (out of detent): beyond 25% of the deflection the thrust is full.
+INPUT	SUBDEVID	REVERSE	DEADZONE	EXPO	CENTER
+THC_X	Axis Y	false	0.15	0	0
+THC_Y	Axis X	false	0.15	0	0
+THC_Z	Axis RZ	false	0.2	0	0
+RMS_CONTROL_TOGGLE	Button 0	false
+# Panel switches of the RMS on the buttons (BRAKES, SAFING, AUTO SEQ, ENTER of panel A8U)
+# SAFING: Button 3 = SAFE; Button 6 = CANCEL (momentary; pressing it with the switch in SAFE moves it to AUTO first)
+PANEL A8A1/BRAKES:TOGGLE	Button 2
+PANEL A8A1/SAFING:UP	Button 3
+PANEL A8A1/SAFING:HOLD_DOWN	Button 6
+PANEL A8A1/AUTO SEQ:TOGGLE	Button 4
+PANEL A8A1/ENTER:PRESS	Button 5

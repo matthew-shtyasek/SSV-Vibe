@@ -84,6 +84,7 @@ namespace vc {
 		void DefineVCAnimations (UINT vcidx);
 		void DefineVC();
 		bool HasPanel(const string& panelname) const;
+		BasicPanel<TVessel>* GetPanel(const string& panelname) const;
 		bool ParsePanelBlock(const string& panelname, FILEHANDLE scn);
 		void Realize();
 		bool OnVCMouseEvent (int id, int _event, VECTOR3 &p);
@@ -137,6 +138,16 @@ namespace vc {
 	{
 		for (const auto& x : panels) x->DefineVC();
 		return;
+	}
+
+	template <class TVessel>
+	BasicPanel<TVessel>* PanelGroup<TVessel>::GetPanel( const string& panelname ) const
+	{
+		for (const auto& x : panels)
+		{
+			if (_stricmp( x->GetIdentifier().c_str(), panelname.c_str() ) == 0) return x;
+		}
+		return NULL;
 	}
 
 	template <class TVessel>

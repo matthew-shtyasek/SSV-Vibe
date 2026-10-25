@@ -1,0 +1,11 @@
+# Example: FPV radio in USB joystick mode (for example BetaFPV LiteRadio 3). Copy to "<name of the radio>.cfg" (see DetectedDevices.txt)
+# The right stick is the RHC pitch and roll, the rudder is the RHC yaw. The channels are assumed to be in the order
+# aileron, elevator, throttle, rudder, AUX1, AUX2 (axes X, Y, Z, RX, RY, RZ): adjust it to your radio.
+# AUX1 (3-position switch) is the RMS trigger: up = capture, down = release. AUX2 (2-position switch) is RATE HOLD.
+INPUT	SUBDEVID	REVERSE	DEADZONE	EXPO	CENTER
+RHC_ROLL	Axis X	false	0.05	0.3	0
+RHC_PITCH	Axis Y	true	0.05	0.3	0
+RHC_YAW	Axis RX	false	0.05	0.3	0
+RMS_CAPTURE	Axis RY	false			
+RMS_RELEASE	Axis RY	true			
+RMS_RATE_HOLD	Axis RZ	false			

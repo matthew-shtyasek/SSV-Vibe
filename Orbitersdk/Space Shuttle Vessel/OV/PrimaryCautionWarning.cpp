@@ -921,6 +921,7 @@ void PrimaryCautionWarning::OnPreStep( double simt, double simdt, double mjd )
 
 			bool OLI = NCountOverflowMemory[ParamCount] && !InhibitMemory[ParamCount];
 			bool NI_OLI = NCountOverflowMemory[ParamCount];
+			if (OLI && !PrimaryCWTriggerMemory[ParamCount]) oapiWriteLogV( "(SSV_OV) [INFO] C&W: parameter %d tripped, MET %.1f%s", (int)ParamCount, STS()->GetMET(), STS()->Playback() ? " (playback)" : "" );
 			Pri_CW_Trigger = Pri_CW_Trigger || (OLI && !PrimaryCWTriggerMemory[ParamCount]);
 
 			bool O1 = !PRI_CW[0].get() && cwmemoryRead;

@@ -1,0 +1,21 @@
+# RMS auto sequences (AUTO 1-4 modes)
+#
+# Up to 20 sequences with up to 200 points each. The sequences assigned to the AUTO 1 to AUTO 4 positions of the MODE switch are
+# selected in the PDRS CONTROL display (SPEC 94), items 13 to 16 (default: sequence 1 to 4). Item 17 selects the point at which the
+# sequence starts (default: point 1, the arm has to be there).
+#
+# Format:
+#   SEQ n                                  starts sequence n (1 to 20)
+#   PT X Y Z P Y R [PAUSE]                 adds a point: position in the Orbiter body axes (inches) and attitude (degrees),
+#                                          as shown by the RMS display (PARAMETER switch in POSITION X/Y/Z and ATTITUDE P/Y/R)
+#                                          PAUSE: the arm comes to rest at the point, PROCEED has to be selected again to continue
+#
+# Fly the arm to the wanted points with the manual modes, press Ctrl+W at each point and copy the "RMS point: PT ..." lines
+# from Orbiter.log to this file. The arm moves in a straight line between the points, at the vernier or coarse rate selected with
+# the RATE switch.
+#
+# Example (disabled): two points, the arm stops at the second one
+#
+# SEQ 1
+# PT -1261.0 -146.0 -551.0 0.0 0.0 0.0
+# PT -1100.0 -146.0 -551.0 0.0 0.0 0.0 PAUSE

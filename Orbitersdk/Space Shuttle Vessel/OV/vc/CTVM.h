@@ -37,7 +37,7 @@ namespace vc
 		private:
 			bool power;
 			unsigned short id;
-			unsigned short menuoptions[3];
+			unsigned short menuoptions[4];
 			unsigned short menuselect;
 			bool powerswitch;
 			bool menu;

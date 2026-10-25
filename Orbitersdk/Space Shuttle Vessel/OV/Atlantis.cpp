@@ -261,6 +261,9 @@ Date         Developer
 #include "AMC3.h"
 #include "ActiveLatchGroup.h"
 #include "RMS.h"
+#include "HandControllers.h"
+#include "ControllerMath.h"
+#include "vc/BasicSwitch.h"
 #include "Payload_MPM.h"
 #include "ASE_IUS.h"
 #include "CISS.h"
@@ -884,6 +887,9 @@ pActiveLatches( 5, NULL ), pXRSound(NULL)
 // --------------------------------------------------------------
 Atlantis::~Atlantis()
 {
+	if (hcNote) oapiDelAnnotation( hcNote );
+	delete pHC;
+
 	delete psubsystems;
 
 	delete pgForward;
@@ -1774,30 +1780,40 @@ void Atlantis::clbkPostStep( double simt, double simdt, double mjd )
 
 bool Atlantis::clbkPlaybackEvent( double simt, double event_t, const char* event_type, const char* event )
 {
-	/*if (!_stricmp(event_type, "STATUS")) {
-		if (!_stricmp(event, "SRB_IGNITION")) {
-			status = 1;
-			return true;
+	try
+	{
+		if (!_stricmp( event_type, "VCM" ))
+		{
+			int id, ev;
+			double x, y, z;
+			if (sscanf_s( event, "%d %d %lf %lf %lf", &id, &ev, &x, &y, &z ) == 5)
+			{
+				VECTOR3 p = _V( x, y, z );
+				clbkVCMouseEvent( id, ev, p );
+				return true;
+			}
 		}
-	}/* else if (!_stricmp (event_type, "CARGODOOR")) {
-	  plop->SetDoorAction (!_stricmp (event, "CLOSE") ? AnimState::CLOSING : AnimState::OPENING);
-	  return true;
-	  } else if (!_stricmp(event_type, "GEAR")) {
-		if (!_stricmp(event, "UP")) DeployLandingGear();
-		else RetractLandingGear();
-		return true;
+		else if (!_stricmp( event_type, "KEY" ))
+		{
+			unsigned int key;
+			int down, mods;
+			if (sscanf_s( event, "%u %d %d", &key, &down, &mods ) == 3)
+			{
+				char kstate[256] = {0};
+				if (mods & 1) kstate[OAPI_KEY_LCONTROL] = (char)0x80;
+				if (mods & 2) kstate[OAPI_KEY_LSHIFT] = (char)0x80;
+				if (mods & 4) kstate[OAPI_KEY_LALT] = (char)0x80;
+				clbkConsumeBufferedKey( key, down != 0, kstate );
+				return true;
+			}
+		}
 	}
-	  else if (!_stricmp(event_type, "SPEEDBRAKE")) {
-		  OperateSpeedbrake(!_stricmp(event, "CLOSE") ? AnimState::CLOSING : AnimState::OPENING);
-		  return true;
-	  } else if (!_stricmp (event_type, "KUBAND")) {
-		plop->SetKuAntennaAction (!_stricmp (event, "CLOSE") ? AnimState::CLOSING : AnimState::OPENING);
-		return true;
-		} else if (psubsystems->PlaybackEvent(simt, event_t, event_type, event)) {
-		  return true;
-	  }*/
+	catch (...)
+	{
+		oapiWriteLog( "(SSV_OV) [ERROR] Exception in clbkPlaybackEvent" );
+	}
 
-	  return false;
+	return false;
 }
 
 void Atlantis::clbkVisualCreated( VISHANDLE vis, int refcount )
@@ -1972,6 +1988,14 @@ int Atlantis::clbkConsumeBufferedKey( DWORD key, bool down, char* kstate )
 {
 	try
 	{
+		// record the keys that operate the vehicle (RMS controls), so they are shown in playback
+		if (Recording() && !Playback() && (!down || KEYMOD_CONTROL( kstate )) && ((key == OAPI_KEY_RETURN) || (key == OAPI_KEY_BACK) || (key == OAPI_KEY_O) || (key == OAPI_KEY_Y) || (key == OAPI_KEY_A) || (key == OAPI_KEY_G)))
+		{
+			char cbuf[64];
+			sprintf_s( cbuf, 64, "%u %d %d", (unsigned int)key, down ? 1 : 0, 1 | (KEYMOD_SHIFT( kstate ) ? 2 : 0) | (KEYMOD_ALT( kstate ) ? 4 : 0) );
+			RecordEvent( "KEY", cbuf );
+		}
+
 		if (!down) {
 			if (KEYMOD_ALT(kstate)) {
 				if (VCMode >= VC_PLBCAMA && VCMode <= VC_RMSCAM) {
@@ -2030,6 +2054,9 @@ int Atlantis::clbkConsumeBufferedKey( DWORD key, bool down, char* kstate )
 					RMSGrapple.ResetLine();
 					RMSRelease.ResetLine();
 					return 1;
+				case OAPI_KEY_Y:
+					RMSRateHold.ResetLine();
+					return 1;
 				case OAPI_KEY_K:
 				case OAPI_KEY_L:
 					RPTA_Input = 0.0;
@@ -2071,6 +2098,19 @@ int Atlantis::clbkConsumeBufferedKey( DWORD key, bool down, char* kstate )
 			case OAPI_KEY_BACK:
 				RMSGrapple.ResetLine();
 				RMSRelease.SetLine();
+				return 1;
+			case OAPI_KEY_Y:// RATE HOLD pushbutton of the RMS RHC
+				RMSRateHold.SetLine();
+				return 1;
+			case OAPI_KEY_J:// live view of the game controllers; with Shift: take the current position of the axes as center
+				if (KEYMOD_SHIFT( kstate ))
+				{
+					if (pHC) pHC->CalibrateCenters();
+				}
+				else hcView = !hcView;
+				return 1;
+			case OAPI_KEY_W:// write the current RMS POR position and attitude to the log (auto sequence point)
+				if (pRMS) pRMS->LogPOR();
 				return 1;
 #if _DEBUG
 			case OAPI_KEY_2:
@@ -2593,6 +2633,28 @@ bool Atlantis::clbkVCMouseEvent( int id, int event, VECTOR3& p )
 {
 	try
 	{
+		// record the panel inputs, so the switch and button operations are shown in playback
+		if (Recording() && !Playback())
+		{
+			bool record = true;
+			if (event & PANEL_MOUSE_LBPRESSED)
+			{
+				double t = oapiGetSimTime();
+				if ((id == lastVCPressedID) && ((t - lastVCPressedT) < 0.1)) record = false;
+				else
+				{
+					lastVCPressedID = id;
+					lastVCPressedT = t;
+				}
+			}
+			if (record)
+			{
+				char cbuf[128];
+				sprintf_s( cbuf, 128, "%d %d %.6f %.6f %.6f", id, event, p.x, p.y, p.z );
+				RecordEvent( "VCM", cbuf );
+			}
+		}
+
 		if (pgForward->OnVCMouseEvent( id, event, p ))
 			return true;
 		if (pgLeft->OnVCMouseEvent( id, event, p ))
@@ -3923,8 +3985,193 @@ double Atlantis::GetPropellantLevel(PROPELLANT_HANDLE ph) const
 	return 100.0*(GetPropellantMass(ph) / GetPropellantMaxMass(ph));
 }
 
+double Atlantis::HCAxis( int input, double fallback ) const
+{
+	if (pHC && pHC->HasInput( input )) return pHC->GetAxis( input );
+	return fallback;
+}
+
+void Atlantis::ApplyHCRotation( double& pitch, double& roll, double& yaw ) const
+{
+	pitch = HCAxis( HandControllers::RHC_PITCH, pitch );
+	roll = HCAxis( HandControllers::RHC_ROLL, roll );
+	yaw = HCAxis( HandControllers::RHC_YAW, yaw );
+	return;
+}
+
+void Atlantis::ApplyHCTranslation( short& x, short& y, short& z ) const
+{
+	// the THC of the orbiter is out of detent or not (the axis values are not used), the limit is 25% of the full deflection
+	if (pHC && pHC->HasInput( HandControllers::THC_X ))
+	{
+		double v = pHC->GetAxis( HandControllers::THC_X );
+		x = (v > 0.25) ? 1 : ((v < -0.25) ? -1 : 0);
+	}
+	if (pHC && pHC->HasInput( HandControllers::THC_Y ))
+	{
+		double v = pHC->GetAxis( HandControllers::THC_Y );
+		y = (v > 0.25) ? 1 : ((v < -0.25) ? -1 : 0);
+	}
+	if (pHC && pHC->HasInput( HandControllers::THC_Z ))
+	{
+		double v = pHC->GetAxis( HandControllers::THC_Z );
+		z = (v > 0.25) ? 1 : ((v < -0.25) ? -1 : 0);
+	}
+	return;
+}
+
+void Atlantis::UpdateHCButtons( void )
+{
+	// the buttons act like the RMS keys (Ctrl+Enter, Ctrl+Backspace, Ctrl+Y, Ctrl+O, Ctrl+A); a state change is needed to act, so the keys still work
+	const bool capture = pHC->GetButton( HandControllers::RMS_CAPTURE );
+	const bool release = pHC->GetButton( HandControllers::RMS_RELEASE );
+	const bool ratehold = pHC->GetButton( HandControllers::RMS_RATE_HOLD );
+	const bool ratetoggle = pHC->GetButton( HandControllers::RMS_RATE_TOGGLE );
+	const bool controltoggle = pHC->GetButton( HandControllers::RMS_CONTROL_TOGGLE );
+
+	if (capture != hcButtonPrev[0])
+	{
+		if (capture)
+		{
+			RMSGrapple.SetLine();
+			RMSRelease.ResetLine();
+		}
+		else RMSGrapple.ResetLine();
+		hcButtonPrev[0] = capture;
+	}
+	if (release != hcButtonPrev[1])
+	{
+		if (release)
+		{
+			RMSGrapple.ResetLine();
+			RMSRelease.SetLine();
+		}
+		else RMSRelease.ResetLine();
+		hcButtonPrev[1] = release;
+	}
+	if (ratehold != hcButtonPrev[2])
+	{
+		if (ratehold) RMSRateHold.SetLine();
+		else RMSRateHold.ResetLine();
+		hcButtonPrev[2] = ratehold;
+	}
+	if (ratetoggle != hcButtonPrev[3])
+	{
+		if (ratetoggle)
+		{
+			if (RMSCoarseRateIn) RMSCoarseRateOut.ResetLine();
+			else RMSCoarseRateOut.SetLine();
+		}
+		hcButtonPrev[3] = ratetoggle;
+	}
+	if (controltoggle != hcButtonPrev[4])
+	{
+		if (controltoggle && pRMS)
+		{
+			ControlRMS = !ControlRMS;
+			if (ControlRMS) DisplayCameraLabel( TEXT_RMSCONTROL );
+			else DisplayCameraLabel( TEXT_RCSCONTROL );
+		}
+		hcButtonPrev[4] = controltoggle;
+	}
+	return;
+}
+
+bool Atlantis::PerformPanelAction( const std::string& panel, const std::string& component, int action, bool press )
+{
+	vc::PanelGroup<Atlantis>* groups[9] = {pgForward, pgLeft, pgCenter, pgRight, pgOverhead, pgOverheadAft, pgAftPort, pgAft, pgAftStbd};
+	vc::BasicPanel<Atlantis>* pnl = NULL;
+	for (int i = 0; (i < 9) && (pnl == NULL); i++) pnl = groups[i]->GetPanel( panel );
+	if (pnl == NULL) return false;
+	vc::BasicVCComponent<Atlantis>* comp = pnl->FindComponentByName( component );
+	if (comp == NULL) return false;
+
+	UINT aid;
+	float xmin, ymin, xmax, ymax;
+	if (!comp->GetMouseRegion( aid, xmin, ymin, xmax, ymax )) return false;
+
+	// the point of the mouse region to click: the upper (or left) part, the lower (or right) part or the center
+	vc::BasicSwitch* sw = dynamic_cast<vc::BasicSwitch*>(comp);
+	const bool horizontal = (sw != NULL) && sw->IsHorizontal();
+	auto point = [&]( double fraction ) -> VECTOR3
+	{
+		if (horizontal) return _V( xmin + ((xmax - xmin) * fraction), (ymin + ymax) * 0.5, 0.0 );
+		return _V( (xmin + xmax) * 0.5, ymin + ((ymax - ymin) * fraction), 0.0 );
+	};
+
+	if ((sw != NULL) && ((action == HandControllers::PA_UP) || (action == HandControllers::PA_DOWN) || (action == HandControllers::PA_MID) || (action == HandControllers::PA_TOGGLE)))
+	{
+		if (!press) return true;
+		const int n = sw->GetNumPositions();
+		int target;
+		if (action == HandControllers::PA_UP) target = n - 1;
+		else if (action == HandControllers::PA_DOWN) target = 0;
+		else if (action == HandControllers::PA_MID) target = (n - 1) / 2;
+		else target = (sw->GetPosition() == (n - 1)) ? 0 : (n - 1);
+
+		// one click moves the switch one position
+		for (int i = 0; (i < n) && (sw->GetPosition() != target); i++)
+		{
+			const bool up = (sw->GetPosition() < target);
+			VECTOR3 p = point( up ? 0.2 : 0.8 );
+			clbkVCMouseEvent( aid, PANEL_MOUSE_LBDOWN, p );
+			if (sw->IsFullySpringLoaded()) clbkVCMouseEvent( aid, PANEL_MOUSE_LBUP, p );
+		}
+		return true;
+	}
+
+	// spring loaded switches and pushbuttons: pressed and released with the button
+	VECTOR3 p = point( (action == HandControllers::PA_HOLD_UP) ? 0.2 : ((action == HandControllers::PA_HOLD_DOWN) ? 0.8 : 0.5) );
+	clbkVCMouseEvent( aid, press ? PANEL_MOUSE_LBDOWN : PANEL_MOUSE_LBUP, p );
+	return true;
+}
+
+void Atlantis::UpdateHCView( void )
+{
+	if (!hcView || (pHC == NULL))
+	{
+		if (hcNote)
+		{
+			oapiDelAnnotation( hcNote );
+			hcNote = NULL;
+		}
+		return;
+	}
+	const double t = oapiGetSysTime();
+	if (hcNote == NULL)
+	{
+		hcNote = oapiCreateAnnotation( false, 0.7, _V( 0.2, 1.0, 0.2 ) );
+		oapiAnnotationSetPos( hcNote, 0.02, 0.1, 0.62, 0.9 );
+		hcNoteT = 0.0;
+	}
+	if ((t - hcNoteT) > 0.15)
+	{
+		hcNoteT = t;
+		std::string text = pHC->GetStatusText();
+		oapiAnnotationSetText( hcNote, const_cast<char*>(text.c_str()) );
+	}
+	return;
+}
+
 void Atlantis::UpdateControllers( double dt )
 {
+	// game controllers (RHC and THC axes, RMS buttons)
+	if (oapiGetFocusInterface() == this)
+	{
+		if (pHC == NULL)
+		{
+			pHC = new HandControllers();
+			pHC->Init();
+		}
+		pHC->Poll();
+		UpdateHCButtons();
+
+		// buttons connected to panel components
+		HandControllers::PanelEvent pe;
+		while (pHC->PopPanelEvent( pe )) PerformPanelAction( pe.panel, pe.component, pe.action, pe.pressed );
+	}
+	UpdateHCView();
+
 	// RHC and THC input (RMS included)
 	if (ControlRMS)
 	{
@@ -3946,9 +4193,10 @@ void Atlantis::UpdateControllers( double dt )
 			RightRHCTrim[i] = 0;
 		}
 
-		RMS_RHCInput[PITCH].SetLine( 5.0f * static_cast<float>(GetManualControlLevel( THGROUP_ATT_PITCHUP ) - GetManualControlLevel( THGROUP_ATT_PITCHDOWN )) );
-		RMS_RHCInput[YAW].SetLine( 5.0f * static_cast<float>(GetManualControlLevel( THGROUP_ATT_YAWRIGHT ) - GetManualControlLevel( THGROUP_ATT_YAWLEFT )) );
-		RMS_RHCInput[ROLL].SetLine( 5.0f * static_cast<float>(GetManualControlLevel( THGROUP_ATT_BANKRIGHT ) - GetManualControlLevel( THGROUP_ATT_BANKLEFT )) );
+		const double rhcpitch = HCAxis( HandControllers::RHC_PITCH, GetManualControlLevel( THGROUP_ATT_PITCHUP ) - GetManualControlLevel( THGROUP_ATT_PITCHDOWN ) );
+		RMS_RHCInput[PITCH].SetLine( 5.0f * static_cast<float>(rhcpitch) );
+		RMS_RHCInput[YAW].SetLine( 5.0f * static_cast<float>(HCAxis( HandControllers::RHC_YAW, GetManualControlLevel( THGROUP_ATT_YAWRIGHT ) - GetManualControlLevel( THGROUP_ATT_YAWLEFT ) )) );
+		RMS_RHCInput[ROLL].SetLine( 5.0f * static_cast<float>(HCAxis( HandControllers::RHC_ROLL, GetManualControlLevel( THGROUP_ATT_BANKRIGHT ) - GetManualControlLevel( THGROUP_ATT_BANKLEFT ) )) );
 		if (GetAttitudeMode() == RCS_ROT) { // use arrow, Ins/Del keys for translation input
 			RMS_THCInput[0].SetLine( 5.0f * static_cast<float>(THC_AltInput.x) );
 			RMS_THCInput[1].SetLine( 5.0f * static_cast<float>(THC_AltInput.y) );
@@ -3960,15 +4208,23 @@ void Atlantis::UpdateControllers( double dt )
 			RMS_THCInput[2].SetLine( 5.0f * static_cast<float>(GetManualControlLevel( THGROUP_ATT_UP ) - GetManualControlLevel( THGROUP_ATT_DOWN )) );
 		}
 
+		// THC axes of the game controllers
+		if (pHC)
+		{
+			if (pHC->HasInput( HandControllers::THC_X )) RMS_THCInput[0].SetLine( 5.0f * static_cast<float>(pHC->GetAxis( HandControllers::THC_X )) );
+			if (pHC->HasInput( HandControllers::THC_Y )) RMS_THCInput[1].SetLine( 5.0f * static_cast<float>(pHC->GetAxis( HandControllers::THC_Y )) );
+			if (pHC->HasInput( HandControllers::THC_Z )) RMS_THCInput[2].SetLine( 5.0f * static_cast<float>(pHC->GetAxis( HandControllers::THC_Z )) );
+		}
+
 		// use RHC pitch commands to drive single joint input
 		// in theory, these discrete lines should only be set if RMS is in SINGLE or DIRECT mode
 		// in practice, RMS code only looks at these discrete lines if in appropriate mode
-		if ((GetManualControlLevel( THGROUP_ATT_PITCHUP ) - GetManualControlLevel( THGROUP_ATT_PITCHDOWN )) > 0.5) {
+		if (rhcpitch > 0.5) {
 			RMSDrivePlus.SetLine();
 			RMSDriveMinus.ResetLine();
 			lastRMSSJCommand = 1;
 		}
-		else if ((GetManualControlLevel( THGROUP_ATT_PITCHUP ) - GetManualControlLevel( THGROUP_ATT_PITCHDOWN )) < -0.5) {
+		else if (rhcpitch < -0.5) {
 			RMSDrivePlus.ResetLine();
 			RMSDriveMinus.SetLine();
 			lastRMSSJCommand = -1;
@@ -4007,6 +4263,7 @@ void Atlantis::UpdateControllers( double dt )
 			pitch = GetManualControlLevel( THGROUP_ATT_PITCHUP, attrot, MANCTRL_ANYDEVICE ) - GetManualControlLevel( THGROUP_ATT_PITCHDOWN, attrot, MANCTRL_ANYDEVICE );
 			roll = GetManualControlLevel( THGROUP_ATT_BANKRIGHT, attrot, MANCTRL_ANYDEVICE ) - GetManualControlLevel( THGROUP_ATT_BANKLEFT, attrot, MANCTRL_ANYDEVICE );
 			yaw = GetManualControlLevel( THGROUP_ATT_YAWRIGHT, attrot, MANCTRL_ANYDEVICE ) - GetManualControlLevel( THGROUP_ATT_YAWLEFT, attrot, MANCTRL_ANYDEVICE );
+			ApplyHCRotation( pitch, roll, yaw );
 
 			if (GetAttitudeMode() == RCS_ROT)
 			{
@@ -4038,6 +4295,8 @@ void Atlantis::UpdateControllers( double dt )
 				else if (GetManualControlLevel( THGROUP_ATT_DOWN, attlin, MANCTRL_ANYDEVICE ) != 0.0) LeftTHC[2] = -1;
 				else LeftTHC[2] = 0;
 			}
+
+			ApplyHCTranslation( LeftTHC[0], LeftTHC[1], LeftTHC[2] );
 
 			if (RHC_TrimUp) LeftRHCTrim[0] = 1;
 			else if (RHC_TrimDown) LeftRHCTrim[0] = -1;
@@ -4099,6 +4358,7 @@ void Atlantis::UpdateControllers( double dt )
 			pitch = GetManualControlLevel( THGROUP_ATT_PITCHUP, attrot, MANCTRL_ANYDEVICE ) - GetManualControlLevel( THGROUP_ATT_PITCHDOWN, attrot, MANCTRL_ANYDEVICE );
 			roll = GetManualControlLevel( THGROUP_ATT_BANKRIGHT, attrot, MANCTRL_ANYDEVICE ) - GetManualControlLevel( THGROUP_ATT_BANKLEFT, attrot, MANCTRL_ANYDEVICE );
 			yaw = GetManualControlLevel( THGROUP_ATT_YAWRIGHT, attrot, MANCTRL_ANYDEVICE ) - GetManualControlLevel( THGROUP_ATT_YAWLEFT, attrot, MANCTRL_ANYDEVICE );
+			ApplyHCRotation( pitch, roll, yaw );
 
 			if (RHC_TrimUp) RightRHCTrim[0] = 1;
 			else if (RHC_TrimDown) RightRHCTrim[0] = -1;
@@ -4156,6 +4416,7 @@ void Atlantis::UpdateControllers( double dt )
 			pitch = GetManualControlLevel( THGROUP_ATT_PITCHUP, attrot, MANCTRL_ANYDEVICE ) - GetManualControlLevel( THGROUP_ATT_PITCHDOWN, attrot, MANCTRL_ANYDEVICE );
 			roll = GetManualControlLevel( THGROUP_ATT_BANKRIGHT, attrot, MANCTRL_ANYDEVICE ) - GetManualControlLevel( THGROUP_ATT_BANKLEFT, attrot, MANCTRL_ANYDEVICE );
 			yaw = GetManualControlLevel( THGROUP_ATT_YAWRIGHT, attrot, MANCTRL_ANYDEVICE ) - GetManualControlLevel( THGROUP_ATT_YAWLEFT, attrot, MANCTRL_ANYDEVICE );
+			ApplyHCRotation( pitch, roll, yaw );
 
 			// connections below are due to physical orientation of aft THC
 			if (GetAttitudeMode() == RCS_ROT)
@@ -4188,6 +4449,11 @@ void Atlantis::UpdateControllers( double dt )
 				else if (GetManualControlLevel( THGROUP_ATT_RIGHT, attlin, MANCTRL_ANYDEVICE ) != 0.0) AftTHC[2] = -1;
 				else AftTHC[2] = 0;
 			}
+
+			// aft THC axes: [0] = X, [1] = Z, [2] = Y, and the aft Y is positive to the left (the keys above), the THC_Y input is positive to the right
+			short aftY = -AftTHC[2];
+			ApplyHCTranslation( AftTHC[0], aftY, AftTHC[1] );
+			AftTHC[2] = -aftY;
 		}
 		else
 		{
@@ -4235,7 +4501,13 @@ void Atlantis::UpdateControllers( double dt )
 	// RPTA input
 	double RPTAtmp = 0.0;
 	if ((VCMode == VC_CDR) || (VCMode == VC_PLT)) RPTAtmp = RPTA_Input;
-	if (RPTAtmp > RPTAs)
+	const bool rptaAnalog = (pHC != NULL) && ((VCMode == VC_CDR) || (VCMode == VC_PLT)) && pHC->HasInput( HandControllers::RPTA );
+	if (rptaAnalog)
+	{
+		// the pedals of the game controller are analog: the pedal position is the command
+		RPTAs = range( -1.0, pHC->GetAxis( HandControllers::RPTA ), 1.0 );
+	}
+	else if (RPTAtmp > RPTAs)
 	{
 		RPTAs += options->RPTARate() * dt;
 		if (RPTAs > RPTAtmp) RPTAs = RPTAtmp;
@@ -4249,14 +4521,16 @@ void Atlantis::UpdateControllers( double dt )
 	// SBTC input
 	LeftSBTCTO = false;
 	RightSBTCTO = false;
+	const bool sbtcAnalog = (pHC != NULL) && pHC->HasInput( HandControllers::SBTC );
+	const double sbtcPos = sbtcAnalog ? ctrlmath::UnipolarFromAxis( pHC->GetAxis( HandControllers::SBTC ) ) : 0.0;// 0 = aft, 1 = forward
 	if (VCMode == VC_CDR)
 	{
-		LeftSBTC = range( 0.0, LeftSBTC + SBTC_Input, 1.0 );
+		LeftSBTC = sbtcAnalog ? sbtcPos : range( 0.0, LeftSBTC + SBTC_Input, 1.0 );
 		LeftSBTCTO = SBTCTO_Input;
 	}
 	else if (VCMode == VC_PLT)
 	{
-		RightSBTC = range( 0.0, RightSBTC + SBTC_Input, 1.0 );
+		RightSBTC = sbtcAnalog ? sbtcPos : range( 0.0, RightSBTC + SBTC_Input, 1.0 );
 		RightSBTCTO = SBTCTO_Input;
 	}
 	SBTC_Input = 0.0;
@@ -4267,11 +4541,15 @@ void Atlantis::UpdateControllers( double dt )
 	SetAnimation( anim_rightsbtcto, RightSBTCTO ? 1.0 : 0.0 );
 
 
-	// brake input
+	// brake input (the toe brakes of the game controllers are analog: the pedal position is the command)
+	const bool brakeLAnalog = (pHC != NULL) && pHC->HasInput( HandControllers::BRAKE_LEFT );
+	const bool brakeRAnalog = (pHC != NULL) && pHC->HasInput( HandControllers::BRAKE_RIGHT );
+	const double brakeL = brakeLAnalog ? ctrlmath::UnipolarFromAxis( pHC->GetAxis( HandControllers::BRAKE_LEFT ) ) : 0.0;
+	const double brakeR = brakeRAnalog ? ctrlmath::UnipolarFromAxis( pHC->GetAxis( HandControllers::BRAKE_RIGHT ) ) : 0.0;
 	if (VCMode == VC_CDR)
 	{
-		BrakeCDR[0] = range( 0.0, BrakeCDR[0] + ((LeftBrake_Input * 2.0) - 1.0) * options->BrakeRate() * dt, 1.0 );
-		BrakeCDR[1] = range( 0.0, BrakeCDR[1] + ((RightBrake_Input * 2.0) - 1.0) * options->BrakeRate() * dt, 1.0 );
+		BrakeCDR[0] = brakeLAnalog ? brakeL : range( 0.0, BrakeCDR[0] + ((LeftBrake_Input * 2.0) - 1.0) * options->BrakeRate() * dt, 1.0 );
+		BrakeCDR[1] = brakeRAnalog ? brakeR : range( 0.0, BrakeCDR[1] + ((RightBrake_Input * 2.0) - 1.0) * options->BrakeRate() * dt, 1.0 );
 		BrakePLT[0] = 0.0;
 		BrakePLT[1] = 0.0;
 	}
@@ -4279,8 +4557,8 @@ void Atlantis::UpdateControllers( double dt )
 	{
 		BrakeCDR[0] = 0.0;
 		BrakeCDR[1] = 0.0;
-		BrakePLT[0] = range( 0.0, BrakePLT[0] + ((LeftBrake_Input * 2.0) - 1.0) * options->BrakeRate() * dt, 1.0 );
-		BrakePLT[1] = range( 0.0, BrakePLT[1] + ((RightBrake_Input * 2.0) - 1.0) * options->BrakeRate() * dt, 1.0 );
+		BrakePLT[0] = brakeLAnalog ? brakeL : range( 0.0, BrakePLT[0] + ((LeftBrake_Input * 2.0) - 1.0) * options->BrakeRate() * dt, 1.0 );
+		BrakePLT[1] = brakeRAnalog ? brakeR : range( 0.0, BrakePLT[1] + ((RightBrake_Input * 2.0) - 1.0) * options->BrakeRate() * dt, 1.0 );
 	}
 	else
 	{
@@ -4840,6 +5118,7 @@ void Atlantis::RealizeSubsystemConnections( void )
 	pBundle = bundleManager->CreateBundle("RMS_EE", 16);
 	RMSGrapple.Connect(pBundle, 0);
 	RMSRelease.Connect(pBundle, 1);
+	RMSRateHold.Connect(pBundle, 12);
 
 	pBundle = bundleManager->CreateBundle("RMS_HC_INPUT", 16);
 	for (int i = 0; i < 3; i++) {

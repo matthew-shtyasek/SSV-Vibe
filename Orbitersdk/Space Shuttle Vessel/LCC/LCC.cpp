@@ -25,6 +25,19 @@ Date         Developer
 #include "../LC39/LC39.h"
 #include "../SLC6/SLC6.h"
 #include "../LCCPadInterface.h"
+#include <fstream>
+
+
+// The launch time of the countdown is written to a file for other add-ons (Shuttle FDO MFD takes the day and time of liftoff from it)
+static void WriteLaunchTimeFile( double launch_mjd )
+{
+	if (launch_mjd <= 0.0) return;
+	std::ofstream file( "./Config/SSV/LaunchTime.txt" );
+	if (!file.is_open()) return;
+	char cbuf[64];
+	sprintf_s( cbuf, 64, "LAUNCH_MJD %.10f", launch_mjd );
+	file << cbuf << std::endl;
+}
 
 
 #define ORBITER_MODULE
@@ -149,6 +162,7 @@ void LCC::clbkPreStep(double simt, double simdt, double mjd)
 
 			CountdownTime = (mjd - launch_mjd) * 86400.0;
 			lastCT = CountdownTime;
+			WriteLaunchTimeFile( launch_mjd );
 
 			if (CountdownTime >= 0.0)
 			{
@@ -238,6 +252,7 @@ void LCC::clbkPreStep(double simt, double simdt, double mjd)
 					resuming = false;
 					resumetimer = 0.0;
 					launch_mjd = mjd + (-CountdownTime / 86400.0);// re-synch so count resumes exactly at the hold time, to allow holding here again in case of failure
+					WriteLaunchTimeFile( launch_mjd );
 					pPad->SetResumeCountCommandFlag( true );
 					pPad->SetGMTLO( launch_mjd );
 					pPad->SetGMTLOSetCommandFlag( true );
@@ -253,6 +268,7 @@ void LCC::clbkPreStep(double simt, double simdt, double mjd)
 				resuming = true;
 				resumetimer = 3.0;
 				launch_mjd = mjd + (-(CountdownTime - 3.0) / 86400.0);
+				WriteLaunchTimeFile( launch_mjd );
 				oapiWriteLog( "(SSV_LCC) [INFO] Countdown clock will resume in 3 seconds" );
 				return;
 			}
@@ -538,7 +554,7 @@ void LCC::Commands( void )
 		}
 		else if (CountdownTime < -205.0)
 		{
-			// move to "left-down" at 3บ/s
+			// move to "left-down" at 3ยบ/s
 			pPad->SetSSMEActPos( 0, (207.0 + CountdownTime) * (-3.0), (207.0 + CountdownTime) * 3.0 );
 			pPad->SetSSMEActPos( 1, (207.0 + CountdownTime) * (-3.0), (207.0 + CountdownTime) * 3.0 );
 			pPad->SetSSMEActPos( 2, (207.0 + CountdownTime) * (-3.0), (207.0 + CountdownTime) * 3.0 );
@@ -552,7 +568,7 @@ void LCC::Commands( void )
 		}
 		else if (CountdownTime < -198.0)
 		{
-			// move to null at 3บ/s
+			// move to null at 3ยบ/s
 			pPad->SetSSMEActPos( 0, (-CountdownTime - 198.0) * (-3.0), (-CountdownTime - 198.0) * 3.0 );
 			pPad->SetSSMEActPos( 1, (-CountdownTime - 198.0) * (-3.0), (-CountdownTime - 198.0) * 3.0 );
 			pPad->SetSSMEActPos( 2, (-CountdownTime - 198.0) * (-3.0), (-CountdownTime - 198.0) * 3.0 );
@@ -566,7 +582,7 @@ void LCC::Commands( void )
 		}
 		else if (CountdownTime < -195.0)
 		{
-			// move to "right-up" at 3บ/s
+			// move to "right-up" at 3ยบ/s
 			pPad->SetSSMEActPos( 0, (197.0 + CountdownTime) * 3.0, (197.0 + CountdownTime) * (-3.0) );
 			pPad->SetSSMEActPos( 1, (197.0 + CountdownTime) * 3.0, (197.0 + CountdownTime) * (-3.0) );
 			pPad->SetSSMEActPos( 2, (197.0 + CountdownTime) * 3.0, (197.0 + CountdownTime) * (-3.0) );
@@ -580,7 +596,7 @@ void LCC::Commands( void )
 		}
 		else if (CountdownTime < -188.0)
 		{
-			// move to null at 3บ/s
+			// move to null at 3ยบ/s
 			pPad->SetSSMEActPos( 0, (-CountdownTime - 188.0) * 3.0, (-CountdownTime - 188.0) * (-3.0) );
 			pPad->SetSSMEActPos( 1, (-CountdownTime - 188.0) * 3.0, (-CountdownTime - 188.0) * (-3.0) );
 			pPad->SetSSMEActPos( 2, (-CountdownTime - 188.0) * 3.0, (-CountdownTime - 188.0) * (-3.0) );
