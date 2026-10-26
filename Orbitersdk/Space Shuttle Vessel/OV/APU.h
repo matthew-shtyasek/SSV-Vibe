@@ -163,6 +163,8 @@ private:
 	DiscInPort APU_CntlrPwr, APU_FuelTankValves;
 	DiscInPort APU_InjectorCool, APU_SpeedHigh, APU_AutoShutdownEnable;
 	DiscInPort WSB_Ready;
+	DiscOutPort WSB_Speed, WSB_PumpNorm;// speed of the APU and pressure of the main pump, for the heat of the hydraulic fluid and of the lube oil
+	DiscInPort WSB_HydOk, WSB_Seize, WSB_OilTemp;// the hydraulic system holds the pressure, the bearings seized, temperature of the lube oil (100 F per volt)
 	DiscInPort InjectorWaterOk;
 	DiscOutPort InjectorWaterCmd;
 	DiscOutPort APU_HydraulicPress;
@@ -171,6 +173,7 @@ private:
 
 	Sensor FuTkPress;
 	Sensor InjTemp, PumpTemp, ValveTemp;
+	Sensor OilTemp;// lube oil (OIL IN TEMP)
 	Sensor HYD_MN_PMP_P[3];// A, B, C
 };
 

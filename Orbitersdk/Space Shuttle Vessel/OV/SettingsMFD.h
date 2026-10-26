@@ -49,9 +49,15 @@ public:
 private:
 	void Apply( void );// the values of the editor to the options of the vessel
 	void Save( void );
+	void DrawSettings( oapi::Sketchpad* skp );
+	void DrawFailures( oapi::Sketchpad* skp );
+	void DrawStatus( oapi::Sketchpad* skp );
+	bool KeyFailures( DWORD key );
 
 	Atlantis* sts;
 	settings::Editor editor;
+	int page;
+	int failRow;// selected line of the page of the failures
 	char status[48];
 	double statusTime;
 };

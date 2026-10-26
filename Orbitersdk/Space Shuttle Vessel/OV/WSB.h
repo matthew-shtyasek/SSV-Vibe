@@ -64,27 +64,28 @@ Date         Developer
 
 #include "AtlantisSubsystem.h"
 #include <discsignals.h>
+#include "HydModel.h"
 
 
 using namespace discsignals;
 
 /**
- * Simulates Water Spray Boiler used to cool APUs and hyd fluid
- * At the moment, all it does is check WSB ready for APU talkbacks
- * TODO: accurately calculate boiloff rate
- * TODO: propulsive force when venting steam
+ * Water spray boiler of an APU/hydraulic system: it cools the hydraulic fluid and the APU lube oil (model in HydModel.h).
+ *
+ * Bundle WSBn (n = 1 to 3), 16 lines:
+ *   0 ready to start (out), 1 BOILER PWR, 2 controller A, 3 controller B, 4 N2 SUPPLY (in, from the panel R2)
+ *   5 speed of the APU, 5 V = 103% (in, from the APU), 6 main pump at nominal pressure (in, from the APU)
+ *   7 lube oil temperature, 8 hydraulic fluid temperature (out, 100 F per volt)
+ *   9 water quantity, 10 hydraulic reservoir quantity (out, 5 V = 100%)
+ *   11 the hydraulic system holds the pressure, 12 the bearings of the APU seized (out)
+ *   13 hydraulic fluid hot (HYD RSVR T), 14 lube oil hot (APU TEMP), 15 the fluid goes through the boiler (out)
+ * Failures (the settings MFD and the scenario): controller A or B, ice in the spray valves, nitrogen leak, hydraulic leak.
  */
 class WSB : public AtlantisSubsystem
 {
-	unsigned short usID; // from 1 to 3
-
-	double waterMass[2];
-
-	// indicates controller selected and if controller is powered
-	DiscInPort Power, ControllerPwr, ControllerA, ControllerB;
-	DiscInPort BoilerN2Supply;
-	DiscOutPort Ready;
 public:
+	enum Failure {FAIL_CTRL_A = 0, FAIL_CTRL_B, FAIL_ICE_HYD, FAIL_ICE_OIL, FAIL_N2_LEAK, FAIL_HYD_LEAK, FAILURE_COUNT};
+
 	WSB(AtlantisSubsystemDirector* _director, const string& _ident, unsigned short _ID);
 	virtual ~WSB();
 
@@ -96,6 +97,33 @@ public:
 
 	void OnSaveState(FILEHANDLE scn) const override;
 	bool OnParseLine(const char* keyword, const char* line) override;
+
+	double GetHydraulicFluidTemperature( void ) const {return th.hyd;}// [F]
+	double GetLubeOilTemperature( void ) const {return th.oil;}// [F]
+	double GetWater( void ) const {return th.water;}// [lb]
+	double GetHydraulicQuantity( void ) const {return th.hydQty;}// [0, 1]
+	bool BearingsSeized( void ) const {return th.seized;}
+
+	/** @return true if the failure is active */
+	bool GetFailure( int failure ) const;
+	/** Sets or clears a failure (a leak is a constant rate). */
+	void SetFailure( int failure, bool active );
+
+	static const char* FailureName( int failure );
+
+private:
+	unsigned short usID;// from 1 to 3
+
+	hydmodel::State th;
+	bool thermalLoaded;// the temperatures came from the scenario
+	bool hydCautionPrev, oilCautionPrev, seizedPrev;
+
+	// indicates controller selected and if controller is powered
+	DiscInPort Power, ControllerA, ControllerB;
+	DiscInPort BoilerN2Supply;
+	DiscOutPort Ready;
+	DiscInPort ApuSpeed, PumpNorm;
+	DiscOutPort OilTemp, HydTemp, WaterQty, HydQty, HydOk, LubeSeize, HydCaution, OilCaution, Through;
 };
 
 #endif// _WSB_H_

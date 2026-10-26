@@ -43,19 +43,47 @@ Run the simulation with the Atlantis or any SSV scenario. Quick start with the a
 - **APU SPEED SELECT** (NORM 103%, HIGH 113%).
 - **Restart after a shutdown:** the injector branch is hot after the shutdown (soakback) and needs **about 180 minutes** to get to 400 F, or **3.5 minutes of water cooling** (APU OPERATE in INJECTOR COOL; do not wait more than 1 s in OFF before START/RUN, the injector heats up again quickly). The water tank is common to the three APUs: 21 minutes of flow, six cycles. Starting an APU above the limits (injector 400 F, fuel pump 210 F, gas generator valve module 200 F) can detonate the hydrazine and **destroy the APU**; so can a restart after an overspeed shutdown.
 - For tests: the key `Failure 1` (the speed falls) or `Failure 2` (the speed rises) in the block of the subsystem `APU1` of a scenario makes the speed of a running APU leave the limits, to see the auto shutdown.
-- The temperatures are in the bundle `APU_n_SENSORS` (lines 1, 2, 3); the displays do not show them yet.
+- The temperatures are in the bundle `APU_n_SENSORS` (lines 1, 2, 3 for the injector, the pump and the valves, 4 for the lube oil); the temperature of the lube oil goes to the displays, the others do not.
 - Fix of an upstream bug: `Atlantis::GetAPU` used the wrong index (SPEC 113 read the wrong objects).
 
-### Reaction of the arm on the orbiter
-Option `RMSReaction` in `Config\Vessels\SSV_OV.cfg` (**off by default**): the payload that the arm moves pushes the orbiter, with the force at the payload (mass times the acceleration relative to the orbiter), so the orbiter turns if the DAP is in FREE. Only the payload is simulated, not the mass of the arm. Not tested in the simulator.
+### The mass of the arm and of its payload: four separate options
+All are in `Config\Vessels\SSV_OV.cfg` (and in the settings MFD), **off by default**, and independent:
+- `RMSPayloadMassEffect`: the rates of the arm decrease with the mass of the payload that it holds (it is about the behavior of the arm).
+- `RMSReaction`: the arm and the payload that it moves push the orbiter (force at the center of mass of the payload and of the arm, mass times the acceleration relative to the orbiter), so the orbiter turns when the DAP is in FREE (try it with a heavy payload such as the Hubble).
+- `RMSCenterOfMass`: the center of mass of the orbiter follows the arm and the payload that it holds (the arm is 410.5 kg, in five points along it), so the RCS jets act about the real center of mass.
+- `RMSInertia`: the moments of inertia of the orbiter change with the arm and the payload (parallel axes). With the center of mass option on, the moments are those about the new center.
+These were made from the geometry of the arm and the mass of the payload; they were not tested in the simulator, and the distribution of the mass of the arm along its links is an assumption.
+
+### Cabin lighting (Crew Operations Manual 2.15)
+- Floodlights (light emitters in the cockpit views; Orbiter needs the local lights on): glareshields of the commander and the pilot (switch BRIGHT, VAR, OFF and DIM/BRT knob, panels O6 and O8), seat and center console lights (SEAT, OFF, CTR CNSL and knob), mission station (R10), payload station (L9) and orbit station (A6U) with ON/OFF and DIM/BRT.
+- Panel lighting: the OFF/BRT knobs of O6 (LEFT/CENTER and LEFT OVERHEAD), O8 (RIGHT/CENTER and RIGHT OVERHEAD), R10 (MS) and A6U (OS) scale the self illumination of the panels of their groups (the knobs at BRT leave the panels as they were).
+- Not connected yet: the knobs INSTRUMENT, NUMERIC and ANNUNCIATOR INTENSITY, the circuit breakers of the lighting, the emergency lighting, the middeck and airlock lights. Option `CabinLighting`.
+
+### Free movement of the head
+Ctrl+M switches it on (and off); then the arrows and Ins/Del move the head (forward, back, left, right, up, down) around the position of the station, inside an ellipsoid of 0.5 m. The arrows and Ins/Del do not operate the THC while it is on. It ends by itself when the view changes to another station. Option `VCFreeMove`.
+
+### Settings MFD
+The MFD mode **SSV Settings** (key V in the list of modes, or from the MFD menu) shows the options of the vessel and changes them at once; the SAVE button writes `Config\SSV\Settings.cfg` (it has the format of the configuration of the vessel and replaces the values of `SSV_OV.cfg` when the next simulation starts). Page 2 sets failures of the water spray boilers (training), page 3 shows the temperatures, water and reservoir of the three hydraulic systems. Keys: Up/Down, Left/Right (or the buttons), Enter, S (save), Del (default), A (all), P (page).
+
+### Hydraulic fluid and APU lube oil: heating, cooling and failures
+- Each APU/hydraulic system has a **water spray boiler** (WSB; panel R2: BOILER PWR, CNTLR/HTR A or B, N2 SUPPLY) with the data of the Crew Operations Manual: spray of the lube oil from 250 F, of the hydraulic fluid from 208 F, bypass valve (through the boiler from 210 F, around it from 190 F), 142 lb of water (spray bars of 10 and 5 lb/min) pushed by nitrogen.
+- The lube oil of a running APU heats (about 15 minutes from cold to 250 F) and the hydraulic fluid heats with the load (aerosurfaces, engine gimbals) and the pump pressure (LOW gives less heat).
+- **Overheating:** more than 230 F in the fluid is the caution HYD RSVR T, more than 290 F in the oil is APU TEMP (both in `Orbiter.log`; the lights of the C&W are not connected yet); **a minute above 290 F and the bearings of the APU seize** (the APU is lost), above 250 F in the fluid the seals degrade and the system leaks until it loses the pressure. As in the manual, change the boiler controller (A or B) first.
+- Failures (page 2 of the MFD, or in the scenario, block `WSB1` to `WSB3`: `FailCtrlA`, `FailCtrlB`, `IceHyd`, `IceOil`, `N2Leak`, `HydLeak`).
+- The OIL IN temperatures, the H2O quantities and the reservoir quantities now go to the displays (DISP 86 and MEDS APU/HYD) through the analog inputs. Option `HydraulicThermal` (off: the temperatures do not change). The scenarios that start with a running APU begin with a warm system.
+
+### Controls of the hand controllers by station
+The hand controllers and the keys operate the RMS when the view is the aft station of the RMS, and the RCS in every other place (before, Ctrl+A did it for the whole cockpit). Ctrl+A, or the controller button RMS_CONTROL_TOGGLE, inverts it until the station is changed.
 
 ### Tools and the pipeline of this repository
 - `tools\build.ps1` builds all the modules (also on a PC with limited resources: one thread, low priority), `tools\get-atl.ps1` gets the ATL libraries without a system installation, `tools\assemble.ps1` puts the build in an Orbiter folder, `tools\package.ps1` makes the zip, `tools\check-encoding.py` reports the encoding of the sources, `tools\get-orbiter-sdk.ps1` gets the SDK from the Orbiter release.
-- **Unit tests** (`Orbitersdk\Space Shuttle Vessel\tests`): 33520 checks of the math of the arm, of the UNIV PTG pointing, of the axes, hats, parsers and example configuration files of the controllers, of the safing and the brakes, of the APU (cooldown, restart, auto shutdown) and of the reaction of the arm. `tools\check-data.py` checks the meshes against the group indices of the code and the scenarios (a wrong index shows as a switch or a light that does not work). `tools\build.ps1 -Orbiter <Orbiter folder> -Tests` runs them, the pipeline too.
+- **Unit tests** (`Orbitersdk\Space Shuttle Vessel\tests`): 43000 checks of the math of the arm, of the UNIV PTG pointing, of the axes, hats, parsers and example configuration files of the controllers, of the safing and the brakes, of the APU (cooldown, restart, auto shutdown), of the reaction, mass and inertia of the arm, of the cabin lighting (levels and the table of the panels), of the free movement of the head, of the table of the options (checked against `SSV_OV.cfg`) and of the boiler (heating, cooling, failures, times of the manual). `tools\check-data.py` checks the meshes against the group indices of the code and the scenarios (a wrong index shows as a switch or a light that does not work) and the table of the panels of the cabin lighting. `tools\build.ps1 -Orbiter <Orbiter folder> -Tests` runs them, the pipeline too.
 - **GitHub Actions** (`.github\workflows\build.yml`): builds, runs the tests and publishes the zip, see below.
 
 ## Known issues and limits
 - **The visual details of the new switches were set by calculation** from the mesh and the texture and can need adjustment (angles of the switches, position of the new indicators).
+- The new visuals (knobs and switches of the lighting, light positions, head movement, the MFD) and the physics of the options of the arm and of the boilers were set by calculation and are not tested in the simulator: the angles, the places of the lights and the heating rates may need adjustment.
+- The lights APU TEMP, UNDERSPEED, OVERSPEED and HYD RSVR T of the C&W are not connected to the logic of the C&W.
 - Auto safing, auto brakes, the failures of the arm (ABE, MCIU, tachometers, encoders) and the delays of the brakes and of the safing are not modelled (the documents have no numbers for the delays).
 - A master alarm at the start of a playback has been seen and the cause is not known: the line `C&W: parameter N tripped` of `Orbiter.log` tells it. Recordings made with older versions of SSV have no panel events (the mouse is still reset).
 - RSLS: the failure branches of the countdown sequence are not implemented (they need data that SSV does not model).
@@ -71,6 +99,10 @@ Option `RMSReaction` in `Config\Vessels\SSV_OV.cfg` (**off by default**): the pa
 7. Two sticks: start a simulation with the devices connected, read `Config\SSV\Controllers\DetectedDevices.txt`, copy the examples (`Joystick1.cfg`, `Joystick2.cfg`), press Ctrl+J.
 8. Record a short part of the flight and play it back (the arm and the panel clicks must be replayed).
 9. UNIV PTG: TGT ID 4, then TRK.
+10. Cabin lighting: O6, DIM/BRT knobs (hold the left button on the right or left half of the knob), flood switches; turn the panel knobs down and up.
+11. Ctrl+M and the arrows in the stations; at the aft RMS station the controllers move the arm.
+12. MFD SSV Settings: change an option, SAVE, restart the scenario.
+13. APU start with the boilers off (BOILER PWR OFF cuts the READY TO START): the boiler failures of the MFD with a running APU, watch `Orbiter.log` and DISP 86.
 
 ## Report a problem
 Open an issue with: the scenario, what you did, and `Orbiter.log` (and `Config\SSV\Controllers\DetectedDevices.txt` for the controllers).

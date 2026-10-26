@@ -96,6 +96,7 @@ APU::APU(AtlantisSubsystemDirector *_director, const std::string &_ident, int _I
 	InjTemp = Sensor( 0.0, 1000.0 );
 	PumpTemp = Sensor( 0.0, 1000.0 );
 	ValveTemp = Sensor( 0.0, 1000.0 );
+	OilTemp = Sensor( 0.0, 500.0 );
 
 	HYD_MN_PMP_P[0] = Sensor( 0.0, 4000.0 );
 	HYD_MN_PMP_P[1] = Sensor( 0.0, 4000.0 );
@@ -147,6 +148,11 @@ void APU::Realize()
 	sprintf_s(cbuf, 255, "WSB%d", ID);
 	pBundle=BundleManager()->CreateBundle(cbuf, 16);
 	WSB_Ready.Connect(pBundle, 0);
+	WSB_Speed.Connect( pBundle, 5 );
+	WSB_PumpNorm.Connect( pBundle, 6 );
+	WSB_OilTemp.Connect( pBundle, 7 );
+	WSB_HydOk.Connect( pBundle, 11 );
+	WSB_Seize.Connect( pBundle, 12 );
 
 	sprintf_s( cbuf, 255, "APU_%d_SENSORS", ID );
 	pBundle = BundleManager()->CreateBundle( cbuf, 16 );
@@ -154,6 +160,7 @@ void APU::Realize()
 	InjTemp.Connect( pBundle, 1 );
 	PumpTemp.Connect( pBundle, 2 );
 	ValveTemp.Connect( pBundle, 3 );
+	OilTemp.Connect( pBundle, 4 );
 
 	pBundle = BundleManager()->CreateBundle( "APU_INJ_WATER", 16 );
 	InjectorWaterCmd.Connect( pBundle, ID - 1 );
@@ -179,6 +186,9 @@ void APU::Fail( const char* reason )
 
 void APU::OnPreStep(double simt, double simdt, double mjd)
 {
+	// the bearings seize when the lube oil is not cooled
+	if (WSB_Seize.IsSet() && !failed) Fail( "the lube oil was too hot and the bearings seized" );
+
 	// the APUs of a scenario that starts with the APU running are hot
 	if (!thermalLoaded)
 	{
@@ -332,7 +342,13 @@ void APU::OnPreStep(double simt, double simdt, double mjd)
 				FuelPress[1]=1455 - 10.0 * oapiRand();
 			else FuelPress[1] += (2.0 * oapiRand() - 1.0);
 
-			if(APU_HydPumpPress.IsSet()) {
+			if (!WSB_HydOk.IsSet())
+			{
+				// the reservoir is empty (leak of the hydraulic system): the pump can not hold the pressure
+				if (HydraulicPressure[1] > 400.0 * simdt) HydraulicPressure[1] -= 400.0 * simdt;
+				else HydraulicPressure[1] = 0.0;
+			}
+			else if(APU_HydPumpPress.IsSet()) {
 				if(HydraulicPressure[1]<2950) {
 					if(HydraulicPressure[1]>2900)
 						HydraulicPressure[1]=3000-(10*oapiRand());
@@ -377,6 +393,12 @@ void APU::OnPostStep(double simt, double simdt, double mjd)
 	InjTemp.SetValue( th.injector );
 	PumpTemp.SetValue( th.pump );
 	ValveTemp.SetValue( th.valve );
+	OilTemp.SetValue( WSB_OilTemp.GetVoltage() * 100.0 );
+
+	// for the heat of the hydraulic fluid and of the lube oil of the boiler
+	WSB_Speed.SetLine( static_cast<float>((APUSpeed[0] >= 103.0) ? 5.0 : (5.0 * APUSpeed[0] / 103.0)) );
+	if (APU_HydPumpPress.IsSet()) WSB_PumpNorm.SetLine();
+	else WSB_PumpNorm.ResetLine();
 
 	HYD_MN_PMP_P[0].SetValue( HydraulicPressure[0] );
 	HYD_MN_PMP_P[1].SetValue( HydraulicPressure[0] );

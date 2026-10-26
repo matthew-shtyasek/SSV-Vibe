@@ -70,14 +70,20 @@ namespace dps
 			case 4:// 2B
 				// APU/HYD
 				//input[0].Connect( pBundle, 0 );// 1 - APU 1 Fuel Quantity
-				//input[1].Connect( pBundle, 0 );// 2 - APU 1 H2O Quantity
+				pBundle = BundleManager()->CreateBundle( "WSB1", 16 );
+				input[1].Connect( pBundle, 9 );// 2 - APU 1 H2O Quantity
+				input[10].Connect( pBundle, 10 );// 11 - Hydraulic 1 Reservoir Quantity
 				//input[2].Connect( pBundle, 0 );// 3 - APU 2 Fuel Quantity
-				//input[3].Connect( pBundle, 0 );// 4 - APU 2 H2O Quantity
-				//input[4].Connect( pBundle, 0 );// 5 - APU 3 H2O Quantity
+				pBundle = BundleManager()->CreateBundle( "WSB2", 16 );
+				input[3].Connect( pBundle, 9 );// 4 - APU 2 H2O Quantity
+				input[15].Connect( pBundle, 10 );// 16 - Hydraulic 2 Reservoir Quantity
+				pBundle = BundleManager()->CreateBundle( "WSB3", 16 );
+				input[4].Connect( pBundle, 9 );// 5 - APU 3 H2O Quantity
+				input[20].Connect( pBundle, 10 );// 21 - Hydraulic 3 Reservoir Quantity
 				//input[5].Connect( pBundle, 0 );// 6 - APU 3 Fuel Quantity
 				pBundle = BundleManager()->CreateBundle( "APU_1_SENSORS", 16 );
 				input[6].Connect( pBundle, 0 );// 7 - APU 1 Fuel Pressure
-				//input[7].Connect( pBundle, 0 );// 8 - APU 1 Oil In Temperature
+				input[7].Connect( pBundle, 4 );// 8 - APU 1 Oil In Temperature
 				pBundle = BundleManager()->CreateBundle( "HYD_PMP_PRESS", 16 );
 				input[9].Connect( pBundle, 0 );// 10 - Hydraulic 1 Pressure
 				input[14].Connect( pBundle, 3 );// 15 - Hydraulic 2 Pressure
@@ -85,11 +91,11 @@ namespace dps
 				//input[10].Connect( pBundle, 0 );// 11 - Hydraulic 1 Reservoir Quantity
 				pBundle = BundleManager()->CreateBundle( "APU_2_SENSORS", 16 );
 				input[11].Connect( pBundle, 0 );// 12 - APU 2 Fuel Pressure
-				//input[12].Connect( pBundle, 0 );// 13 - APU 2 Oil In Temperature
+				input[12].Connect( pBundle, 4 );// 13 - APU 2 Oil In Temperature
 				//input[15].Connect( pBundle, 0 );// 16 - Hydraulic 2 Reservoir Quantity
 				pBundle = BundleManager()->CreateBundle( "APU_3_SENSORS", 16 );
 				input[16].Connect( pBundle, 0 );// 17 - APU 3 Fuel Pressure
-				//input[17].Connect( pBundle, 0 );// 18 - APU 3 Oil In Temperature
+				input[17].Connect( pBundle, 4 );// 18 - APU 3 Oil In Temperature
 				//input[20].Connect( pBundle, 0 );// 21 - Hydraulic 3 Reservoir Quantity
 
 				pAPU[0] = dynamic_cast<APU*>(director->GetSubsystemByName( "APU1" ));

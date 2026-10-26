@@ -6046,6 +6046,14 @@ APU* Atlantis::GetAPU( int apu ) const
 	return pAPU[apu - 1];
 }
 
+WSB* Atlantis::GetWSB( int system ) const
+{
+	if ((system < 1) || (system > 3)) return NULL;
+	char name[8];
+	sprintf_s( name, sizeof( name ), "WSB%d", system );
+	return dynamic_cast<WSB*>(psubsystems->GetSubsystemByName( name ));
+}
+
 MPM_Base* Atlantis::GetPortMPM( void ) const
 {
 	return pRMS;

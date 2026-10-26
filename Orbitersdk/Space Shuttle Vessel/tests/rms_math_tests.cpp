@@ -14,6 +14,7 @@ static char g_debugstring[1024];
 #include "../OV/ControllerMath.h"
 #include "../OV/APUModel.h"
 #include "../OV/RMSReaction.h"
+#include "../OV/HydModel.h"
 #include "../OV/ParameterValues.h"
 #include "../OV/SettingsModel.h"
 #include "../OV/FreeMoveMath.h"
@@ -1300,6 +1301,23 @@ static void test_settings( const char* root )
 		CHECK( c.Cursor() == 0 );
 	}
 
+	// rows of the page of the failures: 3 systems with 6 kinds each
+	CHECK( FAIL_ROWS == 18 );
+	for (int row = 0; row < FAIL_ROWS; row++)
+	{
+		CHECK( (FailSystem( row ) >= 1) && (FailSystem( row ) <= FAIL_SYSTEMS) );
+		CHECK( (FailKind( row ) >= 0) && (FailKind( row ) < FAIL_KINDS) );
+		CHECK( (((FailSystem( row ) - 1) * FAIL_KINDS) + FailKind( row )) == row );
+	}
+	// pages of the MFD: circular in both directions
+	{
+		int p = PAGE_SETTINGS;
+		for (int i = 0; i < PAGE_COUNT; i++) p = NextPage( p, 1 );
+		CHECK( p == PAGE_SETTINGS );
+		CHECK( NextPage( PAGE_SETTINGS, -1 ) == (PAGE_COUNT - 1) );
+		CHECK( NextPage( PAGE_COUNT - 1, 1 ) == PAGE_SETTINGS );
+	}
+
 	// the options of the file of the repository agree with the table: the same keys and the same defaults
 	if ((root != NULL) && (root[0] != 0))
 	{
@@ -1342,6 +1360,302 @@ static void test_settings( const char* root )
 	}
 }
 
+// heating and cooling of the hydraulic fluid and of the lube oil, water spray boiler, failures from overheating
+static hydmodel::Input hyd_input( double speed, double load, int controller, bool n2 )
+{
+	hydmodel::Input in;
+	in.speed = speed;
+	in.pumpNorm = true;
+	in.load = load;
+	in.ambient = hydmodel::AMBIENT;
+	in.powered = true;
+	in.controller = controller;
+	in.n2Open = n2;
+	return in;
+}
+
+// advances the state with steps of a second; returns the time [s] until the condition is true (or the limit)
+template <class Cond>
+static double hyd_run( hydmodel::State& s, const hydmodel::Input& in, double limit, Cond cond )
+{
+	double t = 0.0;
+	while (t < limit)
+	{
+		hydmodel::Step( s, in, 1.0 );
+		t += 1.0;
+		if (cond( s )) break;
+	}
+	return t;
+}
+
+static void test_hyd_model( void )
+{
+	using namespace hydmodel;
+
+	// the numbers of the manual
+	CHECK_NEAR( OIL_SETPOINT, 250.0, 1e-12 );
+	CHECK_NEAR( HYD_SETPOINT, 208.0, 1e-12 );
+	CHECK_NEAR( HYD_THROUGH, 210.0, 1e-12 );
+	CHECK_NEAR( HYD_BYPASS, 190.0, 1e-12 );
+	CHECK_NEAR( WATER_TANK, 142.0, 1e-12 );
+	CHECK_NEAR( OIL_LIMIT, 290.0, 1e-12 );
+	CHECK_NEAR( HYD_CAUTION, 230.0, 1e-12 );
+
+	// the initial state
+	{
+		const State s = InitialState();
+		CHECK_NEAR( s.hyd, AMBIENT, 1e-12 );
+		CHECK_NEAR( s.oil, AMBIENT, 1e-12 );
+		CHECK_NEAR( s.water, WATER_TANK, 1e-12 );
+		CHECK_NEAR( s.hydQty, 1.0, 1e-12 );
+		CHECK( !s.seized );
+		CHECK( HydraulicsOk( s ) );
+		CHECK( !HydCaution( s ) );
+		CHECK( !OilCaution( s ) );
+	}
+
+	// the commands of the controller
+	CHECK_NEAR( HydSprayCommand( 200.0 ), 0.0, 1e-12 );
+	CHECK_NEAR( HydSprayCommand( 208.0 ), 0.0, 1e-12 );
+	CHECK_NEAR( HydSprayCommand( 211.0 ), 0.5, 1e-12 );
+	CHECK_NEAR( HydSprayCommand( 230.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( OilSprayCommand( 240.0 ), 0.0, 1e-12 );
+	CHECK_NEAR( OilSprayCommand( 254.0 ), 0.5, 1e-12 );
+	CHECK_NEAR( OilSprayCommand( 300.0 ), 1.0, 1e-12 );
+	// the bypass valve: hysteresis
+	CHECK( !BypassLogic( false, 200.0 ) );
+	CHECK( BypassLogic( false, 210.0 ) );
+	CHECK( BypassLogic( true, 200.0 ) );// it stays through the boiler between 190 and 210
+	CHECK( !BypassLogic( true, 190.0 ) );
+	CHECK( !BypassLogic( false, 205.0 ) );
+	// the nitrogen
+	CHECK_NEAR( N2Effect( 1.0, true ), 1.0, 1e-12 );
+	CHECK_NEAR( N2Effect( 0.15, true ), 0.5, 1e-12 );
+	CHECK_NEAR( N2Effect( 0.0, true ), 0.0, 1e-12 );
+	CHECK_NEAR( N2Effect( 1.0, false ), 0.0, 1e-12 );
+	// the controller
+	{
+		State s = InitialState();
+		Input in = hyd_input( 1.0, 0.5, 1, true );
+		CHECK( ControllerWorks( s, in ) );
+		in.controller = 0;
+		CHECK( !ControllerWorks( s, in ) );
+		in.controller = 2;
+		CHECK( ControllerWorks( s, in ) );
+		s.ctrlFail[1] = true;
+		CHECK( !ControllerWorks( s, in ) );
+		in.controller = 1;
+		CHECK( ControllerWorks( s, in ) );
+		in.powered = false;
+		CHECK( !ControllerWorks( s, in ) );
+	}
+	// the units of the sensors
+	CHECK_NEAR( TemperatureToVolts( 250.0 ), 2.5, 1e-12 );
+	CHECK_NEAR( TemperatureToVolts( 900.0 ), 5.0, 1e-12 );
+	CHECK_NEAR( TemperatureToVolts( -5.0 ), 0.0, 1e-12 );
+	CHECK_NEAR( VoltsToTemperature( TemperatureToVolts( 213.0 ) ), 213.0, 1e-9 );
+	// load
+	CHECK_NEAR( LoadFromFlight( 0.0, false ), 0.25, 1e-12 );
+	CHECK_NEAR( LoadFromFlight( 3000.0, false ), 1.0, 1e-12 );
+	CHECK_NEAR( LoadFromFlight( 30000.0, false ), 1.0, 1e-12 );
+	CHECK_NEAR( LoadFromFlight( 0.0, true ), 0.7, 1e-12 );// the gimbals of the engines
+
+	// a stopped system goes to the ambient temperature
+	{
+		State s = InitialState();
+		s.hyd = 200.0;
+		s.oil = 250.0;
+		Input in = hyd_input( 0.0, 0.3, 1, true );
+		for (int i = 0; i < 20000; i++) Step( s, in, 1.0 );
+		CHECK_NEAR( s.hyd, AMBIENT, 1.0 );
+		CHECK_NEAR( s.oil, AMBIENT, 1.0 );
+		CHECK_NEAR( s.water, WATER_TANK, 1e-9 );// no spray: the temperatures are below the set points
+	}
+
+	// nominal run of an APU with the boiler: the temperatures stay at the set points, and the water lasts
+	{
+		State s = InitialState();
+		const Input in = hyd_input( 1.0, 0.8, 1, true );
+		const double tOil250 = hyd_run( s, in, 3600.0, []( const State& st ) {return st.oil >= OIL_SETPOINT;} );
+		CHECK( (tOil250 > 600.0) && (tOil250 < 1200.0) );// 10 to 20 minutes, as in the ascent: the boiler starts to spray in the first minutes of flight
+		for (int i = 0; i < 2400; i++) Step( s, in, 1.0 );// 40 more minutes
+		CHECK( (s.oil > 245.0) && (s.oil < 262.0) );
+		CHECK( (s.hyd > 195.0) && (s.hyd < 228.0) );
+		CHECK( !HydCaution( s ) );
+		CHECK( !OilCaution( s ) );
+		CHECK( s.water > 0.0 );// there is water for more than an hour
+		CHECK( s.water < WATER_TANK );
+		CHECK( !s.seized );
+		CHECK_NEAR( s.hydDamage, 0.0, 1e-12 );
+		CHECK_NEAR( s.hydQty, 1.0, 1e-12 );
+		// the spray works with the lube oil (the lube oil needs more) and the water used is in the order of the manual
+		const double used = WATER_TANK - s.water;
+		CHECK( (used > 20.0) && (used < 140.0) );
+	}
+
+	// nothing cools: the lube oil gets to the limit in about 3 minutes from the operating temperature, and the bearings seize
+	{
+		State s = InitialState();
+		s.oil = OIL_SETPOINT;
+		s.hyd = 150.0;
+		const Input in = hyd_input( 1.0, 0.5, 0, true );// no controller
+		const double t290 = hyd_run( s, in, 3600.0, []( const State& st ) {return st.oil > OIL_LIMIT;} );
+		CHECK( (t290 > 120.0) && (t290 < 240.0) );
+		CHECK( OilCaution( s ) );
+		CHECK( !s.seized );
+		const double tSeize = hyd_run( s, in, 3600.0, []( const State& st ) {return st.seized;} );
+		CHECK( (tSeize > 50.0) && (tSeize < 70.0) );// a minute above the limit
+		CHECK( ((t290 + tSeize) > 120.0) && ((t290 + tSeize) < 300.0) );// 2 to 5 minutes from the operating temperature, as in the manual
+		CHECK_NEAR( s.water, WATER_TANK, 1e-9 );// no spray
+	}
+
+	// the lube oil does not stay above the limit for the seizure if it is cooled in time (the controller is changed)
+	{
+		State s = InitialState();
+		s.oil = OIL_SETPOINT;
+		s.hyd = 150.0;
+		s.ctrlFail[0] = true;// the controller A failed
+		Input in = hyd_input( 1.0, 0.5, 1, true );// A selected
+		hyd_run( s, in, 3600.0, []( const State& st ) {return st.oil > 270.0;} );
+		CHECK( s.oil > 270.0 );
+		CHECK( !s.seized );
+		in.controller = 2;// the crew selects B
+		for (int i = 0; i < 600; i++) Step( s, in, 1.0 );
+		CHECK( (s.oil > 245.0) && (s.oil < 262.0) );// back to the set point
+		CHECK( !s.seized );
+		CHECK( s.oilOver < OIL_SEIZE_TIME );
+		CHECK( s.water < WATER_TANK );
+	}
+
+	// failures of the boiler
+	{
+		// ice in the spray valve of the lube oil
+		State s = InitialState();
+		s.oil = OIL_SETPOINT;
+		s.iceOil = true;
+		const Input in = hyd_input( 1.0, 0.5, 1, true );
+		hyd_run( s, in, 3600.0, []( const State& st ) {return st.oil > OIL_LIMIT;} );
+		CHECK( s.oil > OIL_LIMIT );
+		CHECK_NEAR( s.oilDuty, 0.0, 1e-12 );
+	}
+	{
+		// the nitrogen supply is closed: no spray
+		State s = InitialState();
+		s.oil = OIL_SETPOINT;
+		const Input in = hyd_input( 1.0, 0.5, 1, false );
+		hyd_run( s, in, 3600.0, []( const State& st ) {return st.oil > OIL_LIMIT;} );
+		CHECK( s.oil > OIL_LIMIT );
+	}
+	{
+		// leak of the nitrogen: the spray goes down and it stops
+		State s = InitialState();
+		s.oil = OIL_SETPOINT;
+		s.n2Leak = 1.0 / 900.0;
+		const Input in = hyd_input( 1.0, 0.5, 1, true );
+		for (int i = 0; i < 600; i++) Step( s, in, 1.0 );
+		CHECK( (s.n2 > 0.0) && (s.n2 < 1.0) );
+		CHECK( !s.seized );
+		const double t = hyd_run( s, in, 7200.0, []( const State& st ) {return st.seized;} );
+		CHECK( t < 7200.0 );// in the end the lube oil gets too hot
+		CHECK_NEAR( s.n2, 0.0, 1e-9 );
+	}
+	{
+		// no water left
+		State s = InitialState();
+		s.oil = OIL_SETPOINT;
+		s.water = 0.5;
+		const Input in = hyd_input( 1.0, 0.5, 1, true );
+		hyd_run( s, in, 3600.0, []( const State& st ) {return st.oil > OIL_LIMIT;} );
+		CHECK( s.oil > OIL_LIMIT );
+		CHECK_NEAR( s.water, 0.0, 1e-12 );
+	}
+
+	// the hydraulic fluid: bypass valve and spray
+	{
+		State s = InitialState();
+		const Input in = hyd_input( 1.0, 0.8, 1, true );
+		bool through = false;
+		bool never = true;
+		for (int i = 0; i < 4800; i++)
+		{
+			Step( s, in, 1.0 );
+			if (s.hyd < HYD_BYPASS) CHECK( !s.through );// below 190 F the fluid goes around the boiler
+			if (s.through && (s.hyd > HYD_BYPASS)) through = true;
+			if (s.hyd > 232.0) never = false;
+		}
+		CHECK( through );// it was sent through the boiler
+		CHECK( never );
+		CHECK( (s.hyd > 195.0) && (s.hyd < 225.0) );
+	}
+
+	// the heat of the pump at low pressure is less
+	{
+		Input hi = hyd_input( 1.0, 1.0, 0, true );
+		Input lo = hi;
+		lo.pumpNorm = false;
+		CHECK( HydSteadyNoCooling( lo ) < HydSteadyNoCooling( hi ) );
+		CHECK( HydSteadyNoCooling( hi ) > HYD_CAUTION );// at a high load, without cooling, the fluid is in caution
+		Input idle = hyd_input( 1.0, 0.25, 0, true );
+		CHECK( HydSteadyNoCooling( idle ) < HYD_CAUTION );
+		Input stopped = hyd_input( 0.0, 1.0, 0, true );
+		CHECK_NEAR( HydSteadyNoCooling( stopped ), AMBIENT, 1e-12 );
+	}
+
+	// no cooling of the hydraulic fluid at the highest load: caution at 230 F, and later the seals degrade, the system leaks and loses the pressure
+	{
+		State s = InitialState();
+		s.hyd = 200.0;
+		const Input in = hyd_input( 1.0, 1.0, 0, true );
+		const double tCaution = hyd_run( s, in, 36000.0, []( const State& st ) {return HydCaution( st );} );
+		CHECK( tCaution < 36000.0 );
+		CHECK_NEAR( s.hydDamage, 0.0, 1e-12 );// there is no damage below 250 F
+		CHECK( HydraulicsOk( s ) );
+		hyd_run( s, in, 36000.0, []( const State& st ) {return st.hyd > HYD_SEAL_LIMIT + 1.0;} );
+		CHECK( s.hyd > HYD_SEAL_LIMIT );
+		const double tLoss = hyd_run( s, in, 100000.0, []( const State& st ) {return !HydraulicsOk( st );} );
+		CHECK( tLoss < 100000.0 );
+		CHECK( s.hydDamage > 0.0 );
+		CHECK( s.hydQty < HYD_QTY_MIN_OK + 1e-3 );
+		// the APU does not go on with a leak in the hydraulic system if the boiler works: with the cooling nothing of this happens
+		State t = InitialState();
+		t.hyd = 200.0;
+		const Input good = hyd_input( 1.0, 1.0, 1, true );
+		for (int i = 0; i < 3000; i++) Step( t, good, 1.0 );
+		CHECK_NEAR( t.hydDamage, 0.0, 1e-12 );
+		CHECK( HydraulicsOk( t ) );
+		CHECK( t.hyd < HYD_CAUTION );
+	}
+
+	// leak of the hydraulic system (failure)
+	{
+		State s = InitialState();
+		s.hydLeak = 1.0 / 900.0;
+		const Input in = hyd_input( 0.0, 0.0, 0, true );
+		const double t = hyd_run( s, in, 3600.0, []( const State& st ) {return !HydraulicsOk( st );} );
+		CHECK( (t > 800.0) && (t < 900.0) );// 95% of the reservoir in a little less than 15 minutes
+	}
+
+	// time acceleration: a long step gives (almost) what the short steps give
+	{
+		State a = InitialState();
+		State b = InitialState();
+		const Input in = hyd_input( 1.0, 0.8, 1, true );
+		for (int i = 0; i < 300; i++) Step( a, in, 1.0 );
+		for (int i = 0; i < 60; i++) Step( b, in, 5.0 );
+		CHECK_NEAR( a.oil, b.oil, 2.0 );
+		CHECK_NEAR( a.hyd, b.hyd, 2.0 );
+	}
+	// no step without time
+	{
+		State s = InitialState();
+		s.oil = 123.0;
+		Step( s, hyd_input( 1.0, 1.0, 1, true ), 0.0 );
+		CHECK_NEAR( s.oil, 123.0, 1e-12 );
+		Step( s, hyd_input( 1.0, 1.0, 1, true ), -1.0 );
+		CHECK_NEAR( s.oil, 123.0, 1e-12 );
+	}
+}
+
 int main( int argc, char** argv )
 {
 	srand( 12345 );
@@ -1359,6 +1673,7 @@ int main( int argc, char** argv )
 	test_safing_and_brakes();
 	test_apu_model();
 	test_rms_reaction();
+	test_hyd_model();
 	test_settings( (argc > 1) ? argv[1] : NULL );
 	test_free_move();
 	test_lighting();

@@ -1,6 +1,7 @@
 #include "SettingsMFD.h"
 #include "Atlantis.h"
 #include "SSVOptions.h"
+#include "WSB.h"
 
 
 namespace
@@ -18,7 +19,7 @@ namespace
 }
 
 
-SettingsMFD::SettingsMFD( DWORD w, DWORD h, VESSEL* vessel ): MFD2( w, h, vessel ), statusTime( -100.0 )
+SettingsMFD::SettingsMFD( DWORD w, DWORD h, VESSEL* vessel ): MFD2( w, h, vessel ), statusTime( -100.0 ), page( settings::PAGE_SETTINGS ), failRow( 0 )
 {
 	sts = static_cast<Atlantis*>(vessel);
 	status[0] = 0;
@@ -50,6 +51,105 @@ void SettingsMFD::Save( void )
 bool SettingsMFD::Update( oapi::Sketchpad* skp )
 {
 	try
+	{
+		if (page == settings::PAGE_FAILURES) DrawFailures( skp );
+		else if (page == settings::PAGE_STATUS) DrawStatus( skp );
+		else DrawSettings( skp );
+		return true;
+	}
+	catch (std::exception& e)
+	{
+		oapiWriteLogV( "(SettingsMFD) [FATAL ERROR] Exception in Update: %s", e.what() );
+		abort();
+	}
+	catch (...)
+	{
+		oapiWriteLog( "(SettingsMFD) [FATAL ERROR] Exception in Update" );
+		abort();
+	}
+}
+
+void SettingsMFD::DrawFailures( oapi::Sketchpad* skp )
+{
+	Title( skp, "SSV HYDRAULIC FAILURES" );
+	const int line = static_cast<int>(ch);
+	const int right = static_cast<int>(W) - static_cast<int>(2 * cw);
+	const int rows = static_cast<int>((H - (7 * ch)) / ch);
+	int first = failRow - (rows / 2);
+	if (first > (settings::FAIL_ROWS - rows)) first = settings::FAIL_ROWS - rows;
+	if (first < 0) first = 0;
+
+	static const char* const kinds[settings::FAIL_KINDS] = {"controller A", "controller B", "ice, hydraulic spray", "ice, lube oil spray", "N2 leak", "hydraulic leak"};
+	int y = 3 * line;
+	char buf[64];
+	for (int r = 0; (r < rows) && ((first + r) < settings::FAIL_ROWS); r++)
+	{
+		const int row = first + r;
+		const int sys = settings::FailSystem( row );
+		const int kind = settings::FailKind( row );
+		WSB* wsb = sts->GetWSB( sys );
+		const bool active = (wsb != NULL) && wsb->GetFailure( kind );
+		const bool selected = (row == failRow);
+		skp->SetTextColor( selected ? COLOR_SELECTED : COLOR_TEXT );
+		skp->Text( static_cast<int>(cw), y, selected ? ">" : " ", 1 );
+		sprintf_s( buf, sizeof( buf ), "WSB %d  %s", sys, kinds[kind] );
+		skp->Text( static_cast<int>(3 * cw), y, buf, static_cast<int>(strlen( buf )) );
+		skp->SetTextColor( selected ? COLOR_SELECTED : (active ? COLOR_WARNING : COLOR_VALUE) );
+		skp->SetTextAlign( oapi::Sketchpad::RIGHT );
+		const char* val = active ? "FAILED" : "OK";
+		skp->Text( right, y, val, static_cast<int>(strlen( val )) );
+		skp->SetTextAlign( oapi::Sketchpad::LEFT );
+		y += line;
+	}
+	y = static_cast<int>(H) - static_cast<int>(3 * ch);
+	skp->SetTextColor( COLOR_NOTE );
+	skp->Text( static_cast<int>(cw), y, "Failures of the boilers, to train", 33 );
+	skp->Text( static_cast<int>(cw), y + line, "TOG: fail   DEF: repair   ALL: repair all", 41 );
+}
+
+void SettingsMFD::DrawStatus( oapi::Sketchpad* skp )
+{
+	Title( skp, "SSV HYDRAULIC STATUS" );
+	const int line = static_cast<int>(ch);
+	int y = 3 * line;
+	char buf[80];
+	for (int sys = 1; sys <= settings::FAIL_SYSTEMS; sys++)
+	{
+		WSB* wsb = sts->GetWSB( sys );
+		skp->SetTextColor( COLOR_TEXT );
+		sprintf_s( buf, sizeof( buf ), "SYSTEM %d", sys );
+		skp->Text( static_cast<int>(cw), y, buf, static_cast<int>(strlen( buf )) );
+		y += line;
+		if (wsb == NULL)
+		{
+			skp->Text( static_cast<int>(2 * cw), y, "no data", 7 );
+			y += 2 * line;
+			continue;
+		}
+		const double oil = wsb->GetLubeOilTemperature();
+		const double hyd = wsb->GetHydraulicFluidTemperature();
+		skp->SetTextColor( (oil > hydmodel::OIL_LIMIT) ? COLOR_WARNING : COLOR_VALUE );
+		sprintf_s( buf, sizeof( buf ), "  OIL %4.0f F", oil );
+		skp->Text( static_cast<int>(cw), y, buf, static_cast<int>(strlen( buf )) );
+		skp->SetTextColor( (hyd > hydmodel::HYD_CAUTION) ? COLOR_WARNING : COLOR_VALUE );
+		sprintf_s( buf, sizeof( buf ), "HYD %4.0f F", hyd );
+		skp->Text( static_cast<int>(19 * cw), y, buf, static_cast<int>(strlen( buf )) );
+		y += line;
+		skp->SetTextColor( COLOR_VALUE );
+		sprintf_s( buf, sizeof( buf ), "  H2O %3.0f LB   RSVR %3.0f%%", wsb->GetWater(), 100.0 * wsb->GetHydraulicQuantity() );
+		skp->Text( static_cast<int>(cw), y, buf, static_cast<int>(strlen( buf )) );
+		y += line;
+		if (wsb->BearingsSeized())
+		{
+			skp->SetTextColor( COLOR_WARNING );
+			skp->Text( static_cast<int>(3 * cw), y, "APU BEARINGS SEIZED", 19 );
+		}
+		y += line;
+	}
+}
+
+void SettingsMFD::DrawSettings( oapi::Sketchpad* skp )
+{
 	{
 		Title( skp, "SSV SETTINGS" );
 		skp->SetTextColor( COLOR_TEXT );
@@ -124,23 +224,12 @@ bool SettingsMFD::Update( oapi::Sketchpad* skp )
 			skp->SetTextColor( COLOR_NOTE );
 			skp->Text( static_cast<int>(cw), y, "* takes effect at the next start", 32 );
 		}
-		return true;
-	}
-	catch (std::exception& e)
-	{
-		oapiWriteLogV( "(SettingsMFD) [FATAL ERROR] Exception in Update: %s", e.what() );
-		abort();
-	}
-	catch (...)
-	{
-		oapiWriteLog( "(SettingsMFD) [FATAL ERROR] Exception in Update" );
-		abort();
 	}
 }
 
 char* SettingsMFD::ButtonLabel( int bt )
 {
-	static char* labels[12] = {"UP", "DWN", "GRP-", "GRP+", 0, 0, "DEC", "INC", "TOG", "SAVE", "DEF", "ALL"};
+	static char* labels[12] = {"UP", "DWN", "GRP-", "GRP+", "PAGE", 0, "DEC", "INC", "TOG", "SAVE", "DEF", "ALL"};
 	return (bt >= 0 && bt < 12) ? labels[bt] : 0;
 }
 
@@ -151,7 +240,7 @@ int SettingsMFD::ButtonMenu( const MFDBUTTONMENU** menu ) const
 		{"Next option", "(Down)", 'D'},
 		{"Previous group", "(PgUp)", 'G'},
 		{"Next group", "(PgDn)", 'H'},
-		{0, 0, 0},
+		{"Next page", "(P)", 'P'},
 		{0, 0, 0},
 		{"Decrease the value", "(Left)", '-'},
 		{"Increase the value", "(Right)", '+'},
@@ -164,8 +253,74 @@ int SettingsMFD::ButtonMenu( const MFDBUTTONMENU** menu ) const
 	return 12;
 }
 
+bool SettingsMFD::KeyFailures( DWORD key )
+{
+	WSB* wsb = sts->GetWSB( settings::FailSystem( failRow ) );
+	const int kind = settings::FailKind( failRow );
+	switch (key)
+	{
+		case OAPI_KEY_UP:
+		case OAPI_KEY_U:
+			failRow = (failRow + settings::FAIL_ROWS - 1) % settings::FAIL_ROWS;
+			break;
+		case OAPI_KEY_DOWN:
+		case OAPI_KEY_D:
+			failRow = (failRow + 1) % settings::FAIL_ROWS;
+			break;
+		case OAPI_KEY_PRIOR:
+		case OAPI_KEY_G:
+			failRow = (((failRow / settings::FAIL_KINDS) + settings::FAIL_SYSTEMS - 1) % settings::FAIL_SYSTEMS) * settings::FAIL_KINDS;
+			break;
+		case OAPI_KEY_NEXT:
+		case OAPI_KEY_H:
+			failRow = (((failRow / settings::FAIL_KINDS) + 1) % settings::FAIL_SYSTEMS) * settings::FAIL_KINDS;
+			break;
+		case OAPI_KEY_LEFT:
+		case OAPI_KEY_MINUS:
+		case OAPI_KEY_RIGHT:
+		case OAPI_KEY_EQUALS:
+		case OAPI_KEY_RETURN:
+		case OAPI_KEY_T:
+		case OAPI_KEY_SPACE:
+			if (wsb != NULL) wsb->SetFailure( kind, !wsb->GetFailure( kind ) );
+			break;
+		case OAPI_KEY_DELETE:
+		case OAPI_KEY_F:
+			if (wsb != NULL) wsb->SetFailure( kind, false );
+			break;
+		case OAPI_KEY_A:
+			for (int s = 1; s <= settings::FAIL_SYSTEMS; s++)
+			{
+				WSB* w = sts->GetWSB( s );
+				if (w == NULL) continue;
+				for (int k = 0; k < settings::FAIL_KINDS; k++) w->SetFailure( k, false );
+			}
+			break;
+		default:
+			return false;
+	}
+	return true;
+}
+
 bool SettingsMFD::ConsumeKeyBuffered( DWORD key )
 {
+	if (key == OAPI_KEY_P)
+	{
+		page = settings::NextPage( page, 1 );
+		InvalidateDisplay();
+		return true;
+	}
+	if (page == settings::PAGE_STATUS) return false;
+	if (page == settings::PAGE_FAILURES)
+	{
+		if (KeyFailures( key ))
+		{
+			InvalidateDisplay();
+			return true;
+		}
+		return false;
+	}
+
 	bool changed = false;
 	switch (key)
 	{
@@ -219,7 +374,7 @@ bool SettingsMFD::ConsumeKeyBuffered( DWORD key )
 bool SettingsMFD::ConsumeButton( int bt, int event )
 {
 	if (!(event & PANEL_MOUSE_LBDOWN)) return false;
-	static const DWORD btkey[12] = {OAPI_KEY_UP, OAPI_KEY_DOWN, OAPI_KEY_PRIOR, OAPI_KEY_NEXT, 0, 0, OAPI_KEY_LEFT, OAPI_KEY_RIGHT, OAPI_KEY_RETURN, OAPI_KEY_S, OAPI_KEY_DELETE, OAPI_KEY_A};
+	static const DWORD btkey[12] = {OAPI_KEY_UP, OAPI_KEY_DOWN, OAPI_KEY_PRIOR, OAPI_KEY_NEXT, OAPI_KEY_P, 0, OAPI_KEY_LEFT, OAPI_KEY_RIGHT, OAPI_KEY_RETURN, OAPI_KEY_S, OAPI_KEY_DELETE, OAPI_KEY_A};
 	if ((bt < 0) || (bt >= 12) || (btkey[bt] == 0)) return false;
 	return ConsumeKeyBuffered( btkey[bt] );
 }

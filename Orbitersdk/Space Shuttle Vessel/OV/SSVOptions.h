@@ -207,6 +207,11 @@ class SSVOptions
 		{
 			return values[settings::VC_FREE_MOVE] != 0.0;
 		}
+
+		bool HydraulicThermal( void ) const
+		{
+			return values[settings::HYDRAULIC_THERMAL] != 0.0;
+		}
 };
 
 #endif// SSV_OPTIONS

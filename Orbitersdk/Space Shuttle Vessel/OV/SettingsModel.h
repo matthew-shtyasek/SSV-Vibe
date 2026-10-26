@@ -70,6 +70,7 @@ namespace settings
 		RMS_INERTIA,
 		CABIN_LIGHTING,
 		VC_FREE_MOVE,
+		HYDRAULIC_THERMAL,
 		COUNT
 	};
 
@@ -88,6 +89,7 @@ namespace settings
 		{"RMSInertia", "Inertia with the arm", "The moments of inertia of the orbiter change with the arm and the payload that it holds", KIND_BOOL, 0.0, 0.0, 1.0, 1.0, false, GROUP_RMS},
 		{"CabinLighting", "Cabin lighting", "Floodlights and panel lighting follow the switches and knobs (needs the local lights of Orbiter)", KIND_BOOL, 1.0, 0.0, 1.0, 1.0, false, GROUP_CABIN},
 		{"VCFreeMove", "Free head movement", "Ctrl+M: arrows and Ins/Del move the head around the station", KIND_BOOL, 1.0, 0.0, 1.0, 1.0, false, GROUP_CABIN},
+		{"HydraulicThermal", "Hydraulic heating", "Heat of the hydraulic fluid and lube oil, boiler cooling and overheating failures", KIND_BOOL, 1.0, 0.0, 1.0, 1.0, false, GROUP_SYSTEMS},
 	};
 	static_assert( (sizeof( ITEMS ) / sizeof( ITEMS[0] )) == COUNT, "the table of the options and its indices" );
 
@@ -150,6 +152,17 @@ namespace settings
 		}
 		return -1;
 	}
+
+	// failures of the hydraulic systems that the MFD can set (3 systems with 6 failures each)
+	inline constexpr int FAIL_SYSTEMS = 3;
+	inline constexpr int FAIL_KINDS = 6;
+	inline constexpr int FAIL_ROWS = FAIL_SYSTEMS * FAIL_KINDS;
+	inline int FailSystem( int row ) { return (row / FAIL_KINDS) + 1; }
+	inline int FailKind( int row ) { return row % FAIL_KINDS; }
+
+	/** Pages of the MFD */
+	enum Page {PAGE_SETTINGS = 0, PAGE_FAILURES, PAGE_STATUS, PAGE_COUNT};
+	inline int NextPage( int page, int dir ) { return (page + ((dir >= 0) ? 1 : (PAGE_COUNT - 1))) % PAGE_COUNT; }
 
 	/** Position of the option in the list of its group (the MFD shows the groups one after the other). */
 	inline int CountInGroup( int group )

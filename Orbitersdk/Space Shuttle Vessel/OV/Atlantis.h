@@ -985,6 +985,8 @@ class Atlantis: public VESSEL4
 		dps::MasterTimingUnit* MTU( void ) const;
 		virtual T0UmbilicalReference* T0UmbRef( void ) const;
 		APU* GetAPU( int apu ) const;
+		/** @return the water spray boiler of the hydraulic system (1 to 3), or NULL */
+		class WSB* GetWSB( int system ) const;
 		MPM_Base* GetPortMPM( void ) const;
 		MPM_Base* GetStarboardMPM( void ) const;
 		VideoControlUnit* GetVCU( void ) const;
