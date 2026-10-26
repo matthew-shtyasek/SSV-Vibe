@@ -108,6 +108,21 @@ namespace freemove
 		return ClampOffset( offset + (dir * (SPEED * dt)) );
 	}
 
+	/** Key (with Ctrl) of the choice of the setting: the order of settings::FREE_MOVE_KEYS. Zero if the choice does not exist. */
+	inline unsigned int ToggleKey( int choice )
+	{
+		switch (choice)
+		{
+			case 0: return OAPI_KEY_HOME;
+			case 1: return OAPI_KEY_END;
+			case 2: return OAPI_KEY_INSERT;
+			case 3: return OAPI_KEY_DELETE;
+			case 4: return OAPI_KEY_SCROLL;
+			case 5: return OAPI_KEY_GRAVE;
+		}
+		return 0;
+	}
+
 	/** Stations in which the head can be moved (the cameras and the airlock have a fixed position). */
 	inline bool StationAllowsMove( int vcMode, int firstCamera, int lastCamera, int airlockFirst )
 	{

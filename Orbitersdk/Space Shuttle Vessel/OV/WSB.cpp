@@ -77,6 +77,7 @@ void WSB::Realize()
 	ApuSpeed.Connect( pBundle, 5 );
 	PumpNorm.Connect( pBundle, 6 );
 	OilTemp.Connect( pBundle, 7 );
+	CwHydTemp.Connect( BundleManager()->CreateBundle( "WSB_CW", 16 ), usID - 1 );
 	HydTemp.Connect( pBundle, 8 );
 	WaterQty.Connect( pBundle, 9 );
 	HydQty.Connect( pBundle, 10 );
@@ -142,6 +143,7 @@ void WSB::OnPreStep(double simt, double simdt, double mjd)
 	// outputs
 	OilTemp.SetLine( static_cast<float>(hydmodel::TemperatureToVolts( th.oil )) );
 	HydTemp.SetLine( static_cast<float>(hydmodel::TemperatureToVolts( th.hyd )) );
+	CwHydTemp.SetLine( static_cast<float>(hydmodel::HydTemperatureToCwVolts( th.hyd )) );
 	WaterQty.SetLine( static_cast<float>(5.0 * hydmodel::Clamp01( th.water / hydmodel::WATER_TANK )) );
 	HydQty.SetLine( static_cast<float>(5.0 * hydmodel::Clamp01( th.hydQty )) );
 	if (hydmodel::HydraulicsOk( th )) HydOk.SetLine();

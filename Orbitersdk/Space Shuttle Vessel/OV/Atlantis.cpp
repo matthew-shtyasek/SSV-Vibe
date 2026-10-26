@@ -2110,6 +2110,20 @@ int Atlantis::clbkConsumeBufferedKey( DWORD key, bool down, char* kstate )
 		}
 
 		if (KEYMOD_CONTROL(kstate)) {
+			// free movement of the head in the cockpit (the key is a setting, because the arrows are used by the THC)
+			if (down && options->VCFreeMove() && (key == freemove::ToggleKey( options->VCFreeMoveKey() )))
+			{
+				if (oapiCameraInternal() && freemove::StationAllowsMove( VCMode, VC_DOCKCAM, VC_LEECAM, VC_EXT_AL ))
+				{
+					vcFreeMove = !vcFreeMove;
+					if (!vcFreeMove) ResetVCMove();
+					char label[96];
+					sprintf_s( label, sizeof( label ), vcFreeMove ? "Free movement: arrows, Ins/Del (%s to end)" : "Free movement off", settings::FREE_MOVE_KEYS[options->VCFreeMoveKey()] );
+					DisplayCameraLabel( label );
+					return 1;
+				}
+				return 0;
+			}
 			switch (key)
 			{
 			case OAPI_KEY_D:// prevent "manual" undocking
@@ -2148,15 +2162,6 @@ int Atlantis::clbkConsumeBufferedKey( DWORD key, bool down, char* kstate )
 				}
 				else hcView = !hcView;
 				return 1;
-			case OAPI_KEY_M:// free movement of the head in the cockpit
-				if (options->VCFreeMove() && oapiCameraInternal() && freemove::StationAllowsMove( VCMode, VC_DOCKCAM, VC_LEECAM, VC_EXT_AL ))
-				{
-					vcFreeMove = !vcFreeMove;
-					if (!vcFreeMove) ResetVCMove();
-					DisplayCameraLabel( vcFreeMove ? "Free movement: arrows, Ins/Del (Ctrl+M to end)" : "Free movement off" );
-					return 1;
-				}
-				return 0;
 			case OAPI_KEY_W:// write the current RMS POR position and attitude to the log (auto sequence point)
 				if (pRMS) pRMS->LogPOR();
 				return 1;

@@ -34,7 +34,7 @@
 
 namespace settings
 {
-	enum Kind {KIND_BOOL = 0, KIND_INT, KIND_FLOAT};
+	enum Kind {KIND_BOOL = 0, KIND_INT, KIND_FLOAT, KIND_CHOICE};
 
 	enum Group {GROUP_FLIGHT = 0, GROUP_RMS, GROUP_CABIN, GROUP_SYSTEMS, GROUP_COUNT};
 
@@ -51,7 +51,12 @@ namespace settings
 		double step;
 		bool restart;// the option is read only when the vessel is created: the change is for the next start of the simulation
 		int group;
+		const char* const* choices;// names of the values of a KIND_CHOICE (the value is the index)
 	};
+
+	/** Keys (with Ctrl) that switch the free movement of the head on and off. */
+	inline constexpr const char* const FREE_MOVE_KEYS[] = {"Ctrl+Home", "Ctrl+End", "Ctrl+Insert", "Ctrl+Delete", "Ctrl+Scroll Lock", "Ctrl+Grave (`)"};
+	inline constexpr int FREE_MOVE_KEY_COUNT = sizeof( FREE_MOVE_KEYS ) / sizeof( FREE_MOVE_KEYS[0] );
 
 	/** Index of each option in the table (the order of the table). */
 	enum Index
@@ -70,6 +75,7 @@ namespace settings
 		RMS_INERTIA,
 		CABIN_LIGHTING,
 		VC_FREE_MOVE,
+		VC_FREE_MOVE_KEY,
 		HYDRAULIC_THERMAL,
 		COUNT
 	};
@@ -88,7 +94,8 @@ namespace settings
 		{"RMSCenterOfMass", "C.g. follows the arm", "The center of mass of the orbiter follows the arm and the payload that it holds", KIND_BOOL, 0.0, 0.0, 1.0, 1.0, false, GROUP_RMS},
 		{"RMSInertia", "Inertia with the arm", "The moments of inertia of the orbiter change with the arm and the payload that it holds", KIND_BOOL, 0.0, 0.0, 1.0, 1.0, false, GROUP_RMS},
 		{"CabinLighting", "Cabin lighting", "Floodlights and panel lighting follow the switches and knobs (needs the local lights of Orbiter)", KIND_BOOL, 1.0, 0.0, 1.0, 1.0, false, GROUP_CABIN},
-		{"VCFreeMove", "Free head movement", "Ctrl+M: arrows and Ins/Del move the head around the station", KIND_BOOL, 1.0, 0.0, 1.0, 1.0, false, GROUP_CABIN},
+		{"VCFreeMove", "Free head movement", "A key switches it on: then the arrows and Ins/Del move the head around the station", KIND_BOOL, 1.0, 0.0, 1.0, 1.0, false, GROUP_CABIN},
+		{"VCFreeMoveKey", "Free movement key", "Key that switches the free movement of the head on and off (the arrows are used by the THC)", KIND_CHOICE, 0.0, 0.0, FREE_MOVE_KEY_COUNT - 1, 1.0, false, GROUP_CABIN, FREE_MOVE_KEYS},
 		{"HydraulicThermal", "Hydraulic heating", "Heat of the hydraulic fluid and lube oil, boiler cooling and overheating failures", KIND_BOOL, 1.0, 0.0, 1.0, 1.0, false, GROUP_SYSTEMS},
 	};
 	static_assert( (sizeof( ITEMS ) / sizeof( ITEMS[0] )) == COUNT, "the table of the options and its indices" );
@@ -123,6 +130,13 @@ namespace settings
 	{
 		const Item& it = ITEMS[i];
 		if (it.kind == KIND_BOOL) return (v != 0.0) ? 0.0 : 1.0;
+		if (it.kind == KIND_CHOICE)
+		{
+			// the list is circular
+			const int n = (int)(it.max - it.min) + 1;
+			const int i0 = (int)floor( v + 0.5 );
+			return it.min + (double)((((i0 - (int)it.min) + ((dir >= 0) ? 1 : (n - 1))) % n + n) % n);
+		}
 		const double n = floor( ((v - it.min) / it.step) + 0.5 ) + ((dir > 0) ? 1.0 : ((dir < 0) ? -1.0 : 0.0));
 		double r = it.min + (n * it.step);
 		if (it.kind == KIND_FLOAT) r = floor( (r * 1e9) + 0.5 ) / 1e9;// no digits of the error of the product
@@ -140,6 +154,7 @@ namespace settings
 		const Item& it = ITEMS[i];
 		if (it.kind == KIND_BOOL) sprintf_s( buf, size, "%s", (v != 0.0) ? "ON" : "OFF" );
 		else if (it.kind == KIND_INT) sprintf_s( buf, size, "%d", (int)floor( v + 0.5 ) );
+		else if (it.kind == KIND_CHOICE) sprintf_s( buf, size, "%s", it.choices[(int)floor( v + 0.5 )] );
 		else sprintf_s( buf, size, "%.2f", v );
 	}
 

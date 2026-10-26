@@ -257,6 +257,13 @@ namespace hydmodel
 		return (v < 0.0) ? 0.0 : ((v > 5.0) ? 5.0 : v);
 	}
 
+	/** Volts of the sensor of the hydraulic fluid that goes to the C&W: the limit of HYD RSVR T (230 F) is 4.2 V of the table of the C&W. */
+	inline double HydTemperatureToCwVolts( double f )
+	{
+		const double v = f * (4.2 / HYD_CAUTION);
+		return (v < 0.0) ? 0.0 : ((v > 5.0) ? 5.0 : v);
+	}
+
 	/** Temperature from the volts of the sensor. */
 	inline double VoltsToTemperature( double v )
 	{

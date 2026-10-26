@@ -14,6 +14,8 @@ static char g_debugstring[1024];
 #include "../OV/ControllerMath.h"
 #include "../OV/APUModel.h"
 #include "../OV/RMSReaction.h"
+#include "../OV/RMSKin.h"
+#include "../OV/PDRSLogic.h"
 #include "../OV/HydModel.h"
 #include "../OV/ParameterValues.h"
 #include "../OV/SettingsModel.h"
@@ -1148,7 +1150,14 @@ static void test_settings( const char* root )
 		CHECK( (it.key != NULL) && (strlen( it.key ) > 0) );
 		CHECK( (it.label != NULL) && (strlen( it.label ) > 0) && (strlen( it.label ) <= 28) );// it has to fit in a line of the MFD
 		CHECK( (it.note != NULL) && (strlen( it.note ) > 0) && (strlen( it.note ) < 110) );// three lines of the MFD
-		CHECK( (it.kind >= KIND_BOOL) && (it.kind <= KIND_FLOAT) );
+		CHECK( (it.kind >= KIND_BOOL) && (it.kind <= KIND_CHOICE) );
+		if (it.kind == KIND_CHOICE)
+		{
+			CHECK( it.choices != NULL );
+			CHECK( (it.min == 0.0) && (it.step == 1.0) );
+			for (int c = 0; c <= (int)it.max; c++) CHECK( (it.choices[c] != NULL) && (strlen( it.choices[c] ) > 0) && (strlen( it.choices[c] ) <= 20) );
+		}
+		else CHECK( it.choices == NULL );
 		CHECK( it.min <= it.def );
 		CHECK( it.def <= it.max );
 		CHECK( it.step > 0.0 );
@@ -1207,6 +1216,22 @@ static void test_settings( const char* root )
 	CHECK( Step( ITEM_RHC_RATE, 0.77, 1 ) == 0.8 );// a value out of the grid goes to the grid
 	CHECK( IsDefault( ITEM_RHC_RATE, 0.75 ) );
 	CHECK( !IsDefault( ITEM_RHC_RATE, 0.8 ) );
+
+	// the choice of the key: circular in both directions, with the names
+	CHECK( FREE_MOVE_KEY_COUNT == 6 );
+	CHECK_NEAR( ITEMS[VC_FREE_MOVE_KEY].max, FREE_MOVE_KEY_COUNT - 1, 1e-12 );
+	CHECK_NEAR( Step( VC_FREE_MOVE_KEY, 0.0, 1 ), 1.0, 1e-12 );
+	CHECK_NEAR( Step( VC_FREE_MOVE_KEY, FREE_MOVE_KEY_COUNT - 1, 1 ), 0.0, 1e-12 );
+	CHECK_NEAR( Step( VC_FREE_MOVE_KEY, 0.0, -1 ), FREE_MOVE_KEY_COUNT - 1, 1e-12 );
+	CHECK_NEAR( Clamp( VC_FREE_MOVE_KEY, 9.0 ), FREE_MOVE_KEY_COUNT - 1, 1e-12 );
+	// the keys are different and are not the ones of the THC (arrows, Ins and Del without Ctrl are used, but Ctrl+Ins and Ctrl+Del are free)
+	for (int c = 0; c < FREE_MOVE_KEY_COUNT; c++)
+	{
+		CHECK( freemove::ToggleKey( c ) != 0 );
+		for (int d = c + 1; d < FREE_MOVE_KEY_COUNT; d++) CHECK( freemove::ToggleKey( c ) != freemove::ToggleKey( d ) );
+		CHECK( freemove::ToggleKey( c ) != OAPI_KEY_M );// that one is Orbiter's map
+	}
+	CHECK( freemove::ToggleKey( 99 ) == 0 );
 
 	// text
 	char buf[32];
@@ -1454,6 +1479,13 @@ static void test_hyd_model( void )
 	CHECK_NEAR( TemperatureToVolts( 900.0 ), 5.0, 1e-12 );
 	CHECK_NEAR( TemperatureToVolts( -5.0 ), 0.0, 1e-12 );
 	CHECK_NEAR( VoltsToTemperature( TemperatureToVolts( 213.0 ) ), 213.0, 1e-9 );
+	// the C&W: the table of its limits has 2.9 V (290 F, 100 F per volt) for the lube oil and 4.2 V for the hydraulic fluid (230 F)
+	CHECK_NEAR( TemperatureToVolts( OIL_LIMIT ), 2.9, 1e-12 );
+	CHECK_NEAR( HydTemperatureToCwVolts( HYD_CAUTION ), 4.2, 1e-12 );
+	CHECK( HydTemperatureToCwVolts( 229.0 ) < 4.2 );
+	CHECK( HydTemperatureToCwVolts( 231.0 ) > 4.2 );
+	CHECK_NEAR( HydTemperatureToCwVolts( 1000.0 ), 5.0, 1e-12 );
+	CHECK_NEAR( HydTemperatureToCwVolts( -5.0 ), 0.0, 1e-12 );
 	// load
 	CHECK_NEAR( LoadFromFlight( 0.0, false ), 0.25, 1e-12 );
 	CHECK_NEAR( LoadFromFlight( 3000.0, false ), 1.0, 1e-12 );
@@ -1656,9 +1688,226 @@ static void test_hyd_model( void )
 	}
 }
 
+// kinematics of the arm
+static double kin_frand( double a, double b )
+{
+	return a + ((b - a) * (rand() / (double)RAND_MAX));
+}
+
+static void test_rms_kin( void )
+{
+	using namespace rmskin;
+
+	// the arm stowed (all the joints at zero): the same pose that the RMS has at the start
+	{
+		const double q[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+		const Pose p = Forward( q );
+		CHECK_VEC( p.posEE, EE_POS, 1e-9 );
+		CHECK_VEC( p.dirEE, _V( 0.0, 0.0, -1.0 ), 1e-9 );
+		CHECK_VEC( p.rotEE, EE_ROT, 1e-9 );
+		const IKPose ik = ForwardIK( q );
+		CHECK_VEC( ik.pos, _V( SP_JOINT.z - EE_POS.z, 0.0, 0.0 ), 1e-9 );
+		CHECK_VEC( ik.dir, _V( 1.0, 0.0, 0.0 ), 1e-9 );
+		CHECK_VEC( ik.rot, _V( 0.0, 0.0, 1.0 ), 1e-9 );
+		// (the stowed pose is a pose of the cradle: the inverse kinematics of the booms in a plane does not give the zero angles, as it was)
+	}
+
+	// the dimensions of the arm
+	CHECK_NEAR( SP_EP_DIST, 6.7, 0.5 );// the upper boom is about 6.4 m
+	CHECK_NEAR( EP_WP_DIST, 7.1, 0.5 );// and the lower boom about 7 m
+	// a straight arm reaches 15 m from the shoulder
+	{
+		const double zero[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+		CHECK_NEAR( length( ForwardIK( zero ).pos ), 15.316, 0.01 );
+	}
+
+	// the rotation of a joint moves the tip in a circle about its axis; the shoulder yaw keeps the distance to the shoulder
+	{
+		double q[6] = {0.0, 20.0, -30.0, 10.0, 5.0, 0.0};
+		const double d0 = length( Forward( q ).posEE - SP_JOINT );
+		q[SHOULDER_YAW] = 45.0;
+		CHECK_NEAR( length( Forward( q ).posEE - SP_JOINT ), d0, 1e-3 );
+		// the wrist roll does not move the tip, and rotates the roll vector about the direction
+		const Pose a = Forward( q );
+		q[WRIST_ROLL] = 90.0;
+		const Pose b = Forward( q );
+		CHECK_VEC( a.posEE, b.posEE, 1e-9 );
+		CHECK_VEC( a.dirEE, b.dirEE, 1e-9 );
+		CHECK_NEAR( dotp( a.rotEE, b.rotEE ), 0.0, 1e-6 );// perpendicular
+	}
+
+	// forward and inverse: a pose from random joints is reached again by the inverse kinematics (the pose, not the angles, as the same pose can
+	// have different angles)
+	int ok = 0;
+	for (int i = 0; i < 400; i++)
+	{
+		const double q[6] = {kin_frand( -80.0, 80.0 ), kin_frand( 10.0, 100.0 ), kin_frand( -140.0, -20.0 ), kin_frand( -70.0, 70.0 ), kin_frand( -60.0, 60.0 ), kin_frand( -150.0, 150.0 )};
+		const IKPose ik = ForwardIK( q );
+		double a[6];
+		if (!Inverse( ik.pos, ik.dir, ik.rot, q, a )) continue;
+		ok++;
+		const IKPose back = ForwardIK( a );
+		CHECK_VEC( back.pos, ik.pos, 2e-3 );
+		CHECK_VEC( back.dir, ik.dir, 2e-3 );
+		CHECK_VEC( back.rot, ik.rot, 2e-3 );
+	}
+	CHECK( ok > 150 );// most of the poses of random joints are reachable by the inverse kinematics
+
+	// the inverse kinematics of a point that is too far fails
+	{
+		const double q[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+		double a[6];
+		CHECK( !Inverse( _V( 30.0, 0.0, 0.0 ), _V( 1.0, 0.0, 0.0 ), _V( 0.0, 0.0, 1.0 ), q, a ) );
+	}
+}
+
+static pdrs::Input pdrs_input( const double q[6], int mode )
+{
+	pdrs::Input in;
+	memset( &in, 0, sizeof( in ) );
+	in.dt = 0.08;
+	in.selected = true;
+	in.powerPrimary = true;
+	in.powered = true;
+	in.modeSwitch = mode;
+	in.jointSwitch = -1;
+	in.armFree = true;
+	in.rateCoarse = true;
+	in.massEffect = false;
+	in.porOffset = _V( 0.0, 0.0, 0.0 );
+	for (int i = 0; i < 3; i++) in.payloadAxes[i] = _V( 0.0, 0.0, 0.0 );
+	for (int i = 0; i < 6; i++) in.joint[i] = q[i];
+	return in;
+}
+
+static void test_pdrs_logic( void )
+{
+	// single joint drive: the commanded rate is the coarse rate of the joint, then the soft stop is reached
+	{
+		pdrs::Logic logic;
+		double q[6] = {0.0, 10.0, -20.0, 0.0, 0.0, 0.0};
+		pdrs::Output out;
+		pdrs::Input in = pdrs_input( q, pdrs::MODE_SINGLE );
+		in.jointSwitch = rmskin::SHOULDER_PITCH;
+		in.directPlus = true;
+		logic.Step( in, out );
+		CHECK( logic.ModeIs( pdrs::MODE_SINGLE ) );
+		CHECK_NEAR( out.rate[rmskin::SHOULDER_PITCH], pdrs::JOINT_COARSE_SPEED[rmskin::SHOULDER_PITCH], 1e-6 );
+		CHECK_NEAR( out.rate[rmskin::ELBOW_PITCH], 0.0, 1e-9 );
+		CHECK( !out.softStop );
+	}
+
+	// the mode of the switch is idle until ENTER is pushed
+	{
+		pdrs::Logic logic;
+		double q[6] = {0.0, 10.0, -20.0, 0.0, 0.0, 0.0};
+		pdrs::Output out;
+		pdrs::Input in = pdrs_input( q, pdrs::MODE_SINGLE );
+		logic.Step( in, out );
+		in.modeSwitch = pdrs::MODE_END_EFF;
+		logic.Step( in, out );
+		CHECK( !logic.ModeIs( pdrs::MODE_END_EFF ) );
+		in.enter = true;
+		logic.Step( in, out );
+		CHECK( logic.ModeIs( pdrs::MODE_END_EFF ) );
+	}
+
+	// no power: no commands
+	{
+		pdrs::Logic logic;
+		double q[6] = {0.0, 10.0, -20.0, 0.0, 0.0, 0.0};
+		pdrs::Output out;
+		pdrs::Input in = pdrs_input( q, pdrs::MODE_SINGLE );
+		in.powered = false;
+		in.jointSwitch = rmskin::SHOULDER_PITCH;
+		in.directPlus = true;
+		logic.Step( in, out );
+		for (int i = 0; i < 6; i++) CHECK_NEAR( out.rate[i], 0.0, 1e-12 );
+	}
+
+	// closed loop: the software commands the rates, the arm integrates them
+	{
+		pdrs::Logic logic;
+		double q[6] = {10.0, 30.0, -80.0, 20.0, 10.0, 0.0};
+		pdrs::Output out;
+		pdrs::Input in = pdrs_input( q, pdrs::MODE_ORB_UNL );
+		logic.Step( in, out );// the mode is taken at the first cycle
+		CHECK( logic.ModeIs( pdrs::MODE_ORB_UNL ) );
+		VECTOR3 p0, p1;
+		MATRIX3 a0;
+		logic.GetEEState( p0, a0 );
+		in.thc[0] = 5.0;// full deflection, coarse rate: 2 ft/s
+		for (int i = 0; i < 50; i++)
+		{
+			for (int j = 0; j < 6; j++) in.joint[j] = q[j];
+			logic.Step( in, out );
+			for (int j = 0; j < 6; j++) q[j] += out.rate[j] * in.dt;
+		}
+		for (int j = 0; j < 6; j++) in.joint[j] = q[j];
+		logic.Step( in, out );
+		logic.GetEEState( p1, a0 );
+		CHECK_NEAR( length( p1 - p0 ), 4.0 * 24.0, 5.0 );// 4 s at 24 in/s
+
+		// RATE HOLD keeps the rate with the hand controller in detent
+		in.rateHoldPB = true;
+		logic.Step( in, out );
+		in.rateHoldPB = false;
+		in.thc[0] = 0.0;
+		CHECK( logic.IsRateHold() );
+		logic.Step( in, out );
+		CHECK( logic.IsRateHold() );
+		CHECK( (fabs( out.rate[rmskin::ELBOW_PITCH] ) + fabs( out.rate[rmskin::SHOULDER_PITCH] )) > 0.0 );
+	}
+
+	// OPR CMD: the arm goes to the entered position
+	{
+		pdrs::Logic logic;
+		double q[6] = {10.0, 30.0, -80.0, 20.0, 10.0, 0.0};
+		pdrs::Output out;
+		pdrs::Input in = pdrs_input( q, pdrs::MODE_OPR_CMD );
+		logic.Step( in, out );
+		pdrs::Status st;
+		logic.GetStatus( st );
+		char buf[32];
+		for (int i = 0; i < 3; i++)
+		{
+			sprintf_s( buf, "%.3f", st.pos[i] + ((i == 0) ? 10.0 : 0.0) );
+			CHECK( logic.ItemInput( 18 + i, buf ) );
+			sprintf_s( buf, "%.3f", st.att[i] );
+			CHECK( logic.ItemInput( 21 + i, buf ) );
+		}
+		CHECK( logic.ItemInput( 25, "" ) );
+		CHECK( logic.GetControl().cmdck == 1 );
+		in.autoProceed = true;
+		for (int i = 0; i < 2000; i++)
+		{
+			for (int j = 0; j < 6; j++) in.joint[j] = q[j];
+			logic.Step( in, out );
+			for (int j = 0; j < 6; j++) q[j] += out.rate[j] * in.dt;
+			if (logic.GetAutoState() == pdrs::AUTO_IDLE && i > 2) break;
+		}
+		for (int j = 0; j < 6; j++) in.joint[j] = q[j];
+		logic.Step( in, out );
+		logic.GetStatus( st );
+		for (int i = 0; i < 3; i++) CHECK_NEAR( st.pos[i], logic.GetControl().endpos[i], 0.5 );
+		CHECK( logic.GetAutoState() == pdrs::AUTO_IDLE );
+	}
+
+	// parser of the auto sequences
+	{
+		std::istringstream f( "# test\nSEQ 2\nPT 1 2 3 4 5 6 PAUSE\nPT 7 8 9 10 11 12\nSEQ 99\nPT 1 1 1 1 1 1\n" );
+		std::vector<pdrs::AutoPoint> seq[20];
+		CHECK( pdrs::ParseAutoSequences( f, seq ) == 1 );
+		CHECK( seq[1].size() == 2 );
+		CHECK( seq[1][0].pause && !seq[1][1].pause );
+		CHECK_NEAR( seq[1][1].pos[2], 9.0, 1e-12 );
+	}
+}
+
 int main( int argc, char** argv )
 {
 	srand( 12345 );
+	test_pdrs_logic();
 	test_frames();
 	test_euler();
 	test_axis_angle();
@@ -1673,6 +1922,7 @@ int main( int argc, char** argv )
 	test_safing_and_brakes();
 	test_apu_model();
 	test_rms_reaction();
+	test_rms_kin();
 	test_hyd_model();
 	test_settings( (argc > 1) ? argv[1] : NULL );
 	test_free_move();

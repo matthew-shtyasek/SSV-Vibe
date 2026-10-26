@@ -394,6 +394,22 @@ void PrimaryCautionWarning::Realize( void )
 	ParameterData[109].Connect( pBundle, 3 );
 	ParameterData[119].Connect( pBundle, 6 );
 
+	// APU and hydraulic systems (the three systems in order): the temperature of the hydraulic fluid (HYD RSVR T, 4.2 V = 230 F), the lube
+	// oil of the APU (2.9 V = 290 F, 100 F per volt), and the discretes of the overspeed and the underspeed of the APU
+	for (int i = 0; i < 3; i++)
+	{
+		char name[32];
+		pBundle = BundleManager()->CreateBundle( "WSB_CW", 16 );
+		ParameterData[8 + (10 * i)].Connect( pBundle, i );// hydraulic fluid temperature
+		sprintf_s( name, sizeof( name ), "WSB%d", i + 1 );
+		pBundle = BundleManager()->CreateBundle( name, 16 );
+		ParameterData[38 + (10 * i)].Connect( pBundle, 7 );// lube oil temperature
+		sprintf_s( name, sizeof( name ), "R2_To_APU%d", i + 1 );
+		pBundle = BundleManager()->CreateBundle( name, 16 );
+		ParameterData[68 + (10 * i)].Connect( pBundle, 10 );// overspeed
+		ParameterData[98 + (10 * i)].Connect( pBundle, 9 );// underspeed
+	}
+
 	// self-test data
 	pBundle = BundleManager()->CreateBundle( "CW_SELF_TEST", 16 );
 	ParameterData[120].Connect( pBundle, 0 );
@@ -782,7 +798,7 @@ void PrimaryCautionWarning::OnPreStep( double simt, double simdt, double mjd )
 				case 5:
 				case 6:
 				case 7:
-				case 8:
+				//case 8:
 				//case 9:
 				case 10:
 				case 11:
@@ -792,7 +808,7 @@ void PrimaryCautionWarning::OnPreStep( double simt, double simdt, double mjd )
 				case 15:
 				case 16:
 				case 17:
-				case 18:
+				//case 18:
 				//case 19:
 				case 20:
 				case 21:
@@ -802,7 +818,7 @@ void PrimaryCautionWarning::OnPreStep( double simt, double simdt, double mjd )
 				case 25:
 				case 26:
 				case 27:
-				case 28:
+				//case 28:
 				//case 29:
 				case 30:
 				case 31:
@@ -812,7 +828,7 @@ void PrimaryCautionWarning::OnPreStep( double simt, double simdt, double mjd )
 				case 35:
 				case 36:
 				case 37:
-				case 38:
+				//case 38:
 				//case 39:
 				case 40:
 				case 41:
@@ -822,7 +838,7 @@ void PrimaryCautionWarning::OnPreStep( double simt, double simdt, double mjd )
 				case 45:
 				case 46:
 				case 47:
-				case 48:
+				//case 48:
 				//case 49:
 				case 50:
 				case 51:
@@ -832,7 +848,7 @@ void PrimaryCautionWarning::OnPreStep( double simt, double simdt, double mjd )
 				case 55:
 				case 56:
 				case 57:
-				case 58:
+				//case 58:
 				//case 59:
 				case 60:
 				case 61:
@@ -842,7 +858,7 @@ void PrimaryCautionWarning::OnPreStep( double simt, double simdt, double mjd )
 				case 65:
 				case 66:
 				//case 67:
-				case 68:
+				//case 68:
 				//case 69:
 				case 70:
 				case 71:
@@ -852,7 +868,7 @@ void PrimaryCautionWarning::OnPreStep( double simt, double simdt, double mjd )
 				case 75:
 				case 76:
 				case 77:
-				case 78:
+				//case 78:
 				//case 79:
 				case 80:
 				case 81:
@@ -862,7 +878,7 @@ void PrimaryCautionWarning::OnPreStep( double simt, double simdt, double mjd )
 				case 85:
 				case 86:
 				case 87:
-				case 88:
+				//case 88:
 				//case 89:
 				case 90:
 				case 91:
@@ -872,7 +888,7 @@ void PrimaryCautionWarning::OnPreStep( double simt, double simdt, double mjd )
 				case 95:
 				case 96:
 				case 97:
-				case 98:
+				//case 98:
 				//case 99:
 				case 100:
 				//case 101:
@@ -882,7 +898,7 @@ void PrimaryCautionWarning::OnPreStep( double simt, double simdt, double mjd )
 				case 105:
 				case 106:
 				case 107:
-				case 108:
+				//case 108:
 				//case 109:
 				case 110:
 				case 111:
@@ -892,7 +908,7 @@ void PrimaryCautionWarning::OnPreStep( double simt, double simdt, double mjd )
 				case 115:
 				case 116:
 				case 117:
-				case 118:
+				//case 118:
 				//case 119:
 					continue;
 				default:

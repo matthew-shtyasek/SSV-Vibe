@@ -60,7 +60,7 @@ These were made from the geometry of the arm and the mass of the payload; they w
 - Not connected yet: the knobs INSTRUMENT, NUMERIC and ANNUNCIATOR INTENSITY, the circuit breakers of the lighting, the emergency lighting, the middeck and airlock lights. Option `CabinLighting`.
 
 ### Free movement of the head
-Ctrl+M switches it on (and off); then the arrows and Ins/Del move the head (forward, back, left, right, up, down) around the position of the station, inside an ellipsoid of 0.5 m. The arrows and Ins/Del do not operate the THC while it is on. It ends by itself when the view changes to another station. Option `VCFreeMove`.
+Ctrl+Home (the key is the option `VCFreeMoveKey`, chosen in the Settings MFD: Home, End, Page Up, Page Down, Space; Ctrl+M is the map of Orbiter) switches it on (and off); then the arrows and Ins/Del move the head (forward, back, left, right, up, down) around the position of the station, inside an ellipsoid of 0.5 m. The arrows and Ins/Del do not operate the THC while it is on. It ends by itself when the view changes to another station. Option `VCFreeMove`.
 
 ### Settings MFD
 The MFD mode **SSV Settings** (key V in the list of modes, or from the MFD menu) shows the options of the vessel and changes them at once; the SAVE button writes `Config\SSV\Settings.cfg` (it has the format of the configuration of the vessel and replaces the values of `SSV_OV.cfg` when the next simulation starts). Page 2 sets failures of the water spray boilers (training), page 3 shows the temperatures, water and reservoir of the three hydraulic systems. Keys: Up/Down, Left/Right (or the buttons), Enter, S (save), Del (default), A (all), P (page).
@@ -68,7 +68,7 @@ The MFD mode **SSV Settings** (key V in the list of modes, or from the MFD menu)
 ### Hydraulic fluid and APU lube oil: heating, cooling and failures
 - Each APU/hydraulic system has a **water spray boiler** (WSB; panel R2: BOILER PWR, CNTLR/HTR A or B, N2 SUPPLY) with the data of the Crew Operations Manual: spray of the lube oil from 250 F, of the hydraulic fluid from 208 F, bypass valve (through the boiler from 210 F, around it from 190 F), 142 lb of water (spray bars of 10 and 5 lb/min) pushed by nitrogen.
 - The lube oil of a running APU heats (about 15 minutes from cold to 250 F) and the hydraulic fluid heats with the load (aerosurfaces, engine gimbals) and the pump pressure (LOW gives less heat).
-- **Overheating:** more than 230 F in the fluid is the caution HYD RSVR T, more than 290 F in the oil is APU TEMP (both in `Orbiter.log`; the lights of the C&W are not connected yet); **a minute above 290 F and the bearings of the APU seize** (the APU is lost), above 250 F in the fluid the seals degrade and the system leaks until it loses the pressure. As in the manual, change the boiler controller (A or B) first.
+- **Overheating:** more than 230 F in the fluid is the caution HYD RSVR T, more than 290 F in the oil is APU TEMP (both in `Orbiter.log`; the APU TEMP light of the C&W is lit by the same limits, the message of the SM is not done yet); **a minute above 290 F and the bearings of the APU seize** (the APU is lost), above 250 F in the fluid the seals degrade and the system leaks until it loses the pressure. As in the manual, change the boiler controller (A or B) first.
 - Failures (page 2 of the MFD, or in the scenario, block `WSB1` to `WSB3`: `FailCtrlA`, `FailCtrlB`, `IceHyd`, `IceOil`, `N2Leak`, `HydLeak`).
 - The OIL IN temperatures, the H2O quantities and the reservoir quantities now go to the displays (DISP 86 and MEDS APU/HYD) through the analog inputs. Option `HydraulicThermal` (off: the temperatures do not change). The scenarios that start with a running APU begin with a warm system.
 
@@ -83,7 +83,7 @@ The hand controllers and the keys operate the RMS when the view is the aft stati
 ## Known issues and limits
 - **The visual details of the new switches were set by calculation** from the mesh and the texture and can need adjustment (angles of the switches, position of the new indicators).
 - The new visuals (knobs and switches of the lighting, light positions, head movement, the MFD) and the physics of the options of the arm and of the boilers were set by calculation and are not tested in the simulator: the angles, the places of the lights and the heating rates may need adjustment.
-- The lights APU TEMP, UNDERSPEED, OVERSPEED and HYD RSVR T of the C&W are not connected to the logic of the C&W.
+- The lights APU TEMP, UNDERSPEED and OVERSPEED of the C&W are connected to the model; the light HYD RSVR T and the SM messages are not.
 - Auto safing, auto brakes, the failures of the arm (ABE, MCIU, tachometers, encoders) and the delays of the brakes and of the safing are not modelled (the documents have no numbers for the delays).
 - A master alarm at the start of a playback has been seen and the cause is not known: the line `C&W: parameter N tripped` of `Orbiter.log` tells it. Recordings made with older versions of SSV have no panel events (the mouse is still reset).
 - RSLS: the failure branches of the countdown sequence are not implemented (they need data that SSV does not model).
@@ -100,7 +100,7 @@ The hand controllers and the keys operate the RMS when the view is the aft stati
 8. Record a short part of the flight and play it back (the arm and the panel clicks must be replayed).
 9. UNIV PTG: TGT ID 4, then TRK.
 10. Cabin lighting: O6, DIM/BRT knobs (hold the left button on the right or left half of the knob), flood switches; turn the panel knobs down and up.
-11. Ctrl+M and the arrows in the stations; at the aft RMS station the controllers move the arm.
+11. Ctrl+Home and the arrows in the stations; at the aft RMS station the controllers move the arm.
 12. MFD SSV Settings: change an option, SAVE, restart the scenario.
 13. APU start with the boilers off (BOILER PWR OFF cuts the READY TO START): the boiler failures of the MFD with a running APU, watch `Orbiter.log` and DISP 86.
 

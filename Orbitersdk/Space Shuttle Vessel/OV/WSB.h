@@ -123,6 +123,7 @@ private:
 	DiscInPort BoilerN2Supply;
 	DiscOutPort Ready;
 	DiscInPort ApuSpeed, PumpNorm;
+	DiscOutPort CwHydTemp;// hydraulic fluid temperature for the C&W (4.2 V = 230 F)
 	DiscOutPort OilTemp, HydTemp, WaterQty, HydQty, HydOk, LubeSeize, HydCaution, OilCaution, Through;
 };
 

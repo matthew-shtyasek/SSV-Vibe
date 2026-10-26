@@ -14,7 +14,7 @@ added option RMSReaction (the payload that the RMS moves pushes the orbiter, off
 corrected the index of Atlantis::GetAPU
 added options RMSCenterOfMass and RMSInertia (center of mass and moments of inertia of the orbiter with the arm and its payload) and the arm in RMSReaction, all off by default
 added cabin lighting: floodlights and panel lighting with the knobs and switches of the panels O6, O8, R10, L9 and A6U (option CabinLighting)
-added free movement of the head in the virtual cockpit (Ctrl+M, arrows and Ins/Del; option VCFreeMove)
+added free movement of the head in the virtual cockpit (Ctrl+Home by default, arrows and Ins/Del; options VCFreeMove and VCFreeMoveKey)
 added the MFD mode "SSV Settings": options of the vessel (saved in Config/SSV/Settings.cfg), failures of the water spray boilers and status of the hydraulic systems
 added heating of the hydraulic fluid and of the APU lube oil, cooling by the water spray boilers and the failures from overheating (option HydraulicThermal); the OIL IN temperature, the H2O quantity and the reservoir quantity go to the displays
 the hand controllers operate the RMS in the aft RMS station and the RCS elsewhere

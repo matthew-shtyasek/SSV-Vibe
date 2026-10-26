@@ -66,7 +66,7 @@ class SSVOptions
 					bool b = (values[i] != 0.0);
 					if (oapiReadItem_bool( cfg, const_cast<char*>(it.key), b )) values[i] = b ? 1.0 : 0.0;
 				}
-				else if (it.kind == settings::KIND_INT)
+				else if ((it.kind == settings::KIND_INT) || (it.kind == settings::KIND_CHOICE))
 				{
 					int n = (int)values[i];
 					if (oapiReadItem_int( cfg, const_cast<char*>(it.key), n )) values[i] = settings::Clamp( i, n );
@@ -119,7 +119,7 @@ class SSVOptions
 			{
 				const settings::Item& it = settings::ITEMS[i];
 				if (it.kind == settings::KIND_BOOL) oapiWriteItem_bool( f, const_cast<char*>(it.key), values[i] != 0.0 );
-				else if (it.kind == settings::KIND_INT) oapiWriteItem_int( f, const_cast<char*>(it.key), (int)values[i] );
+				else if ((it.kind == settings::KIND_INT) || (it.kind == settings::KIND_CHOICE)) oapiWriteItem_int( f, const_cast<char*>(it.key), (int)values[i] );
 				else oapiWriteItem_float( f, const_cast<char*>(it.key), values[i] );
 			}
 			oapiCloseFile( f, FILE_OUT );
@@ -206,6 +206,12 @@ class SSVOptions
 		bool VCFreeMove( void ) const
 		{
 			return values[settings::VC_FREE_MOVE] != 0.0;
+		}
+
+		/** @return the index of the key of the free movement of the head (settings::FREE_MOVE_KEYS) */
+		int VCFreeMoveKey( void ) const
+		{
+			return (int)values[settings::VC_FREE_MOVE_KEY];
 		}
 
 		bool HydraulicThermal( void ) const
