@@ -580,7 +580,12 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 
 	videoswitcher->TimeStep();
 
-	if (bFirstStep) CheckRFL();
+	if (bFirstStep)
+	{
+		// a stored pose of the payload is only valid if the payload is attached to the arm (Orbiter restores the attachment of the scenario)
+		if (capOffsetValid && ((hAttach == NULL) || (STS()->GetAttachmentStatus( hAttach ) == NULL))) capOffsetValid = false;
+		CheckRFL();
+	}
 
 	// reaction of the arm on the orbiter: the arm accelerates the payload and its own mass (relative to the orbiter), and the orbiter feels the
 	// opposite force at the same places (option RMSReaction). The positions are taken in the frame of the mesh, so that a shift of the c.g.
@@ -1141,6 +1146,11 @@ bool RMS::OnParseLine(const char* line)
 		if (gpcLogic != NULL) gpcLogic->SetAcceptedMode( acceptedMode );
 		return true;
 	}
+	else if(!_strnicmp(line, "PAYLOAD_POSE", 12)) {
+		// pose of the payload in the end effector (see OnBeforePhysicalAttach)
+		if (sscanf_s( line + 12, "%lf %lf %lf %lf %lf %lf %lf %lf %lf", &capPos.x, &capPos.y, &capPos.z, &capDir.x, &capDir.y, &capDir.z, &capRot.x, &capRot.y, &capRot.z ) == 9) capOffsetValid = true;
+		return true;
+	}
 	else if(!_strnicmp(line, "PDRS_IO", 7)) {
 		int io = 1;
 		sscanf_s(line+7, "%d", &io);
@@ -1175,6 +1185,11 @@ void RMS::OnSaveState(FILEHANDLE scn) const
 	oapiWriteScenario_int( scn, "ACCEPTED_MODE", saveGpc ? gpcLogic->GetAcceptedMode() : acceptedMode );
 	sprintf_s( cbuf, 256, "%d %d", saveGpc ? gpcLogic->GetControl().plid : pdrs.plid, saveGpc ? gpcLogic->GetControl().eeid : pdrs.eeid );
 	oapiWriteScenario_string( scn, "PDRS_ID", cbuf );
+	if (capOffsetValid && (hAttach != NULL) && (STS()->GetAttachmentStatus( hAttach ) != NULL))
+	{
+		sprintf_s( cbuf, 256, "%.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g", capPos.x, capPos.y, capPos.z, capDir.x, capDir.y, capDir.z, capRot.x, capRot.y, capRot.z );
+		oapiWriteScenario_string( scn, "PAYLOAD_POSE", cbuf );
+	}
 	oapiWriteScenario_int( scn, "PDRS_IO", (saveGpc ? gpcLogic->GetControl().io : pdrs.io) ? 1 : 0 );
 	WriteScenario_state(scn, "GRAPPLE", Grapple_State);
 	WriteScenario_state(scn, "RIGIDIZE", Rigid_State);
