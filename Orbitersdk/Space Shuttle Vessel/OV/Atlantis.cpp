@@ -5679,7 +5679,7 @@ void Atlantis::SetPanelLighting( int channel, double scale )
 
 void Atlantis::SetVCRotationRange( double left, double right, double up, double down )
 {
-	SetCameraRotationRange( (std::max)( left, PI ), (std::max)( right, PI ), (std::max)( up, 100.0 * RAD ), (std::max)( down, 90.0 * RAD ) );
+	SetCameraRotationRange( (std::max)( left, 2.0 * PI ), (std::max)( right, 2.0 * PI ), (std::max)( up, 100.0 * RAD ), (std::max)( down, 90.0 * RAD ) );
 }
 
 void Atlantis::SetCabinBrightness( double scale )
