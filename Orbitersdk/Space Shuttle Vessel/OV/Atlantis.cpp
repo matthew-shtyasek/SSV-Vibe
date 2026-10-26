@@ -876,7 +876,7 @@ pActiveLatches( 5, NULL ), pXRSound(NULL)
 	RCS_PSSpec.atmslowdown = 30.0;
 	RCS_PSSpec.ltype = PARTICLESTREAMSPEC::EMISSIVE;
 	RCS_PSSpec.levelmap = PARTICLESTREAMSPEC::LVL_PLIN;
-	RCS_PSSpec.lmin = 0.1;
+	RCS_PSSpec.lmin = 0.5;// the plume has the same intensity at any level: the DAP commands small levels (pulses, roll control during OMS burns, time acceleration) that were nearly invisible
 	RCS_PSSpec.lmax = 0.5;
 	RCS_PSSpec.atmsmap = PARTICLESTREAMSPEC::ATM_FLAT;
 	RCS_PSSpec.amin = 1.0;
