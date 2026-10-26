@@ -140,6 +140,9 @@ public:
 	/** @return true if the computer supported modes are run by the GPC (option RMSViaGPC and the software is loaded) */
 	bool UsingGpc( void ) const;
 
+	/** @return true if the arm is selected and has power */
+	bool IsPowered( void ) const {return Powered();}
+
 	/**
 	 * Data entered in the PDRS CONTROL display (SPEC 94).
 	 */

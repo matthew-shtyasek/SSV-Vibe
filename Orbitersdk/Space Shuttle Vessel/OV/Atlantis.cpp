@@ -5579,6 +5579,8 @@ void Atlantis::UpdateRMSControl( void )
 	// for the RCS everywhere else (Ctrl+A inverts it, until the station is changed)
 	const bool focused = oapiCameraInternal() && (oapiGetFocusObject() == GetHandle());
 	const bool inStation = (pRMS != NULL) && focused && (VCMode == VC_RMSSTATION);
+	// in an external view there is no station: the hand controllers go to the arm if it is selected and has power (RCS otherwise), Ctrl+A gives the other one
+	const bool external = (pRMS != NULL) && !oapiCameraInternal() && (oapiGetFocusObject() == GetHandle()) && pRMS->IsPowered();
 	if (VCMode != RMSControlStation)
 	{
 		const bool changed = (RMSControlStation != -1);
@@ -5586,7 +5588,7 @@ void Atlantis::UpdateRMSControl( void )
 		RMSControlOverride = false;
 		if (changed && focused && pRMS) DisplayCameraLabel( inStation ? TEXT_RMSCONTROL : TEXT_RCSCONTROL );
 	}
-	ControlRMS = RMSMath::ControlsRMS( pRMS != NULL, inStation, RMSControlOverride );
+	ControlRMS = RMSMath::ControlsRMS( pRMS != NULL, inStation || external, RMSControlOverride );
 }
 
 void Atlantis::ResetVCMove( void )
