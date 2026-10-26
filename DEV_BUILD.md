@@ -74,6 +74,8 @@ These were made from the geometry of the arm and the mass of the payload; they w
 - Panel lighting: the OFF/BRT knobs of O6 (LEFT/CENTER and LEFT OVERHEAD), O8 (RIGHT/CENTER and RIGHT OVERHEAD), R10 (MS) and A6U (OS) scale the self illumination of the panels of their groups (the knobs at BRT leave the panels as they were).
 - Not connected yet: the knobs INSTRUMENT, NUMERIC and ANNUNCIATOR INTENSITY, the circuit breakers of the lighting, the emergency lighting, the middeck and airlock lights. Option `CabinLighting`.
 
+The pointer of the DIM-BRT and OFF-BRT knobs of O6 and O8 is calibrated by two settings (Settings MFD, group Cabin, or `SSV_OV.cfg`; the scenario must be reloaded): `CabinKnobOffset` (angle of the pointer of the mesh from the middle of the travel, default 90) and `CabinKnobReverse` (reverses the direction). If the pointer does not reach DIM and BRT, or turns the wrong way, change these two and report the values that are right. The head can turn 360 degrees to the sides.
+
 ### Free movement of the head
 Ctrl+Home (the key is the option `VCFreeMoveKey`, chosen in the Settings MFD: Home, End, Page Up, Page Down, Space; Ctrl+M is the map of Orbiter) switches it on (and off); then the arrows and Ins/Del move the head (forward, back, left, right, up, down) around the position of the station, inside an ellipsoid (0.7 m to the sides and forward/back, 0.35 m up, 0.7 m down). The arrows and Ins/Del do not operate the THC while it is on. It ends by itself when the view changes to another station. Option `VCFreeMove`.
 

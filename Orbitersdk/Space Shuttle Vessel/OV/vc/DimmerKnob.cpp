@@ -1,4 +1,5 @@
 #include "DimmerKnob.h"
+#include "../SSVOptions.h"
 #include "../Atlantis.h"
 #include "../LightingMath.h"
 #include <cassert>
@@ -67,10 +68,18 @@ namespace vc
 		assert( bHasDirection && "DimmerKnob.bHasDirection" );
 		assert( (ang > 0.0) && "DimmerKnob.ang" );
 
+		// knobs with a pointer offset (O6, O8) take the calibration from the settings
+		double off = offset;
+		VECTOR3 dir = GetDirection();
+		if (offset != 0.0)
+		{
+			off = STS()->GetOptions()->CabinKnobOffset();
+			if (STS()->GetOptions()->CabinKnobReverse()) dir = -dir;
+		}
 		// the direction of the axis points to the user (the normal of the panel): in the left handed frame of Orbiter a positive angle turns clockwise as seen from the tip of the axis
 		// the group is in the middle of its travel: the first component takes it to the first stop (counterclockwise), the second to the other stop
-		rotStart = new MGROUP_ROTATE( vc_idx, &grpIndex, 1, GetReference(), GetDirection(), static_cast<float>((offset - (0.5 * ang)) * RAD) );
-		rotTravel = new MGROUP_ROTATE( vc_idx, &grpIndex, 1, GetReference(), GetDirection(), static_cast<float>(ang * RAD) );
+		rotStart = new MGROUP_ROTATE( vc_idx, &grpIndex, 1, GetReference(), dir, static_cast<float>((off - (0.5 * ang)) * RAD) );
+		rotTravel = new MGROUP_ROTATE( vc_idx, &grpIndex, 1, GetReference(), dir, static_cast<float>(ang * RAD) );
 		anim_rot = STS()->CreateAnimation( START_STATE );
 		STS()->AddAnimationComponent( anim_rot, 0.0, START_STATE, rotStart );
 		STS()->AddAnimationComponent( anim_rot, START_STATE, 1.0, rotTravel );

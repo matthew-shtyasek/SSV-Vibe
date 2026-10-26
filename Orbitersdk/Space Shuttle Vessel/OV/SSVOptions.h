@@ -208,6 +208,16 @@ class SSVOptions
 			return values[settings::CABIN_LIGHTING] != 0.0;
 		}
 
+		double CabinKnobOffset( void ) const
+		{
+			return values[settings::CABIN_KNOB_OFFSET];
+		}
+
+		bool CabinKnobReverse( void ) const
+		{
+			return values[settings::CABIN_KNOB_REVERSE] != 0.0;
+		}
+
 		bool VCFreeMove( void ) const
 		{
 			return values[settings::VC_FREE_MOVE] != 0.0;
