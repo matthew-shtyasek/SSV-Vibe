@@ -14,6 +14,9 @@ Date         Developer
 #include "../Atlantis.h"
 #include "../ParameterValues.h"
 #include "vc_defs.h"
+#include "StandardSwitch.h"
+#include "DimmerKnob.h"
+#include "../CabinLighting.h"
 #include "../meshres_vc_r10.h"
 
 
@@ -22,6 +25,14 @@ namespace vc
 	PanelR10::PanelR10( Atlantis* _sts ):AtlantisPanel( _sts, "R10" )
 	{
 		DefineMesh( MESHNAME_PANELR10 );
+
+		// MS lighting
+		Add( pMSFlood = new StdSwitch2( _sts, "MS LIGHTING FLOOD" ) );
+		pMSFlood->SetLabel( 0, "OFF" );
+		pMSFlood->SetLabel( 1, "ON" );
+		pMSFlood->SetInitialPosition( 0 );
+		Add( pMSFloodDim = new DimmerKnob( _sts, "MS LIGHTING FLOOD DIM-BRT", 0.5 ) );
+		Add( pPanelMS = new DimmerKnob( _sts, "MS LIGHTING PANEL OFF-BRT", 1.0 ) );
 	}
 
 	PanelR10::~PanelR10()
@@ -30,7 +41,25 @@ namespace vc
 
 	void PanelR10::DefineVC()
 	{
+		const VECTOR3 switch_rot = _V( 0.0, 0.0, -1.0 );
+
 		AddAIDToMouseEventList( AID_R10 );
+
+		pMSFlood->SetInitialAnimState( 0.5f );
+		pMSFlood->DefineGroup( GRP_S12_R10_VC );
+		pMSFlood->SetReference( _V( 1.6240, 2.4906, 12.3585 ), switch_rot );
+		pMSFlood->SetMouseRegion( AID_R10, 0.790722f, 0.311514f, 0.836241f, 0.520646f );
+
+		pMSFloodDim->DefineGroup( GRP_R3_R10_VC );
+		pMSFloodDim->SetReference( _V( 1.6247, 2.4897, 12.3055 ), _V( 0.5446, -0.8387, 0.0 ) );
+		pMSFloodDim->SetAngleRange( 270.0 );
+		pMSFloodDim->SetMouseRegion( AID_R10, 0.873934f, 0.285688f, 0.946764f, 0.574146f );
+
+		pPanelMS->DefineGroup( GRP_R4_R10_VC );
+		pPanelMS->SetReference( _V( 1.6247, 2.4897, 12.4120 ), _V( 0.5446, -0.8387, 0.0 ) );
+		pPanelMS->SetAngleRange( 270.0 );
+		pPanelMS->SetMouseRegion( AID_R10, 0.679378f, 0.256269f, 0.752208f, 0.544727f );
+
 		return;
 	}
 
@@ -49,6 +78,13 @@ namespace vc
 
 	void PanelR10::Realize()
 	{
+		DiscreteBundle* pLtgSw = STS()->BundleManager()->CreateBundle( "CABIN_LTG_SW", CABIN_LTG_SW_BUNDLE_LINES );
+		pMSFlood->ConnectPort( 1, pLtgSw, CabinLighting::SW_MS_ON );
+		DiscreteBundle* pLtgKnob = STS()->BundleManager()->CreateBundle( "CABIN_LTG_KNOB", CABIN_LTG_KNOB_BUNDLE_LINES );
+		pMSFloodDim->Connect( pLtgKnob, CabinLighting::KNOB_MS );
+		DiscreteBundle* pLtgPanel = STS()->BundleManager()->CreateBundle( "CABIN_LTG_PANEL", CABIN_LTG_PANEL_BUNDLE_LINES );
+		pPanelMS->Connect( pLtgPanel, cabinlight::PNL_MS - 1 );
+
 		AtlantisPanel::Realize();
 		return;
 	}

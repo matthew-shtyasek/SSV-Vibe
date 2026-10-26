@@ -65,8 +65,16 @@ Date         Developer
 
 namespace vc
 {
+	class StdSwitch2;
+	class DimmerKnob;
+
+
 	class PanelL9:public AtlantisPanel
 	{
+		private:
+			StdSwitch2* pPSFlood;
+			DimmerKnob* pPSFloodDim;
+
 		public:
 			explicit PanelL9( Atlantis* _sts );
 			virtual ~PanelL9();

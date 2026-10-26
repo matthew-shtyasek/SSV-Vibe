@@ -86,6 +86,7 @@ Date         Developer
 
 
 #include "RMSReaction.h"
+#include "MassProps.h"
 #include "MPM.h"
 #include <vector>
 #include "mission/Mission.h"
@@ -202,6 +203,17 @@ public:
 	 * @return false if there is none
 	 */
 	bool GetGrappleHint( double& distance, double& angle ) const;
+
+	/**
+	 * Gets the points of mass of the arm and of the payload that it holds, for the center of mass and the inertia of the orbiter (positions in the frame of the mesh).
+	 * @param[out] arm the arm where it is
+	 * @param[out] armStowed the arm where it is in the default center of mass of the orbiter (negative mass)
+	 * @param[out] payload the payload held by the arm (zero mass if there is none)
+	 */
+	void GetMassPoints( massprops::Point& arm, massprops::Point& armStowed, massprops::Point& payload ) const;
+
+	/** @return the attachment of the end effector (the payload that the arm holds is attached to it) */
+	ATTACHMENTHANDLE GetEEAttachment( void ) const { return hAttach; }
 
 	/**
 	 * Handles an item entry in the PDRS CONTROL display (SPEC 94).
@@ -426,7 +438,9 @@ private:
 	DiscOutPort BrakesApplied;// BRAKES talkback: the brakes hold the joints (switch ON, or no power)
 	bool safingLatched;// safing is maintained until it is cancelled
 	rmsreact::AccelEstimator reactEst;// acceleration of the payload relative to the orbiter (option RMSReaction)
+	rmsreact::AccelEstimator reactArmEst;// acceleration of the center of mass of the arm relative to the orbiter (option RMSReaction)
 	VESSEL* reactPayload;
+	VECTOR3 posArmCoM;// center of mass of the arm (frame of the mesh)
 	DiscInPort AutoSeqProceed;// AUTO SEQ switch in PROCEED
 	DiscInPort EnterPB;// ENTER pushbutton
 	DiscOutPort ReadyLight, InProgLight;

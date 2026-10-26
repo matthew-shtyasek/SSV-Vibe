@@ -57,10 +57,13 @@ class SSVOptions
 		bool bAlarm1x;
 		bool bRMSPayloadMassEffect;
 		bool bRMSReaction;
+		bool bRMSCenterOfMass;
+		bool bRMSInertia;
+		bool bCabinLighting;
 
 	public:
 		SSVOptions(void):
-			bEIUDataRecorder(false), usPositionLabelTime(3), bAutoActionLandingGear(true), bAutoActionDragChute(true), dRHCRate(RHC_RATE), dRPTARate(RPTA_RATE), dBrakeRate(BRAKE_RATE), bAlarm1x(true), bRMSPayloadMassEffect(false), bRMSReaction(false)
+			bEIUDataRecorder(false), usPositionLabelTime(3), bAutoActionLandingGear(true), bAutoActionDragChute(true), dRHCRate(RHC_RATE), dRPTARate(RPTA_RATE), dBrakeRate(BRAKE_RATE), bAlarm1x(true), bRMSPayloadMassEffect(false), bRMSReaction(false), bRMSCenterOfMass(false), bRMSInertia(false), bCabinLighting(true)
 		{
 		}
 
@@ -92,6 +95,12 @@ class SSVOptions
 			oapiReadItem_bool( cfg, "RMSPayloadMassEffect", bRMSPayloadMassEffect );
 
 			oapiReadItem_bool( cfg, "RMSReaction", bRMSReaction );
+
+			oapiReadItem_bool( cfg, "RMSCenterOfMass", bRMSCenterOfMass );
+
+			oapiReadItem_bool( cfg, "RMSInertia", bRMSInertia );
+
+			oapiReadItem_bool( cfg, "CabinLighting", bCabinLighting );
 			return;
 		}
 
@@ -143,6 +152,21 @@ class SSVOptions
 		bool RMSReaction( void ) const
 		{
 			return bRMSReaction;
+		}
+
+		bool RMSCenterOfMass( void ) const
+		{
+			return bRMSCenterOfMass;
+		}
+
+		bool RMSInertia( void ) const
+		{
+			return bRMSInertia;
+		}
+
+		bool CabinLighting( void ) const
+		{
+			return bCabinLighting;
 		}
 };
 

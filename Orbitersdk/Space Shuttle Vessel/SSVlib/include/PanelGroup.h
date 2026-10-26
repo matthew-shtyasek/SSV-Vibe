@@ -85,6 +85,13 @@ namespace vc {
 		void DefineVC();
 		bool HasPanel(const string& panelname) const;
 		BasicPanel<TVessel>* GetPanel(const string& panelname) const;
+
+		/** Calls the function with each panel of the group. */
+		template <class Func>
+		void ForEachPanel( Func f ) const
+		{
+			for (const auto& x : panels) f( x );
+		}
 		bool ParsePanelBlock(const string& panelname, FILEHANDLE scn);
 		void Realize();
 		bool OnVCMouseEvent (int id, int _event, VECTOR3 &p);

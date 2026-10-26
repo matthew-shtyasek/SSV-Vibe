@@ -14,6 +14,9 @@ static char g_debugstring[1024];
 #include "../OV/ControllerMath.h"
 #include "../OV/APUModel.h"
 #include "../OV/RMSReaction.h"
+#include "../OV/LightingMath.h"
+#include "../OV/CabinLightingData.h"
+#include "../OV/MassProps.h"
 #include "../OV/HandControllers.h"
 #include <fstream>
 #include <vector>
@@ -731,6 +734,281 @@ static void test_controller_parsers( void )
 	CHECK( ctrlmath::ACT_PRESS == HandControllers::PA_PRESS );
 }
 
+// center of mass and inertia of the orbiter with the arm and its payload
+static void test_mass_props( void )
+{
+	using namespace massprops;
+
+	// the shares of the arm add up to the whole arm
+	CHECK_NEAR( SHARE_SHOULDER + SHARE_UPPER_BOOM + SHARE_ELBOW + SHARE_LOWER_BOOM + SHARE_WRIST, 1.0, 1e-12 );
+	// all the joints at one place: the center of mass is that place
+	CHECK_VEC( ArmCoM( _V( 1.0, 2.0, 3.0 ), _V( 1.0, 2.0, 3.0 ), _V( 1.0, 2.0, 3.0 ), _V( 1.0, 2.0, 3.0 ) ), _V( 1.0, 2.0, 3.0 ), 1e-12 );
+	// the arm along a line: the center is between the shoulder and the end
+	{
+		const VECTOR3 c = ArmCoM( _V( 0.0, 0.0, 7.0 ), _V( 0.0, 0.0, 0.6 ), _V( 0.0, 0.0, -6.5 ), _V( 0.0, 0.0, -8.3 ) );
+		CHECK( (c.z < 7.0) && (c.z > -8.3) );
+		const double expected = (7.0 * SHARE_SHOULDER) + (3.8 * SHARE_UPPER_BOOM) + (0.6 * SHARE_ELBOW) + (-2.95 * SHARE_LOWER_BOOM) + (-7.4 * SHARE_WRIST);
+		CHECK_NEAR( c.z, expected, 1e-12 );
+		CHECK_NEAR( c.x, 0.0, 1e-12 );
+	}
+	// the center of mass moves rigidly with the joints
+	{
+		const VECTOR3 sh = _V( 0.3, -0.2, 5.0 ), el = _V( 1.0, 2.0, -1.0 ), wr = _V( -3.0, 0.5, -4.0 ), ee = _V( -3.5, 0.6, -6.0 );
+		const VECTOR3 d = _V( 10.0, -20.0, 5.0 );
+		CHECK_VEC( ArmCoM( sh + d, el + d, wr + d, ee + d ), ArmCoM( sh, el, wr, ee ) + d, 1e-12 );
+	}
+
+	// two masses
+	{
+		const Point p[2] = {{100.0, _V( 0.0, 0.0, 0.0 )}, {300.0, _V( 4.0, 0.0, 8.0 )}};
+		VECTOR3 cog;
+		CHECK_NEAR( Combine( p, 2, cog ), 400.0, 1e-12 );
+		CHECK_VEC( cog, _V( 3.0, 0.0, 6.0 ), 1e-12 );
+		// nothing
+		CHECK_NEAR( Combine( p, 0, cog ), 0.0, 1e-12 );
+		CHECK_VEC( cog, _V( 0.0, 0.0, 0.0 ), 1e-12 );
+		// a pair of equal and opposite masses has no mass, and no center: the origin
+		const Point q[2] = {{5.0, _V( 1.0, 1.0, 1.0 )}, {-5.0, _V( 2.0, 2.0, 2.0 )}};
+		CHECK_NEAR( Combine( q, 2, cog ), 0.0, 1e-12 );
+		CHECK_VEC( cog, _V( 0.0, 0.0, 0.0 ), 1e-12 );
+	}
+
+	// moment of inertia of a point mass
+	CHECK_VEC( PointInertia( 2.0, _V( 0.0, 3.0, 4.0 ), _V( 0.0, 0.0, 0.0 ) ), _V( 50.0, 32.0, 18.0 ), 1e-12 );
+	CHECK_VEC( PointInertia( 2.0, _V( 1.0, 3.0, 4.0 ), _V( 1.0, 0.0, 0.0 ) ), _V( 50.0, 32.0, 18.0 ), 1e-12 );// only the distance counts
+	CHECK_VEC( PointInertia( 0.0, _V( 10.0, 30.0, 40.0 ), _V( 0.0, 0.0, 0.0 ) ), _V( 0.0, 0.0, 0.0 ), 1e-12 );
+
+	// no points: nothing changes
+	{
+		VECTOR3 cog;
+		double mass;
+		const VECTOR3 pmi = ComposePMI( _V( 120.0, 108.0, 13.5 ), 80000.0, _V( 0.1, -0.2, 0.3 ), NULL, 0, cog, mass );
+		CHECK_VEC( pmi, _V( 120.0, 108.0, 13.5 ), 1e-9 );
+		CHECK_VEC( cog, _V( 0.1, -0.2, 0.3 ), 1e-12 );
+		CHECK_NEAR( mass, 80000.0, 1e-9 );
+	}
+
+	// a payload at the center of mass adds mass and no distance: the moments are the same, divided by the larger mass
+	{
+		VECTOR3 cog;
+		double mass;
+		const Point p = {10000.0, _V( 1.0, 2.0, 3.0 )};
+		const VECTOR3 pmi = ComposePMI( _V( 100.0, 200.0, 300.0 ), 90000.0, _V( 1.0, 2.0, 3.0 ), &p, 1, cog, mass );
+		CHECK_NEAR( mass, 100000.0, 1e-9 );
+		CHECK_VEC( cog, _V( 1.0, 2.0, 3.0 ), 1e-12 );
+		CHECK_VEC( pmi, _V( 90.0, 180.0, 270.0 ), 1e-9 );
+	}
+
+	// a payload away from the center: the center moves and the inertia is the sum with the parallel axes
+	{
+		VECTOR3 cog;
+		double mass;
+		const Point p = {100.0, _V( 0.0, 0.0, 10.0 )};
+		const VECTOR3 pmi = ComposePMI( _V( 10.0, 20.0, 30.0 ), 1000.0, _V( 0.0, 0.0, 0.0 ), &p, 1, cog, mass );
+		CHECK_NEAR( mass, 1100.0, 1e-9 );
+		const double zc = 1000.0 / 1100.0;
+		CHECK_VEC( cog, _V( 0.0, 0.0, zc ), 1e-12 );
+		const double d1 = zc;// base from the new center
+		const double d2 = 10.0 - zc;// payload
+		CHECK_NEAR( pmi.x, ((1000.0 * (10.0 + (d1 * d1))) + (100.0 * d2 * d2)) / 1100.0, 1e-9 );
+		CHECK_NEAR( pmi.y, ((1000.0 * (20.0 + (d1 * d1))) + (100.0 * d2 * d2)) / 1100.0, 1e-9 );
+		CHECK_NEAR( pmi.z, 30.0 * 1000.0 / 1100.0, 1e-9 );// on the axis: the roll moment does not change
+	}
+
+	// the result does not depend on where the origin is
+	{
+		const Point p[2] = {{100.0, _V( 1.0, -2.0, 10.0 )}, {-30.0, _V( 0.5, 0.2, 3.0 )}};
+		const VECTOR3 d = _V( 123.0, -45.0, 67.0 );
+		const Point q[2] = {{100.0, p[0].r + d}, {-30.0, p[1].r + d}};
+		VECTOR3 cog1, cog2;
+		double m1, m2;
+		const VECTOR3 a = ComposePMI( _V( 10.0, 20.0, 30.0 ), 1000.0, _V( 0.2, 0.3, -0.4 ), p, 2, cog1, m1 );
+		const VECTOR3 b = ComposePMI( _V( 10.0, 20.0, 30.0 ), 1000.0, _V( 0.2, 0.3, -0.4 ) + d, q, 2, cog2, m2 );
+		CHECK_VEC( a, b, 1e-9 );
+		CHECK_VEC( cog1 + d, cog2, 1e-9 );
+		CHECK_NEAR( m1, m2, 1e-12 );
+	}
+
+	// moving the arm as a displacement (mass where it is, minus mass where it was) is the same as the vessel made from the hull and the arm in the new place
+	{
+		const VECTOR3 hullPMI = _V( 110.0, 105.0, 12.0 );
+		const double hullMass = 70000.0;
+		const VECTOR3 hullCoG = _V( 0.0, 0.5, -1.0 );
+		const double armMass = ARM_MASS;
+		const VECTOR3 stowed = _V( -2.7, 0.7, 0.0 );
+		const VECTOR3 now = _V( -2.0, 3.0, -9.0 );
+
+		// the vessel in the default configuration (the arm stowed)
+		VECTOR3 cog0;
+		double mass0;
+		const Point armStowedPoint = {armMass, stowed};
+		const VECTOR3 pmi0 = ComposePMI( hullPMI, hullMass, hullCoG, &armStowedPoint, 1, cog0, mass0 );
+
+		// the vessel built with the arm in the new place
+		VECTOR3 cogDirect;
+		double massDirect;
+		const Point armNowPoint = {armMass, now};
+		const VECTOR3 pmiDirect = ComposePMI( hullPMI, hullMass, hullCoG, &armNowPoint, 1, cogDirect, massDirect );
+
+		// the displacement
+		const Point disp[2] = {{armMass, now}, {-armMass, stowed}};
+		VECTOR3 cogDisp;
+		double massDisp;
+		const VECTOR3 pmiDisp = ComposePMI( pmi0, mass0, cog0, disp, 2, cogDisp, massDisp );
+		CHECK_NEAR( massDisp, massDirect, 1e-9 );
+		CHECK_VEC( cogDisp, cogDirect, 1e-9 );
+		CHECK_VEC( pmiDisp, pmiDirect, 1e-9 );
+
+		// the arm where it was: nothing changes
+		const Point none[2] = {{armMass, stowed}, {-armMass, stowed}};
+		VECTOR3 cogNone;
+		double massNone;
+		const VECTOR3 pmiNone = ComposePMI( pmi0, mass0, cog0, none, 2, cogNone, massNone );
+		CHECK_VEC( pmiNone, pmi0, 1e-9 );
+		CHECK_VEC( cogNone, cog0, 1e-12 );
+		CHECK_NEAR( massNone, mass0, 1e-9 );
+
+		// the center moves in the direction of the displacement and in the right proportion
+		CHECK_VEC( cogDisp - cog0, (now - stowed) * (armMass / mass0), 1e-9 );
+	}
+
+	// a payload on a long arm: more moment about the axes perpendicular to the arm, none about the arm itself
+	{
+		VECTOR3 cog;
+		double mass;
+		const Point hubble = {11000.0, _V( 0.0, 0.0, -15.0 )};
+		const VECTOR3 pmi = ComposePMI( _V( 120.0, 109.0, 13.5 ), 78000.0, _V( 0.0, 0.0, 0.0 ), &hubble, 1, cog, mass );
+		CHECK( pmi.x > 120.0 * 78000.0 / mass );// pitch
+		CHECK( pmi.y > 109.0 * 78000.0 / mass );// yaw
+		CHECK_NEAR( pmi.z, 13.5 * 78000.0 / mass, 1e-9 );// roll (the arm is along the roll axis)
+		CHECK( cog.z < 0.0 );
+	}
+
+	// added inertia, with the mass already in the vessel
+	{
+		const Point p[2] = {{11000.0, _V( 0.0, 0.0, -15.0 )}, {0.0, _V( 1.0, 1.0, 1.0 )}};
+		const VECTOR3 added = AddedPMI( p, 2, _V( 0.0, 0.0, 0.0 ), 100000.0 );
+		CHECK_NEAR( added.x, 11000.0 * 225.0 / 100000.0, 1e-9 );
+		CHECK_NEAR( added.y, 11000.0 * 225.0 / 100000.0, 1e-9 );
+		CHECK_NEAR( added.z, 0.0, 1e-12 );
+		CHECK_VEC( AddedPMI( p, 2, _V( 0.0, 0.0, 0.0 ), 0.0 ), _V( 0.0, 0.0, 0.0 ), 1e-12 );
+		CHECK_VEC( AddedPMI( NULL, 0, _V( 0.0, 0.0, 0.0 ), 1000.0 ), _V( 0.0, 0.0, 0.0 ), 1e-12 );
+		// the arm in the same place with opposite masses adds nothing
+		const Point pair[2] = {{ARM_MASS, _V( 1.0, 2.0, 3.0 )}, {-ARM_MASS, _V( 1.0, 2.0, 3.0 )}};
+		CHECK_VEC( AddedPMI( pair, 2, _V( 5.0, 5.0, 5.0 ), 80000.0 ), _V( 0.0, 0.0, 0.0 ), 1e-12 );
+	}
+}
+
+// cabin lighting: levels of the floodlights and of the panels
+static void test_lighting( void )
+{
+	using namespace lightmath;
+
+	// knob and voltage
+	CHECK_NEAR( KnobFromVolts( 0.0 ), 0.0, 1e-12 );
+	CHECK_NEAR( KnobFromVolts( 2.5 ), 0.5, 1e-12 );
+	CHECK_NEAR( KnobFromVolts( 5.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( KnobFromVolts( -3.0 ), 0.0, 1e-12 );
+	CHECK_NEAR( KnobFromVolts( 9.0 ), 1.0, 1e-12 );
+
+	// the level follows the knob: the OFF/DIM stop is the lowest level, BRT the full level, and it grows with the knob
+	CHECK_NEAR( KnobLevel( 0.0 ), 0.0, 1e-12 );
+	CHECK_NEAR( KnobLevel( 1.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( KnobLevel( 0.5 ), 0.25, 1e-12 );
+	CHECK_NEAR( KnobLevel( -1.0 ), 0.0, 1e-12 );
+	CHECK_NEAR( KnobLevel( 2.0 ), 1.0, 1e-12 );
+	double last = -1.0;
+	for (int i = 0; i <= 100; i++)
+	{
+		const double l = KnobLevel( i / 100.0 );
+		CHECK( l >= last );
+		CHECK( (l >= 0.0) && (l <= 1.0) );
+		last = l;
+	}
+
+	// glareshield: BRIGHT, VAR (knob), OFF
+	CHECK_NEAR( GlareshieldLevel( true, false, 0.0 ), 1.0, 1e-12 );// BRIGHT ignores the knob
+	CHECK_NEAR( GlareshieldLevel( true, true, 0.3 ), 1.0, 1e-12 );// BRIGHT has priority
+	CHECK_NEAR( GlareshieldLevel( false, true, 0.5 ), 0.25, 1e-12 );
+	CHECK_NEAR( GlareshieldLevel( false, true, 1.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( GlareshieldLevel( false, true, 0.0 ), 0.0, 1e-12 );
+	CHECK_NEAR( GlareshieldLevel( false, false, 1.0 ), 0.0, 1e-12 );// OFF ignores the knob
+
+	// stations: ON/OFF and a knob
+	CHECK_NEAR( SwitchedLevel( true, 1.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( SwitchedLevel( true, 0.5 ), 0.25, 1e-12 );
+	CHECK_NEAR( SwitchedLevel( false, 1.0 ), 0.0, 1e-12 );
+
+	// seat and console: one of them, never both
+	CHECK( SeatConsoleSelect( true, false ) == SC_SEAT );
+	CHECK( SeatConsoleSelect( false, true ) == SC_CONSOLE );
+	CHECK( SeatConsoleSelect( false, false ) == SC_OFF );
+	CHECK( SeatConsoleSelect( true, true ) == SC_OFF );
+
+	// panels: BRT is the panel as it is in the mesh
+	CHECK_NEAR( PanelScale( 1.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( PanelScale( 0.0 ), 0.0, 1e-12 );
+	CHECK( PanelScale( 0.7 ) < PanelScale( 0.8 ) );
+
+	// emitter
+	CHECK_NEAR( EmitterIntensity( 0.5, 1.0 ), 0.5, 1e-12 );
+	CHECK_NEAR( EmitterIntensity( 0.5, 3.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( EmitterIntensity( -0.5, 1.0 ), 0.0, 1e-12 );
+
+	// ramp: the level does not jump and does not pass the target
+	CHECK_NEAR( Ramp( 0.0, 1.0, 4.0, 0.1 ), 0.4, 1e-12 );
+	CHECK_NEAR( Ramp( 0.9, 1.0, 4.0, 0.1 ), 1.0, 1e-12 );
+	CHECK_NEAR( Ramp( 1.0, 0.0, 4.0, 0.1 ), 0.6, 1e-12 );
+	CHECK_NEAR( Ramp( 0.1, 0.0, 4.0, 0.1 ), 0.0, 1e-12 );
+	CHECK_NEAR( Ramp( 0.5, 0.5, 4.0, 0.1 ), 0.5, 1e-12 );
+	{
+		double l = 0.0;
+		int steps = 0;
+		while ((l < 1.0) && (steps < 1000))
+		{
+			l = Ramp( l, 1.0, 4.0, 0.05 );
+			steps++;
+		}
+		CHECK( steps == 5 );// 0.25 s from dark to full
+	}
+}
+
+// the table of the panels of the cabin lighting (made from the meshes by tools/gen-cabin-lighting-data.py)
+static void test_panel_lighting_table( void )
+{
+	using namespace cabinlight;
+
+	CHECK( PANEL_LIGHTING_COUNT > 40 );
+	int perChannel[PNL_COUNT] = {0, 0, 0, 0, 0, 0, 0};
+	for (int i = 0; i < PANEL_LIGHTING_COUNT; i++)
+	{
+		const PanelLightingEntry& e = PANEL_LIGHTING[i];
+		const std::string name = e.mesh;
+		CHECK( name.compare( 0, 5, "panel" ) == 0 );// the meshes are panelXX
+		bool lower = true;
+		for (char c : name) lower = lower && !((c >= 'A') && (c <= 'Z'));
+		CHECK( lower );
+		CHECK( (e.channel >= PNL_NONE) && (e.channel < PNL_COUNT) );
+		CHECK( e.channel != PNL_NONE );// every panel has a channel
+		CHECK( e.dimMask != 0 );// and something to dim: the first material of a panel mesh is the panel
+		CHECK( (e.dimMask & 1) != 0 );
+		perChannel[e.channel]++;
+		// the names are unique
+		for (int j = i + 1; j < PANEL_LIGHTING_COUNT; j++) CHECK( name != PANEL_LIGHTING[j].mesh );
+	}
+	// all the channels have panels (the knobs have something to dim)
+	for (int c = PNL_LEFT_CTR; c < PNL_COUNT; c++) CHECK( perChannel[c] > 0 );
+	// the panels of the controls are in their channels
+	for (int i = 0; i < PANEL_LIGHTING_COUNT; i++)
+	{
+		const std::string name = PANEL_LIGHTING[i].mesh;
+		if (name == "panelo6") CHECK( PANEL_LIGHTING[i].channel == PNL_LEFT_OVHD );
+		if (name == "panelo8") CHECK( PANEL_LIGHTING[i].channel == PNL_RIGHT_OVHD );
+		if (name == "panelr10") CHECK( PANEL_LIGHTING[i].channel == PNL_MS );
+		if (name == "panela6u") CHECK( PANEL_LIGHTING[i].channel == PNL_OS );
+	}
+}
+
 int main( int argc, char** argv )
 {
 	srand( 12345 );
@@ -748,6 +1026,9 @@ int main( int argc, char** argv )
 	test_safing_and_brakes();
 	test_apu_model();
 	test_rms_reaction();
+	test_lighting();
+	test_panel_lighting_table();
+	test_mass_props();
 	test_controller_parsers();
 	test_controller_examples( (argc > 1) ? argv[1] : NULL );
 	printf( "%d checks, %d failed\n", g_checks, g_failed );

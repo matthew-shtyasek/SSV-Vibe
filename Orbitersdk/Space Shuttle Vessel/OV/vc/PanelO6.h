@@ -75,6 +75,7 @@ using namespace discsignals;
 namespace vc
 {
 	class StdSwitch2;
+	class DimmerKnob;
 	class StdSwitch3;
 	class StandardTalkback2;
 	class StandardTalkback3;
@@ -85,7 +86,12 @@ namespace vc
 
 	class PanelO6 : public AtlantisPanel {
 	private:
-		//StdSwitch3* pLGlareShieldFlood;
+		StdSwitch3* pLGlareshieldFlood;
+		DimmerKnob* pLGlareshieldDim;
+		StdSwitch3* pLSeatConsoleFlood;
+		DimmerKnob* pLSeatConsoleDim;
+		DimmerKnob* pPanelLeftCenter;
+		DimmerKnob* pPanelLeftOverhead;
 		StandardTalkback3* pStarTrackerDoorPositionY;
 		StandardTalkback3* pStarTrackerDoorPositionZ;
 		StandardSwitchCover* pStarTrackerDoorControlSys1Cover;
@@ -94,7 +100,6 @@ namespace vc
 		StdSwitch3* pStarTrackerDoorControlSys2;
 		StdSwitch2* pStarTrackerPowerY;
 		StdSwitch2* pStarTrackerPowerZ;
-		//StdSwitch3* pLeftSeatCenterFlood;
 		//StdSwitch2* pUHFXmitFreq;
 		//StdSwitch2* pUHFSPLXPowerAmp;
 		//StdSwitch2* pUHFSquelch;

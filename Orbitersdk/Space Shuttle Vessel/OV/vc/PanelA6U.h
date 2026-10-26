@@ -79,6 +79,7 @@ namespace vc
 {
 	class LockableLever2;
 	class StdSwitch2;
+	class DimmerKnob;
 	class StdSwitch3;
 	class RotaryDemuxSwitch;
 	class PushButtonIndicatorSingleLight;
@@ -103,6 +104,9 @@ namespace vc
 			void OnPreStep(double simt, double simdt, double mjd) override;
 
 		private:
+			StdSwitch2* pOSFlood;
+			DimmerKnob* pOSFloodDim;
+			DimmerKnob* pPanelOS;
 			typedef enum { PL1=0, PL2=1, PL3=2, MON=3 } PAYLOAD; // both monitor positions are the same, so we only need 1 MON enum
 
 			PanelA6U::PAYLOAD GetSelectedPayload() const;

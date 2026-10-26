@@ -613,6 +613,11 @@ class Atlantis: public VESSEL4
 		double pl_mass;
 
 		VECTOR3 currentCoG; // 0,0,0 corresponds to CoG at center of Orbiter mesh
+		VECTOR3 basePMI;// PMI of the current configuration without the effect of the arm and the payload that it holds (options RMSCenterOfMass and RMSInertia)
+		VECTOR3 appliedPMI;// PMI set in the last update
+
+		/** Sets the PMI of the configuration (the effect of the arm is added by UpdateMassAndCoG). */
+		void SetConfigurationPMI( const VECTOR3& pmi );
 
 		bool hasCISS;
 
@@ -802,6 +807,13 @@ class Atlantis: public VESSEL4
 		bool GravityLoaded( void ) const { return (status < 3/*STATE_ORBITER*/) || GroundContact(); }
 
 		RMS* GetRMS( void ) const { return pRMS; }
+
+		/**
+		 * Sets the brightness of the panel lighting of a channel (cabinlight::PanelChannel): the panels of the channel scale their self illumination.
+		 * @param channel channel of the lighting
+		 * @param scale [0, 1], 1 = the panel as it is in the mesh
+		 */
+		void SetPanelLighting( int channel, double scale );
 
 		~Atlantis();
 

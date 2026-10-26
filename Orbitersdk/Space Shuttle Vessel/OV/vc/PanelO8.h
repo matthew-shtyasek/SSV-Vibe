@@ -68,6 +68,7 @@ namespace vc
 {
 	class StdSwitch2;
 	class StdSwitch3;
+	class DimmerKnob;
 
 
 	class PanelO8:public AtlantisPanel
@@ -75,6 +76,12 @@ namespace vc
 		private:
 			StdSwitch2* pRadarAltimeter[2];
 			StdSwitch3* pAnnunciatorLampTest;
+			StdSwitch3* pRGlareshieldFlood;
+			DimmerKnob* pRGlareshieldDim;
+			StdSwitch3* pRSeatConsoleFlood;
+			DimmerKnob* pRSeatConsoleDim;
+			DimmerKnob* pPanelRightCenter;
+			DimmerKnob* pPanelRightOverhead;
 
 		public:
 			explicit PanelO8( Atlantis* psts );

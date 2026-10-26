@@ -63,6 +63,10 @@ Date         Developer
 #include <string>
 #include <BasicPanel.h>
 #include "../Atlantis.h"
+#include "../CabinLightingData.h"
+#include <cstring>
+#include <cctype>
+#include <cmath>
 
 
 namespace vc
@@ -74,7 +78,10 @@ using namespace std;
 class AtlantisPanel : public BasicPanel<Atlantis>
 {
 public:
-	AtlantisPanel(Atlantis* _sts, const std::string& _name) : BasicPanel(_sts, _name) {};
+	AtlantisPanel(Atlantis* _sts, const std::string& _name) : BasicPanel(_sts, _name), lightingChannel(cabinlight::PNL_NONE), dimMask(0), glow(1.0)
+	{
+		for (int i = 0; i < 32; i++) baseEmissive[i][0] = baseEmissive[i][1] = baseEmissive[i][2] = -1.0f;
+	};
 	virtual ~AtlantisPanel() {};
 	Atlantis* STS() const { return V(); };
 
@@ -87,6 +94,26 @@ public:
 			STS()->SetMeshVisibilityMode( mesh_idx, MESHVIS_VC );
 		}
 		return;
+	}
+
+	/** @return the channel of the panel lighting that dims this panel (cabinlight::PanelChannel) */
+	int GetLightingChannel() const { return lightingChannel; }
+
+	/**
+	 * Sets the brightness of the panel lighting: the self illumination of the panel surfaces is scaled (1 = as it is in the mesh).
+	 * @param scale [0, 1]
+	 */
+	void SetGlow( double scale )
+	{
+		if (fabs( scale - glow ) < 0.002) return;
+		glow = scale;
+		ApplyGlow();
+	}
+
+	void VisualCreated() override
+	{
+		BasicPanel::VisualCreated();
+		ApplyGlow();
 	}
 
 	void SetMeshVisibility( bool visible )override
@@ -111,9 +138,64 @@ protected:
 	{
 		hMesh = oapiLoadMeshGlobal( meshname );
 		mesh_idx = (UINT)-1;
+		FindLighting( meshname );
 		this->panelofs = panelofs;
 		bHasOwnVCMesh = true;
 		return;
+	}
+
+private:
+	int lightingChannel;
+	unsigned long dimMask;// materials of the mesh that the panel lighting dims
+	double glow;
+	float baseEmissive[32][3];// emissive color of the materials in the mesh (-1 = not read yet)
+
+	/** Looks in the table of the cabin lighting for the mesh. */
+	void FindLighting( const char* meshname )
+	{
+		const char* base = meshname;
+		for (const char* c = meshname; *c != 0; c++)
+		{
+			if ((*c == '\\') || (*c == '/')) base = c + 1;
+		}
+		char lower[64];
+		size_t n = 0;
+		for (; (base[n] != 0) && (n < (sizeof( lower ) - 1)); n++) lower[n] = static_cast<char>(tolower( static_cast<unsigned char>(base[n]) ));
+		lower[n] = 0;
+		lightingChannel = cabinlight::PNL_NONE;
+		dimMask = 0;
+		for (int i = 0; i < cabinlight::PANEL_LIGHTING_COUNT; i++)
+		{
+			if (strcmp( lower, cabinlight::PANEL_LIGHTING[i].mesh ) == 0)
+			{
+				lightingChannel = cabinlight::PANEL_LIGHTING[i].channel;
+				dimMask = cabinlight::PANEL_LIGHTING[i].dimMask;
+				break;
+			}
+		}
+	}
+
+	void ApplyGlow()
+	{
+		if ((mesh_idx == (UINT)-1) || (dimMask == 0) || (STS()->Get_vis() == 0)) return;
+		DEVMESHHANDLE hDev = STS()->GetDevMesh( STS()->Get_vis(), mesh_idx );
+		if (hDev == NULL) return;
+		for (unsigned int i = 0; i < 32; i++)
+		{
+			if ((dimMask & (1ul << i)) == 0) continue;
+			MATERIAL mat;
+			if (oapiMeshMaterial( hDev, i, &mat ) != 0) continue;
+			if (baseEmissive[i][0] < 0.0f)
+			{
+				baseEmissive[i][0] = mat.emissive.r;
+				baseEmissive[i][1] = mat.emissive.g;
+				baseEmissive[i][2] = mat.emissive.b;
+			}
+			mat.emissive.r = baseEmissive[i][0] * static_cast<float>(glow);
+			mat.emissive.g = baseEmissive[i][1] * static_cast<float>(glow);
+			mat.emissive.b = baseEmissive[i][2] * static_cast<float>(glow);
+			oapiSetMaterial( hDev, i, &mat );
+		}
 	}
 };
 

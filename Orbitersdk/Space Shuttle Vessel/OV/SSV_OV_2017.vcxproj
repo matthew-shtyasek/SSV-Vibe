@@ -418,6 +418,8 @@
     <ClCompile Include="RMS.cpp" />
     <ClCompile Include="mps\SSME.cpp" />
     <ClCompile Include="vc\RotarySwitchPotentiometer.cpp" />
+    <ClCompile Include="vc\DimmerKnob.cpp" />
+    <ClCompile Include="CabinLighting.cpp" />
     <ClCompile Include="vc\PushWheel.cpp" />
     <ClCompile Include="vc\SelectorWheel.cpp" />
     <ClCompile Include="vc\StandardCurvedMechMeter.cpp" />
@@ -761,6 +763,11 @@
     <ClInclude Include="RMS.h" />
     <ClInclude Include="mps\SSME.h" />
     <ClInclude Include="vc\RotarySwitchPotentiometer.h" />
+    <ClInclude Include="vc\DimmerKnob.h" />
+    <ClInclude Include="CabinLighting.h" />
+    <ClInclude Include="CabinLightingData.h" />
+    <ClInclude Include="LightingMath.h" />
+    <ClInclude Include="MassProps.h" />
     <ClInclude Include="vc\PushWheel.h" />
     <ClInclude Include="vc\SelectorWheel.h" />
     <ClInclude Include="vc\StandardCurvedMechMeter.h" />

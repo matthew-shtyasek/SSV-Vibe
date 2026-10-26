@@ -346,6 +346,9 @@ Date         Developer
 #include "DDU.h"
 #include "HUD.h"
 #include "APU.h"
+#include "CabinLighting.h"
+#include "MassProps.h"
+#include "vc/AtlantisPanel.h"
 #include "RHC.h"
 #include "THC.h"
 #include "RPTA.h"
@@ -731,6 +734,8 @@ pActiveLatches( 5, NULL ), pXRSound(NULL)
 
 	orbiter_ofs = _V(0, 0, 0);
 	currentCoG = _V(0.0, 0.0, 0.0);
+	basePMI = _V( 0.0, 0.0, 0.0 );
+	appliedPMI = _V( 0.0, 0.0, 0.0 );
 
 	// preload meshes
 	hOrbiterMesh = oapiLoadMeshGlobal( MESHNAME_ORBITER );
@@ -2790,7 +2795,7 @@ void Atlantis::SetLaunchConfiguration(void)
 	SetSize(30.0);
 	SetCrossSections(_V(668.94, 676.94, 258.97));
 	SetRotDrag(_V(0.7, 0.1, 0.3));
-	SetPMI(_V(249.62, 239.97, 67.43));
+	SetConfigurationPMI( _V( 249.62, 239.97, 67.43 ) );
 
 	DefineTouchdownPoints();
 
@@ -2854,7 +2859,7 @@ void Atlantis::SetOrbiterTankConfiguration(void)
 	//SetEmptyMass (ORBITER_EMPTY_MASS + TANK_EMPTY_MASS + pl_mass);
 	SetCrossSections(_V(303.91, 422.33, 153.51));
 	SetRotDrag(_V(0.7, 0.1, 0.3));
-	SetPMI(_V(131.82, 131.49, 59.28));
+	SetConfigurationPMI( _V( 131.82, 131.49, 59.28 ) );
 	SetTouchdownPoints(_V(0, -5, 30), _V(-10, -10, -30), _V(10, 0, -30));
 
 	// ************************* propellant specs **********************************
@@ -2897,7 +2902,7 @@ void Atlantis::SetOrbiterConfiguration(void)
 	// *********************** physical parameters *********************************
 
 	SetSize(19.6);
-	SetPMI(_V(120.2, 108.8, 13.497));
+	SetConfigurationPMI( _V( 120.2, 108.8, 13.497 ) );
 	SetGravityGradientDamping(20.0);
 	SetCrossSections(ORBITER_CS);
 	DefineTouchdownPoints();
@@ -5491,6 +5496,27 @@ void Atlantis::UpdateMPSManifold(void)
 	return;
 }
 
+void Atlantis::SetPanelLighting( int channel, double scale )
+{
+	vc::PanelGroup<Atlantis>* groups[] = {pgForward, pgLeft, pgCenter, pgRight, pgOverhead, pgOverheadAft, pgAftPort, pgAft, pgAftStbd};
+	for (vc::PanelGroup<Atlantis>* pg : groups)
+	{
+		if (pg == NULL) continue;
+		pg->ForEachPanel( [channel, scale]( vc::BasicPanel<Atlantis>* panel )
+		{
+			vc::AtlantisPanel* ap = dynamic_cast<vc::AtlantisPanel*>(panel);
+			if ((ap != NULL) && (ap->GetLightingChannel() == channel)) ap->SetGlow( scale );
+		} );
+	}
+}
+
+void Atlantis::SetConfigurationPMI( const VECTOR3& pmi )
+{
+	basePMI = pmi;
+	appliedPMI = pmi;
+	SetPMI( pmi );
+}
+
 void Atlantis::UpdateMassAndCoG( bool bUpdateAttachedVessels )
 {
 	std::vector<double> masses;
@@ -5502,6 +5528,16 @@ void Atlantis::UpdateMassAndCoG( bool bUpdateAttachedVessels )
 	double subsysMass = 0.0;// mass of subsystems
 	VECTOR3 subsysCoG = _V( 0.0, 0.0, 0.0 );
 
+	// the arm and the payload that it holds (options RMSCenterOfMass and RMSInertia)
+	const bool rmsCoG = (pRMS != NULL) && options->RMSCenterOfMass();
+	const bool rmsInertia = (pRMS != NULL) && options->RMSInertia();
+	ATTACHMENTHANDLE ahRMS = rmsCoG ? pRMS->GetEEAttachment() : NULL;// the payload of the arm is handled with the arm
+	massprops::Point rmsArm = {0.0, _V( 0.0, 0.0, 0.0 )};
+	massprops::Point rmsArmStowed = rmsArm;
+	massprops::Point rmsPayload = rmsArm;
+	if (rmsCoG || rmsInertia) pRMS->GetMassPoints( rmsArm, rmsArmStowed, rmsPayload );
+	const double rmsPayloadMass = rmsCoG ? rmsPayload.m : 0.0;// counted here, at the place that the arm gives it
+
 	// get mass and c.g. of attached payloads
 	//if (bUpdateAttachedVessels)
 	//{
@@ -5509,7 +5545,7 @@ void Atlantis::UpdateMassAndCoG( bool bUpdateAttachedVessels )
 		for (DWORD i = 0; i < attachmentCount; i++)
 		{
 			ATTACHMENTHANDLE ah = GetAttachmentHandle( false, i );
-			if ((ah != ahET) && (ah != ahLeftSRB) && (ah != ahRightSRB))
+			if ((ah != ahET) && (ah != ahLeftSRB) && (ah != ahRightSRB) && (ah != ahRMS))
 			{
 				if (GetAttachmentStatus( ah ))
 				{
@@ -5549,7 +5585,7 @@ void Atlantis::UpdateMassAndCoG( bool bUpdateAttachedVessels )
 	}
 
 	// set empty mass
-	SetEmptyMass( pMission->GetOrbiterMass() + subsysMass + pl_mass + payloadMass + stackMass );
+	SetEmptyMass( pMission->GetOrbiterMass() + subsysMass + pl_mass + payloadMass + rmsPayloadMass + stackMass );
 
 
 	// calc overall c.g.
@@ -5559,6 +5595,19 @@ void Atlantis::UpdateMassAndCoG( bool bUpdateAttachedVessels )
 	shuttleMass -= payloadMass;
 	masses.push_back( payloadMass );
 	positions.push_back( payloadCoG );
+
+	// payload of the arm and the arm: the arm is part of the default c.g., so it is added as a displacement (its mass where it is, and minus its mass where it was)
+	if (rmsCoG)
+	{
+		shuttleMass -= rmsPayloadMass;
+		masses.push_back( rmsPayloadMass );
+		positions.push_back( rmsPayload.r );
+
+		masses.push_back( rmsArm.m );
+		positions.push_back( rmsArm.r );
+		masses.push_back( rmsArmStowed.m );
+		positions.push_back( rmsArmStowed.r );
+	}
 
 	// subsystems c.g.
 	shuttleMass -= subsysMass;
@@ -5664,6 +5713,35 @@ void Atlantis::UpdateMassAndCoG( bool bUpdateAttachedVessels )
 		newCoG += positions[i] * masses[i];
 	}
 	newCoG = newCoG / totalMass;
+
+	// moments of inertia with the arm and the payload that it holds
+	if (length( basePMI ) > 0.0)
+	{
+		VECTOR3 newPMI = basePMI;
+		if (rmsInertia)
+		{
+			const massprops::Point rmsPoints[3] = {rmsArm, rmsArmStowed, rmsPayload};
+			if (rmsCoG)
+			{
+				// the vessel without the arm displaced and without its payload, and these added
+				const double baseMass = totalMass - rmsPayload.m;
+				const VECTOR3 baseCoG = ((newCoG * totalMass) - (rmsPayload.r * rmsPayload.m) - (rmsArm.r * rmsArm.m) - (rmsArmStowed.r * rmsArmStowed.m)) / baseMass;
+				VECTOR3 cog;
+				double mass;
+				newPMI = massprops::ComposePMI( basePMI, baseMass, baseCoG, rmsPoints, 3, cog, mass );
+			}
+			else
+			{
+				// the c.g. is not changed by the arm: the payload (already in the mass) and the arm displaced add inertia about it
+				newPMI = basePMI + massprops::AddedPMI( rmsPoints, 3, currentCoG, totalMass );
+			}
+		}
+		if ((fabs( newPMI.x - appliedPMI.x ) > (0.002 * appliedPMI.x)) || (fabs( newPMI.y - appliedPMI.y ) > (0.002 * appliedPMI.y)) || (fabs( newPMI.z - appliedPMI.z ) > (0.002 * appliedPMI.z)))
+		{
+			SetPMI( newPMI );
+			appliedPMI = newPMI;
+		}
+	}
 
 	if (length( newCoG - currentCoG ) > 0.1)// to avoid rounding errors during launch, only shift CG when magnitude of change is large enough
 	{
@@ -6013,6 +6091,7 @@ void Atlantis::CreateSubsystems( void )
 	psubsystems->AddSubsystem( new SBTC( psubsystems, "RightSBTC", 2 ) );
 
 	psubsystems->AddSubsystem( new APUInjectorWater( psubsystems, "APUWATER" ) );
+	psubsystems->AddSubsystem( new CabinLighting( psubsystems, "CABINLIGHTING" ) );
 	psubsystems->AddSubsystem(pAPU[0] = new APU(psubsystems, "APU1", 1));
 	psubsystems->AddSubsystem(pAPU[1] = new APU(psubsystems, "APU2", 2));
 	psubsystems->AddSubsystem(pAPU[2] = new APU(psubsystems, "APU3", 3));

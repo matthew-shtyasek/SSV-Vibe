@@ -24,6 +24,8 @@ Date         Developer
 #include "StandardSwitch.h"
 #include "StandardSwitchCover.h"
 #include "PushButton.h"
+#include "DimmerKnob.h"
+#include "../CabinLighting.h"
 #include "Talkback.h"
 #include "../Atlantis.h"
 #include "../ParameterValues.h"
@@ -38,10 +40,21 @@ namespace vc {
 
 		DefineMesh( MESHNAME_PANELO6 );
 
-		/*Add(pLGlareShieldFlood	= new StdSwitch3(_sts, "L GLRSHLD FLOOD"));
-		pLGlareShieldFlood->SetLabel(0, "OFF");
-		pLGlareShieldFlood->SetLabel(1, "VAR");
-		pLGlareShieldFlood->SetLabel(2, "BRIGHT");*/
+		// cabin lighting
+		Add( pLGlareshieldFlood = new StdSwitch3( _sts, "L GLARESHIELD FLOOD" ) );
+		pLGlareshieldFlood->SetLabel( 0, "OFF" );
+		pLGlareshieldFlood->SetLabel( 1, "VAR" );
+		pLGlareshieldFlood->SetLabel( 2, "BRIGHT" );
+		pLGlareshieldFlood->SetInitialPosition( 0 );
+		Add( pLGlareshieldDim = new DimmerKnob( _sts, "L GLARESHIELD FLOOD DIM-BRT", 0.5 ) );
+		Add( pLSeatConsoleFlood = new StdSwitch3( _sts, "LEFT SEAT-CTR CNSL FLOOD" ) );
+		pLSeatConsoleFlood->SetLabel( 0, "CTR CNSL" );
+		pLSeatConsoleFlood->SetLabel( 1, "OFF" );
+		pLSeatConsoleFlood->SetLabel( 2, "SEAT" );
+		pLSeatConsoleFlood->SetInitialPosition( 1 );
+		Add( pLSeatConsoleDim = new DimmerKnob( _sts, "LEFT SEAT-CTR CNSL FLOOD DIM-BRT", 0.5 ) );
+		Add( pPanelLeftCenter = new DimmerKnob( _sts, "PANEL LEFT-CENTER OFF-BRT", 1.0 ) );
+		Add( pPanelLeftOverhead = new DimmerKnob( _sts, "PANEL LEFT OVERHEAD OFF-BRT", 1.0 ) );
 
 		Add( pStarTrackerDoorPositionY = new StandardTalkback3( _sts, "STAR TRACKER DOOR POSITION -Y" ) );
 		Add( pStarTrackerDoorPositionZ = new StandardTalkback3( _sts, "STAR TRACKER DOOR POSITION -Z" ) );
@@ -287,6 +300,37 @@ namespace vc {
 		VECTOR3 SWITCH_VERTICAL = _V( 1.0, 0.0, 0.0 );
 
 		AddAIDToMouseEventList(AID_O6);
+
+		pLGlareshieldFlood->SetInitialAnimState( 0.5f );
+		pLGlareshieldFlood->DefineGroup( GRP_S1_O6_VC );
+		pLGlareshieldFlood->SetReference( _V( -0.6642, 3.1196, 13.8812 ), switch_rot );
+		pLGlareshieldFlood->SetMouseRegion( AID_O6, 0.097383f, 0.367273f, 0.146553f, 0.407245f );
+
+		pLGlareshieldDim->DefineGroup( GRP_R1_O6_VC );
+		pLGlareshieldDim->SetReference( _V( -0.5943, 3.1201, 13.8795 ), _V( 0.0, 0.9719, 0.2354 ) );
+		pLGlareshieldDim->SetAngleRange( 270.0 );
+		pLGlareshieldDim->SetMouseRegion( AID_O6, 0.220071f, 0.357178f, 0.298743f, 0.412312f );
+
+		pLSeatConsoleFlood->SetInitialAnimState( 0.5f );
+		pLSeatConsoleFlood->DefineGroup( GRP_S6_O6_VC );
+		pLSeatConsoleFlood->SetReference( _V( -0.5130, 3.1196, 13.8812 ), switch_rot );
+		pLSeatConsoleFlood->SetMouseRegion( AID_O6, 0.394723f, 0.367273f, 0.443892f, 0.407245f );
+
+		pLSeatConsoleDim->DefineGroup( GRP_R7_O6_VC );
+		pLSeatConsoleDim->SetReference( _V( -0.4591, 3.1201, 13.8795 ), _V( 0.0, 0.9719, 0.2354 ) );
+		pLSeatConsoleDim->SetAngleRange( 270.0 );
+		pLSeatConsoleDim->SetMouseRegion( AID_O6, 0.485962f, 0.357178f, 0.564634f, 0.412312f );
+
+		pPanelLeftCenter->DefineGroup( GRP_R3_O6_VC );
+		pPanelLeftCenter->SetReference( _V( -0.6636, 3.1630, 13.7005 ), _V( 0.0, 0.9719, 0.2354 ) );
+		pPanelLeftCenter->SetAngleRange( 270.0 );
+		pPanelLeftCenter->SetMouseRegion( AID_O6, 0.083871f, 0.103467f, 0.162542f, 0.158601f );
+
+		pPanelLeftOverhead->DefineGroup( GRP_R4_O6_VC );
+		pPanelLeftOverhead->SetReference( _V( -0.5947, 3.1630, 13.7005 ), _V( 0.0, 0.9719, 0.2354 ) );
+		pPanelLeftOverhead->SetAngleRange( 270.0 );
+		pPanelLeftOverhead->SetMouseRegion( AID_O6, 0.219422f, 0.103467f, 0.298094f, 0.158601f );
+
 
 		pStarTrackerDoorPositionY->DefineMeshGroup( GetVCMeshIndex(), GRP_DS1_O6_VC );
 
@@ -587,6 +631,18 @@ namespace vc {
 
 	void PanelO6::Realize()
 	{
+		DiscreteBundle* pLtgSw = STS()->BundleManager()->CreateBundle( "CABIN_LTG_SW", CABIN_LTG_SW_BUNDLE_LINES );
+		pLGlareshieldFlood->ConnectPort( 2, pLtgSw, CabinLighting::SW_CDR_GLARE_BRIGHT );
+		pLGlareshieldFlood->ConnectPort( 1, pLtgSw, CabinLighting::SW_CDR_GLARE_VAR );
+		pLSeatConsoleFlood->ConnectPort( 2, pLtgSw, CabinLighting::SW_CDR_SEAT );
+		pLSeatConsoleFlood->ConnectPort( 0, pLtgSw, CabinLighting::SW_CDR_CONSOLE );
+		DiscreteBundle* pLtgKnob = STS()->BundleManager()->CreateBundle( "CABIN_LTG_KNOB", CABIN_LTG_KNOB_BUNDLE_LINES );
+		pLGlareshieldDim->Connect( pLtgKnob, CabinLighting::KNOB_CDR_GLARE );
+		pLSeatConsoleDim->Connect( pLtgKnob, CabinLighting::KNOB_CDR_SEAT );
+		DiscreteBundle* pLtgPanel = STS()->BundleManager()->CreateBundle( "CABIN_LTG_PANEL", CABIN_LTG_PANEL_BUNDLE_LINES );
+		pPanelLeftCenter->Connect( pLtgPanel, cabinlight::PNL_LEFT_CTR - 1 );
+		pPanelLeftOverhead->Connect( pLtgPanel, cabinlight::PNL_LEFT_OVHD - 1 );
+
 		DiscreteBundle* pBundleO6 = STS()->BundleManager()->CreateBundle( "O6_INTERNAL", 16 );
 		pStarTrackerPowerZ->ConnectPort( 1, pBundleO6, 0 );
 		pStarTrackerPowerY->ConnectPort( 1, pBundleO6, 1 );

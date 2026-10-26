@@ -66,6 +66,7 @@ Date         Developer
 #include "meshres_RMS_Port.h"
 #include "../CommonDefs.h"
 #include <MathSSV.h>
+#include <UtilsSSV.h>
 #include "../SSVSound.h"
 #include "Atlantis.h"
 #include "SSVOptions.h"
@@ -95,7 +96,9 @@ const VECTOR3 RMS_WP_JOINT = _V( -2.7432, 0.709931, -6.4569 );// Xo+1208.5, Yo-1
 const VECTOR3 RMS_WY_JOINT = _V( -2.7432, 0.709931, -6.9141 );// Xo+1226.5, Yo-108.0, Zo+444.765
 const VECTOR3 RMS_EE_POS = _V( -2.7432, 0.709931, -8.3365 );// Xo+1282.5, Yo-108.0, Zo+444.765
 
-const VECTOR3 RMS_SY_AXIS = _V( -0.333478, 0.942758, 0.0 );
+const VECTOR3 RMS_ARM_COM_STOWED = massprops::ArmCoM( RMS_SP_JOINT, RMS_EP_JOINT, RMS_WP_JOINT, RMS_EE_POS );// center of mass of the arm in its place in the default center of mass of the orbiter
+
+const VECTOR3 RMS_SY_AXIS =_V( -0.333478, 0.942758, 0.0 );
 const VECTOR3 RMS_SP_AXIS = _V( 0.942758, 0.333478, 0.0 );
 const VECTOR3 RMS_EP_AXIS = RMS_SP_AXIS;
 const VECTOR3 RMS_WP_AXIS = RMS_SP_AXIS;
@@ -175,6 +178,7 @@ RMS::RMS( AtlantisSubsystemDirector *_director, const std::string& _ident, bool 
 	joint_angle[WRIST_ROLL] = 0.0;
 
 	posEE = RMS_EE_POS;
+	posArmCoM = RMS_ARM_COM_STOWED;
 	dirEE = -RMS_WR_AXIS;
 	rotEE = RMS_EE_ROT;
 	rotEEik = RMS_SY_AXIS;
@@ -568,23 +572,38 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 
 	if (bFirstStep) CheckRFL();
 
-	// reaction of the payload on the orbiter: the arm accelerates the payload (relative to the orbiter), and the orbiter feels the opposite
-	// force at the payload (option RMSReaction)
-	if (STS()->GetOptions()->RMSReaction() && (attachedPayload != NULL) && (simdt > 0.0) && (simdt < 0.5))
+	// reaction of the arm on the orbiter: the arm accelerates the payload and its own mass (relative to the orbiter), and the orbiter feels the
+	// opposite force at the same places (option RMSReaction). The positions are taken in the frame of the mesh, so that a shift of the c.g.
+	// (option RMSCenterOfMass) is not taken as an acceleration.
+	if (STS()->GetOptions()->RMSReaction() && (simdt > 0.0) && (simdt < 0.5))
 	{
-		if (reactPayload != attachedPayload)
+		const VECTOR3 ofs = STS()->GetOrbiterCoGOffset();// local frame = frame of the mesh + ofs
+		VECTOR3 acc;
+		const VECTOR3 armPos = posArmCoM + RMS_MESH_OFFSET;
+		if (reactArmEst.Update( armPos, simdt, acc )) STS()->AddForce( rmsreact::ReactionForce( massprops::ARM_MASS, acc ), armPos + ofs );
+
+		if (attachedPayload != NULL)
+		{
+			if (reactPayload != attachedPayload)
+			{
+				reactEst.Reset();
+				reactPayload = attachedPayload;
+			}
+			VECTOR3 gpos, lpos;
+			attachedPayload->GetGlobalPos( gpos );
+			STS()->Global2Local( gpos, lpos );
+			if (reactEst.Update( lpos - ofs, simdt, acc )) STS()->AddForce( rmsreact::ReactionForce( attachedPayload->GetMass(), acc ), lpos );
+		}
+		else
 		{
 			reactEst.Reset();
-			reactPayload = attachedPayload;
+			reactPayload = NULL;
 		}
-		VECTOR3 gpos, lpos, acc;
-		attachedPayload->GetGlobalPos( gpos );
-		STS()->Global2Local( gpos, lpos );
-		if (reactEst.Update( lpos, simdt, acc )) STS()->AddForce( rmsreact::ReactionForce( attachedPayload->GetMass(), acc ), lpos );
 	}
 	else
 	{
 		reactEst.Reset();
+		reactArmEst.Reset();
 		reactPayload = NULL;
 	}
 
@@ -2325,5 +2344,23 @@ void RMS::CalcVectors( void )
 	posLight = mul( mrotWR, posLight - posWR ) + posWR;
 
 	dirEE = -axisWR;
+
+	posArmCoM = massprops::ArmCoM( posSP, posEP, posWP, posEE );
 	return;
+}
+
+void RMS::GetMassPoints( massprops::Point& arm, massprops::Point& armStowed, massprops::Point& payload ) const
+{
+	arm.m = massprops::ARM_MASS;
+	arm.r = posArmCoM + RMS_MESH_OFFSET;
+	armStowed.m = -massprops::ARM_MASS;
+	armStowed.r = RMS_ARM_COM_STOWED + RMS_MESH_OFFSET;
+	payload.m = 0.0;
+	payload.r = _V( 0.0, 0.0, 0.0 );
+	if ((attachedPayload != NULL) && hAttach)
+	{
+		VECTOR3 cog;// in the local frame of the orbiter (origin in the c.g.)
+		payload.m = GetMassAndCoGOfAttachedObject( STS(), hAttach, cog );
+		payload.r = cog - STS()->GetOrbiterCoGOffset();// to the frame of the mesh
+	}
 }

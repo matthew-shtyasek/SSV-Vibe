@@ -159,6 +159,21 @@ def check_scenarios():
                 errors.append('%s: BEGIN_%s is not closed' % (os.path.relpath(path, ROOT), stack[-1]))
 
 
+def check_cabin_lighting():
+    """The table of the panels of the cabin lighting (made from the materials of the panel meshes) must agree with the meshes."""
+    import importlib.util
+    path = os.path.join(ROOT, 'tools', 'gen-cabin-lighting-data.py')
+    if not os.path.exists(path):
+        return
+    spec = importlib.util.spec_from_file_location('gen_cabin_lighting_data', path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    target = os.path.join(ROOT, 'Orbitersdk', 'Space Shuttle Vessel', 'OV', 'CabinLightingData.h')
+    have = open(target, 'rb').read().decode('latin-1').replace(chr(13) + chr(10), chr(10)) if os.path.exists(target) else ''
+    if have != mod.render(mod.build(ROOT)):
+        errors.append('OV/CabinLightingData.h does not agree with the panel meshes: run tools/gen-cabin-lighting-data.py')
+
+
 def main():
     textures_index = index_files(TEXTURES, '.dds')
     textures_index.update(index_files(TEXTURES, '.bmp'))
@@ -166,6 +181,7 @@ def main():
     mesh_index = index_files(MESHES, '.msh')
     check_meshres(textures_index, mesh_index)
     check_scenarios()
+    check_cabin_lighting()
     for w in warnings:
         print('warning: ' + w)
     for e in errors:

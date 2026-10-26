@@ -45,6 +45,8 @@ Date         Developer
 #include "Talkback.h"
 #include "PushButtonIndicator.h"
 #include "ThumbWheel.h"
+#include "DimmerKnob.h"
+#include "../CabinLighting.h"
 #include "PushWheel.h"
 #include "../Atlantis.h"
 #include "../meshres_vc_a6u.h"
@@ -66,6 +68,14 @@ namespace vc
 		else thumbwheels = true;
 
 		DefineMesh( MESHNAME_PANEL, OFFSET_PANEL );
+
+		// OS lighting
+		Add( pOSFlood = new StdSwitch2( _sts, "OS LIGHTING FLOOD" ) );
+		pOSFlood->SetLabel( 0, "OFF" );
+		pOSFlood->SetLabel( 1, "ON" );
+		pOSFlood->SetInitialPosition( 0 );
+		Add( pOSFloodDim = new DimmerKnob( _sts, "OS LIGHTING FLOOD DIM-BRT", 0.5 ) );
+		Add( pPanelOS = new DimmerKnob( _sts, "OS LIGHTING PANEL OFF-BRT", 1.0 ) );
 
 		Add(pSense=new StdSwitch2(_sts, "SENSE"));
 		Add(pFltCntlrPower = new LockableLever2(_sts, "FLT CNTLR POWER"));
@@ -172,6 +182,22 @@ namespace vc
 		oapiWriteLog( "PanelA6U: DefineVC called" );
 
 		AddAIDToMouseEventList( AID_A6U );
+
+		pOSFlood->SetInitialAnimState( 0.5f );
+		pOSFlood->DefineGroup( GRP_S32_A6U_VC );
+		pOSFlood->SetReference( _V( 0.1566, 0.3366, -0.1049 ), switch_rot );
+		pOSFlood->SetMouseRegion( AID_A6U, 0.679435f, 0.083371f, 0.726827f, 0.155784f );
+
+		pOSFloodDim->DefineGroup( GRP_R1_A6U_VC );
+		pOSFloodDim->SetReference( _V( 0.1058, 0.3375, -0.1066 ), _V( 0.0, -0.2994, -0.9541 ) );
+		pOSFloodDim->SetAngleRange( 270.0 );
+		pOSFloodDim->SetMouseRegion( AID_A6U, 0.761582f, 0.066247f, 0.837409f, 0.166127f );
+
+		pPanelOS->DefineGroup( GRP_R3_A6U_VC );
+		pPanelOS->SetReference( _V( 0.0490, 0.3375, -0.1066 ), _V( 0.0, -0.2994, -0.9541 ) );
+		pPanelOS->SetAngleRange( 270.0 );
+		pPanelOS->SetMouseRegion( AID_A6U, 0.869198f, 0.066247f, 0.945025f, 0.166127f );
+
 
 		pSense->DefineGroup( GRP_S1_A6U_VC );
 		pSense->SetInitialAnimState( 0.5 );
@@ -434,6 +460,13 @@ namespace vc
 
 	void PanelA6U::Realize()
 	{
+		DiscreteBundle* pLtgSw = STS()->BundleManager()->CreateBundle( "CABIN_LTG_SW", CABIN_LTG_SW_BUNDLE_LINES );
+		pOSFlood->ConnectPort( 1, pLtgSw, CabinLighting::SW_OS_ON );
+		DiscreteBundle* pLtgKnob = STS()->BundleManager()->CreateBundle( "CABIN_LTG_KNOB", CABIN_LTG_KNOB_BUNDLE_LINES );
+		pOSFloodDim->Connect( pLtgKnob, CabinLighting::KNOB_OS );
+		DiscreteBundle* pLtgPanel = STS()->BundleManager()->CreateBundle( "CABIN_LTG_PANEL", CABIN_LTG_PANEL_BUNDLE_LINES );
+		pPanelOS->Connect( pLtgPanel, cabinlight::PNL_OS - 1 );
+
 		DiscreteBundle* pBundle=STS()->BundleManager()->CreateBundle( "DDU_POWER", 16 );
 		pFltCntlrPower->ConnectPort( 1, pBundle, 10 );
 
