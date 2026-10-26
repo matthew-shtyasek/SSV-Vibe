@@ -412,6 +412,7 @@ class Atlantis: public VESSEL4
 		ATTACHMENTHANDLE ahET, ahLeftSRB, ahRightSRB;
 
 		int mfdID;
+		int mfdSettingsID;
 
 		double slag1, slag2, slag3;
 		PSTREAM_HANDLE pshSlag1[2], pshSlag2[2], pshSlag3[2];
@@ -568,7 +569,10 @@ class Atlantis: public VESSEL4
 		 */
 		double LH2mass;
 
-		bool ControlRMS;
+		bool ControlRMS;// the hand controllers and keys operate the RMS (effective state)
+		bool RMSControlOverride;// Ctrl+A: the opposite of what the station gives (the RMS is controlled in the RMS station, the RCS elsewhere)
+		int RMSControlStation;// station in which the control was last updated
+		void UpdateRMSControl( void );
 		// controller inputs
 		VECTOR3 THC_AltInput; // uses arrows, Ins and Del keys to provide translation inputs; axis correspond to RCS FWD SENSE
 		bool RHC_TrimUp;
@@ -684,6 +688,15 @@ class Atlantis: public VESSEL4
 
 		// Actual Virtual Cockpit Mode
 		int VCMode;
+
+		// free movement of the head in the virtual cockpit (option VCFreeMove, key Ctrl+M)
+		bool vcFreeMove;
+		VECTOR3 vcMoveOfs;// offset of the head from the position of the station [m]
+		VECTOR3 vcBaseOfs;// position of the station in the frame of the mesh
+		VECTOR3 vcAppliedOfs;// offset that is applied to the camera
+		bool vcMoveKey[6];// forward, back, left, right, up, down
+		void UpdateVCMove( double dt );
+		void ResetVCMove( void );
 		/**
 		 * Structural configuration
 		 * - 0 launch configuration

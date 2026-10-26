@@ -420,6 +420,7 @@
     <ClCompile Include="vc\RotarySwitchPotentiometer.cpp" />
     <ClCompile Include="vc\DimmerKnob.cpp" />
     <ClCompile Include="CabinLighting.cpp" />
+    <ClCompile Include="SettingsMFD.cpp" />
     <ClCompile Include="vc\PushWheel.cpp" />
     <ClCompile Include="vc\SelectorWheel.cpp" />
     <ClCompile Include="vc\StandardCurvedMechMeter.cpp" />
@@ -765,6 +766,9 @@
     <ClInclude Include="vc\RotarySwitchPotentiometer.h" />
     <ClInclude Include="vc\DimmerKnob.h" />
     <ClInclude Include="CabinLighting.h" />
+    <ClInclude Include="SettingsMFD.h" />
+    <ClInclude Include="SettingsModel.h" />
+    <ClInclude Include="FreeMoveMath.h" />
     <ClInclude Include="CabinLightingData.h" />
     <ClInclude Include="LightingMath.h" />
     <ClInclude Include="MassProps.h" />

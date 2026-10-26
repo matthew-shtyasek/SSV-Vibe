@@ -77,6 +77,15 @@ namespace RMSMath
 		return brakesSwitchOn || !powered;
 	}
 
+	/**
+	 * The hand controllers and the keys operate the RMS when the view is the aft station of the RMS, and the RCS in every other place.
+	 * The override (Ctrl+A) gives the opposite until the station is changed. Without an RMS, never.
+	 */
+	inline bool ControlsRMS( bool hasRMS, bool inRMSStation, bool override )
+	{
+		return hasRMS && (inRMSStation != override);
+	}
+
 	/** Local frame to body axes. */
 	inline VECTOR3 LocalToBody( const VECTOR3& v )
 	{

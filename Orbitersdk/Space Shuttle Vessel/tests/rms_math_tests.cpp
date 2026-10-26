@@ -14,11 +14,15 @@ static char g_debugstring[1024];
 #include "../OV/ControllerMath.h"
 #include "../OV/APUModel.h"
 #include "../OV/RMSReaction.h"
+#include "../OV/ParameterValues.h"
+#include "../OV/SettingsModel.h"
+#include "../OV/FreeMoveMath.h"
 #include "../OV/LightingMath.h"
 #include "../OV/CabinLightingData.h"
 #include "../OV/MassProps.h"
 #include "../OV/HandControllers.h"
 #include <fstream>
+#include <string>
 #include <vector>
 
 static int g_checks = 0;
@@ -380,6 +384,15 @@ static void test_load_scale( void )
 
 static void test_safing_and_brakes( void )
 {
+	// who the hand controllers operate: the RMS in its station, the RCS elsewhere, Ctrl+A inverts it
+	CHECK( RMSMath::ControlsRMS( true, true, false ) );
+	CHECK( !RMSMath::ControlsRMS( true, false, false ) );
+	CHECK( !RMSMath::ControlsRMS( true, true, true ) );
+	CHECK( RMSMath::ControlsRMS( true, false, true ) );
+	CHECK( !RMSMath::ControlsRMS( false, true, false ) );// no RMS
+	CHECK( !RMSMath::ControlsRMS( false, false, true ) );
+	CHECK( !RMSMath::ControlsRMS( false, true, true ) );
+
 	// SAFE brings the arm to rest, and it is maintained with the switch back in AUTO
 	bool st = false;
 	st = RMSMath::SafingLatch( st, false, false, false );
@@ -1009,6 +1022,326 @@ static void test_panel_lighting_table( void )
 	}
 }
 
+// free movement of the head in the cockpit
+static void test_free_move( void )
+{
+	using namespace freemove;
+
+	// limits: inside is not changed, outside is moved to the surface on the line to the center
+	CHECK_VEC( ClampOffset( _V( 0.1, 0.1, 0.1 ) ), _V( 0.1, 0.1, 0.1 ), 1e-12 );
+	{
+		const VECTOR3 o = ClampOffset( _V( 2.0, 0.0, 0.0 ) );
+		CHECK_NEAR( o.x, RADIUS_HORIZONTAL, 1e-12 );
+		CHECK_NEAR( o.y, 0.0, 1e-12 );
+		CHECK( IsInside( o ) );
+	}
+	{
+		const VECTOR3 o = ClampOffset( _V( 0.0, 5.0, 0.0 ) );
+		CHECK_NEAR( o.y, RADIUS_UP, 1e-12 );
+		const VECTOR3 d = ClampOffset( _V( 0.0, -5.0, 0.0 ) );
+		CHECK_NEAR( d.y, -RADIUS_DOWN, 1e-12 );
+	}
+	{
+		// the direction is kept
+		const VECTOR3 o = ClampOffset( _V( 3.0, 0.0, 4.0 ) );
+		CHECK_NEAR( o.x / o.z, 0.75, 1e-12 );
+		CHECK_NEAR( sqrt( (o.x * o.x) + (o.z * o.z) ), RADIUS_HORIZONTAL, 1e-12 );
+	}
+	CHECK( IsInside( _V( 0.0, 0.0, 0.0 ) ) );
+	CHECK( !IsInside( _V( 0.6, 0.0, 0.0 ) ) );
+	CHECK( !IsInside( _V( 0.0, 0.5, 0.0 ) ) );
+	CHECK( IsInside( _V( 0.0, -0.39, 0.0 ) ) );
+
+	// random points: the clamp is always inside, and the points inside do not move
+	for (int i = 0; i < 2000; i++)
+	{
+		const VECTOR3 o = _V( (rand() / (double)RAND_MAX - 0.5) * 3.0, (rand() / (double)RAND_MAX - 0.5) * 3.0, (rand() / (double)RAND_MAX - 0.5) * 3.0 );
+		const VECTOR3 c = ClampOffset( o );
+		CHECK( IsInside( c ) );
+		if (IsInside( o )) CHECK_VEC( c, o, 1e-12 );
+		CHECK_VEC( ClampOffset( c ), c, 1e-9 );// idempotent
+	}
+
+	// the direction of the view on the horizontal plane
+	CHECK_VEC( HorizontalForward( _V( 0.0, 0.0, 1.0 ), _V( 0.0, 0.0, 1.0 ) ), _V( 0.0, 0.0, 1.0 ), 1e-12 );
+	CHECK_VEC( HorizontalForward( _V( 1.0, 5.0, 1.0 ), _V( 0.0, 0.0, 1.0 ) ), _V( 0.70710678, 0.0, 0.70710678 ), 1e-7 );// the height of the view does not matter
+	CHECK_VEC( HorizontalForward( _V( 0.0, 1.0, 0.0 ), _V( 1.0, 0.0, 0.0 ) ), _V( 1.0, 0.0, 0.0 ), 1e-12 );// looking up: the default direction
+	CHECK_VEC( HorizontalForward( _V( 0.0, -1.0, 0.0 ), _V( 0.0, 0.0, 0.0 ) ), _V( 0.0, 0.0, 1.0 ), 1e-12 );// nothing: forward of the vessel
+	// right of the view
+	CHECK_VEC( RightOf( _V( 0.0, 0.0, 1.0 ) ), _V( 1.0, 0.0, 0.0 ), 1e-12 );
+	CHECK_VEC( RightOf( _V( 1.0, 0.0, 0.0 ) ), _V( 0.0, 0.0, -1.0 ), 1e-12 );
+	CHECK_VEC( RightOf( _V( 0.0, 0.0, -1.0 ) ), _V( -1.0, 0.0, 0.0 ), 1e-12 );
+
+	// movement
+	const VECTOR3 f = _V( 0.0, 0.0, 1.0 );
+	{
+		const VECTOR3 o = Move( _V( 0.0, 0.0, 0.0 ), 1.0, 0.0, 0.0, f, 0.1 );
+		CHECK_VEC( o, _V( 0.0, 0.0, SPEED * 0.1 ), 1e-12 );// forward
+		CHECK_VEC( Move( _V( 0.0, 0.0, 0.0 ), -1.0, 0.0, 0.0, f, 0.1 ), _V( 0.0, 0.0, -SPEED * 0.1 ), 1e-12 );
+		CHECK_VEC( Move( _V( 0.0, 0.0, 0.0 ), 0.0, 1.0, 0.0, f, 0.1 ), _V( SPEED * 0.1, 0.0, 0.0 ), 1e-12 );// right
+		CHECK_VEC( Move( _V( 0.0, 0.0, 0.0 ), 0.0, -1.0, 0.0, f, 0.1 ), _V( -SPEED * 0.1, 0.0, 0.0 ), 1e-12 );
+		CHECK_VEC( Move( _V( 0.0, 0.0, 0.0 ), 0.0, 0.0, 1.0, f, 0.1 ), _V( 0.0, SPEED * 0.1, 0.0 ), 1e-12 );// up
+	}
+	// forward follows the view: looking to the right (+x) forward is +x and right is -z
+	{
+		const VECTOR3 v = _V( 1.0, 0.0, 0.0 );
+		CHECK_VEC( Move( _V( 0.0, 0.0, 0.0 ), 1.0, 0.0, 0.0, v, 0.1 ), _V( SPEED * 0.1, 0.0, 0.0 ), 1e-12 );
+		CHECK_VEC( Move( _V( 0.0, 0.0, 0.0 ), 0.0, 1.0, 0.0, v, 0.1 ), _V( 0.0, 0.0, -SPEED * 0.1 ), 1e-12 );
+	}
+	// opposite keys cancel
+	CHECK_VEC( Move( _V( 0.1, 0.0, 0.0 ), 0.0, 0.0, 0.0, f, 0.1 ), _V( 0.1, 0.0, 0.0 ), 1e-12 );
+	// the diagonal is not faster
+	{
+		const VECTOR3 o = Move( _V( 0.0, 0.0, 0.0 ), 1.0, 1.0, 1.0, f, 0.1 );
+		CHECK_NEAR( sqrt( (o.x * o.x) + (o.y * o.y) + (o.z * o.z) ), SPEED * 0.1, 1e-12 );
+	}
+	// the step of time is limited, and a step without time does not move
+	CHECK_VEC( Move( _V( 0.0, 0.0, 0.0 ), 1.0, 0.0, 0.0, f, 5.0 ), _V( 0.0, 0.0, SPEED * MAX_STEP ), 1e-12 );
+	CHECK_VEC( Move( _V( 0.0, 0.0, 0.0 ), 1.0, 0.0, 0.0, f, 0.0 ), _V( 0.0, 0.0, 0.0 ), 1e-12 );
+	// the limit stops the movement
+	{
+		VECTOR3 o = _V( 0.0, 0.0, 0.0 );
+		for (int i = 0; i < 1000; i++)
+		{
+			o = Move( o, 1.0, 0.0, 0.0, f, 0.05 );
+			CHECK( IsInside( o ) );
+		}
+		CHECK_NEAR( o.z, RADIUS_HORIZONTAL, 1e-9 );
+		// and the way back is possible
+		o = Move( o, -1.0, 0.0, 0.0, f, 0.1 );
+		CHECK( o.z < RADIUS_HORIZONTAL );
+	}
+	// time to cross the range at the speed of the head (a little less than 3 s for half a meter)
+	{
+		VECTOR3 o = _V( 0.0, 0.0, 0.0 );
+		int steps = 0;
+		while ((o.z < (RADIUS_HORIZONTAL - 1e-9)) && (steps < 10000))
+		{
+			o = Move( o, 1.0, 0.0, 0.0, f, 0.01 );
+			steps++;
+		}
+		CHECK( (steps * 0.01) > 1.0 );
+		CHECK( (steps * 0.01) < 2.5 );
+	}
+
+	// stations that allow the movement
+	CHECK( StationAllowsMove( 0, 12, 18, 200 ) );// CDR
+	CHECK( StationAllowsMove( 11, 12, 18, 200 ) );// aft workstation
+	CHECK( !StationAllowsMove( 12, 12, 18, 200 ) );// cameras
+	CHECK( !StationAllowsMove( 17, 12, 18, 200 ) );
+	CHECK( !StationAllowsMove( 18, 12, 18, 200 ) );
+	CHECK( StationAllowsMove( 20, 12, 18, 200 ) );// panel positions
+	CHECK( StationAllowsMove( 100, 12, 18, 200 ) );// middeck
+	CHECK( !StationAllowsMove( 200, 12, 18, 200 ) );// airlock
+}
+
+// table of the options, operations on the values and the list of the settings MFD
+static void test_settings( const char* root )
+{
+	using namespace settings;
+
+	// the table
+	for (int i = 0; i < COUNT; i++)
+	{
+		const Item& it = ITEMS[i];
+		CHECK( (it.key != NULL) && (strlen( it.key ) > 0) );
+		CHECK( (it.label != NULL) && (strlen( it.label ) > 0) && (strlen( it.label ) <= 28) );// it has to fit in a line of the MFD
+		CHECK( (it.note != NULL) && (strlen( it.note ) > 0) && (strlen( it.note ) < 110) );// three lines of the MFD
+		CHECK( (it.kind >= KIND_BOOL) && (it.kind <= KIND_FLOAT) );
+		CHECK( it.min <= it.def );
+		CHECK( it.def <= it.max );
+		CHECK( it.step > 0.0 );
+		CHECK( (it.group >= 0) && (it.group < GROUP_COUNT) );
+		if (it.kind == KIND_BOOL) CHECK( (it.min == 0.0) && (it.max == 1.0) );
+		for (int j = i + 1; j < COUNT; j++) CHECK( _stricmp( it.key, ITEMS[j].key ) != 0 );// unique keys
+		CHECK( FindKey( it.key ) == i );
+		// the groups are together
+		if (i > 0)
+		{
+			if (ITEMS[i - 1].group != it.group)
+			{
+				for (int j = 0; j < i; j++) CHECK( ITEMS[j].group != it.group );
+			}
+		}
+	}
+	CHECK( FindKey( "rhcrate" ) == ITEM_RHC_RATE );// not case sensitive
+	CHECK( FindKey( "Nothing" ) == -1 );
+	int total = 0;
+	for (int g = 0; g < GROUP_COUNT; g++) total += CountInGroup( g );
+	CHECK( total == COUNT );
+	CHECK( std::string( GroupName( GROUP_RMS ) ) == "RMS" );
+	CHECK( std::string( GroupName( 99 ) ).empty() );
+
+	// the defaults agree with the constants of the code
+	CHECK_NEAR( ITEMS[ITEM_RHC_RATE].def, ::RHC_RATE, 1e-12 );
+	CHECK_NEAR( ITEMS[ITEM_RPTA_RATE].def, ::RPTA_RATE, 1e-12 );
+	CHECK_NEAR( ITEMS[ITEM_BRAKE_RATE].def, ::BRAKE_RATE, 1e-12 );
+
+	// values
+	CHECK_NEAR( Clamp( POSITION_LABEL_TIME, 3.4 ), 3.0, 1e-12 );
+	CHECK_NEAR( Clamp( POSITION_LABEL_TIME, 3.6 ), 4.0, 1e-12 );
+	CHECK_NEAR( Clamp( POSITION_LABEL_TIME, 100.0 ), 60.0, 1e-12 );
+	CHECK_NEAR( Clamp( POSITION_LABEL_TIME, -5.0 ), 0.0, 1e-12 );
+	CHECK_NEAR( Clamp( ITEM_RHC_RATE, 0.0 ), 0.05, 1e-12 );
+	CHECK_NEAR( Clamp( ITEM_RHC_RATE, 9.0 ), 5.0, 1e-12 );
+	CHECK_NEAR( Clamp( ITEM_RHC_RATE, 0.77 ), 0.77, 1e-12 );// a float is not rounded
+	CHECK_NEAR( Clamp( CABIN_LIGHTING, 0.7 ), 1.0, 1e-12 );
+	CHECK_NEAR( Clamp( CABIN_LIGHTING, 0.2 ), 0.0, 1e-12 );
+
+	// steps
+	CHECK_NEAR( Step( CABIN_LIGHTING, 1.0, 1 ), 0.0, 1e-12 );// a boolean toggles
+	CHECK_NEAR( Step( CABIN_LIGHTING, 0.0, -1 ), 1.0, 1e-12 );
+	CHECK_NEAR( Step( POSITION_LABEL_TIME, 3.0, 1 ), 4.0, 1e-12 );
+	CHECK_NEAR( Step( POSITION_LABEL_TIME, 0.0, -1 ), 0.0, 1e-12 );// at the limit
+	CHECK_NEAR( Step( POSITION_LABEL_TIME, 60.0, 1 ), 60.0, 1e-12 );
+	CHECK( Step( ITEM_RHC_RATE, 0.75, 1 ) == 0.8 );// exactly on the grid, without the error of the sum
+	CHECK( Step( ITEM_RHC_RATE, 0.8, -1 ) == 0.75 );
+	{
+		double v = 0.75;
+		for (int i = 0; i < 100; i++) v = Step( ITEM_RHC_RATE, v, 1 );
+		CHECK_NEAR( v, 5.0, 1e-12 );
+		for (int i = 0; i < 200; i++) v = Step( ITEM_RHC_RATE, v, -1 );
+		CHECK_NEAR( v, 0.05, 1e-12 );
+	}
+	CHECK( Step( ITEM_RHC_RATE, 0.77, 1 ) == 0.8 );// a value out of the grid goes to the grid
+	CHECK( IsDefault( ITEM_RHC_RATE, 0.75 ) );
+	CHECK( !IsDefault( ITEM_RHC_RATE, 0.8 ) );
+
+	// text
+	char buf[32];
+	FormatValue( CABIN_LIGHTING, 1.0, buf, sizeof( buf ) );
+	CHECK( std::string( buf ) == "ON" );
+	FormatValue( CABIN_LIGHTING, 0.0, buf, sizeof( buf ) );
+	CHECK( std::string( buf ) == "OFF" );
+	FormatValue( POSITION_LABEL_TIME, 3.0, buf, sizeof( buf ) );
+	CHECK( std::string( buf ) == "3" );
+	FormatValue( ITEM_RHC_RATE, 0.75, buf, sizeof( buf ) );
+	CHECK( std::string( buf ) == "0.75" );
+
+	// the list of the MFD
+	{
+		Editor e;
+		CHECK( e.Cursor() == 0 );
+		CHECK( !e.IsDirty() );
+		for (int i = 0; i < COUNT; i++) CHECK_NEAR( e.Value( i ), ITEMS[i].def, 1e-12 );
+		e.Move( -1 );// circular
+		CHECK( e.Cursor() == (COUNT - 1) );
+		e.Move( 1 );
+		CHECK( e.Cursor() == 0 );
+		for (int i = 0; i < COUNT; i++) e.Move( 1 );
+		CHECK( e.Cursor() == 0 );
+
+		// change and reset of an option
+		while (e.Cursor() != RMS_REACTION) e.Move( 1 );
+		CHECK( e.Change( 1 ) );
+		CHECK_NEAR( e.Value( RMS_REACTION ), 1.0, 1e-12 );
+		CHECK( e.IsDirty() );
+		e.MarkSaved();
+		CHECK( !e.IsDirty() );
+		CHECK( e.ResetItem() );
+		CHECK_NEAR( e.Value( RMS_REACTION ), 0.0, 1e-12 );
+		CHECK( e.IsDirty() );
+		CHECK( !e.ResetItem() );// it is already the default
+		// a float at the limit does not change, and does not make the list dirty
+		e.MarkSaved();
+		while (e.Cursor() != POSITION_LABEL_TIME) e.Move( 1 );
+		for (int i = 0; i < 70; i++) e.Change( 1 );
+		CHECK_NEAR( e.Value( POSITION_LABEL_TIME ), 60.0, 1e-12 );
+		e.MarkSaved();
+		CHECK( !e.Change( 1 ) );
+		CHECK( !e.IsDirty() );
+
+		// all the defaults
+		CHECK( e.ResetAll() );
+		for (int i = 0; i < COUNT; i++) CHECK_NEAR( e.Value( i ), ITEMS[i].def, 1e-12 );
+		CHECK( !e.ResetAll() );
+
+		// values from the options (limited to the range)
+		double v[COUNT];
+		for (int i = 0; i < COUNT; i++) v[i] = 1000.0;
+		e.SetValues( v );
+		for (int i = 0; i < COUNT; i++) CHECK_NEAR( e.Value( i ), ITEMS[i].max, 1e-12 );
+		CHECK( !e.IsDirty() );
+
+		// windows: the selected line is always shown
+		for (int rows = 1; rows <= (COUNT + 3); rows++)
+		{
+			Editor w;
+			for (int c = 0; c < COUNT; c++)
+			{
+				const int first = w.FirstRow( rows );
+				CHECK( first >= 0 );
+				CHECK( (rows >= COUNT) ? (first == 0) : ((first + rows) <= COUNT) );
+				CHECK( (w.Cursor() >= first) && (w.Cursor() < (first + ((rows < COUNT) ? rows : COUNT))) );
+				w.Move( 1 );
+			}
+		}
+	}
+
+	// groups
+	{
+		Editor e;
+		const int g0 = ITEMS[e.Cursor()].group;
+		e.MoveGroup( 1 );
+		CHECK( ITEMS[e.Cursor()].group != g0 );
+		CHECK( (e.Cursor() == 0) || (ITEMS[e.Cursor() - 1].group != ITEMS[e.Cursor()].group) );// the first line of the group
+		const int g1 = ITEMS[e.Cursor()].group;
+		e.Move( 1 );
+		e.MoveGroup( -1 );// to the first of the group
+		CHECK( ITEMS[e.Cursor()].group == g1 );
+		CHECK( (e.Cursor() == 0) || (ITEMS[e.Cursor() - 1].group != g1) );
+		e.MoveGroup( -1 );// to the previous group
+		CHECK( ITEMS[e.Cursor()].group == g0 );
+		// going forward through all the groups comes back to the first
+		Editor c;
+		int groups = 1;
+		for (int i = 1; i < COUNT; i++) groups += (ITEMS[i].group != ITEMS[i - 1].group) ? 1 : 0;
+		for (int i = 0; i < groups; i++) c.MoveGroup( 1 );
+		CHECK( c.Cursor() == 0 );
+	}
+
+	// the options of the file of the repository agree with the table: the same keys and the same defaults
+	if ((root != NULL) && (root[0] != 0))
+	{
+		const std::string path = std::string( root ) + "/Config/Vessels/SSV_OV.cfg";
+		std::ifstream f( path );
+		CHECK( f.is_open() );
+		bool found[COUNT];
+		for (int i = 0; i < COUNT; i++) found[i] = false;
+		std::string line;
+		while (f.is_open() && std::getline( f, line ))
+		{
+			if (line.empty() || (line[0] == ';')) continue;
+			const size_t eq = line.find( '=' );
+			if (eq == std::string::npos) continue;
+			std::string key = line.substr( 0, eq );
+			std::string val = line.substr( eq + 1 );
+			while (!key.empty() && (key.back() == ' ')) key.pop_back();
+			while (!val.empty() && ((val[0] == ' ') || (val[0] == '\t'))) val.erase( 0, 1 );
+			while (!val.empty() && ((val.back() == ' ') || (val.back() == '\r'))) val.pop_back();
+			if ((key == "ClassName") || (key == "Module")) continue;
+			const int i = FindKey( key.c_str() );
+			CHECK( i >= 0 );// every option of the file is in the table
+			if (i < 0)
+			{
+				printf( "option %s of SSV_OV.cfg is not in the table\n", key.c_str() );
+				continue;
+			}
+			found[i] = true;
+			double v;
+			if (ITEMS[i].kind == KIND_BOOL) v = (_stricmp( val.c_str(), "TRUE" ) == 0) ? 1.0 : 0.0;
+			else v = atof( val.c_str() );
+			CHECK_NEAR( v, ITEMS[i].def, 1e-9 );// the default of the table is the one of the file
+			if (fabs( v - ITEMS[i].def ) > 1e-9) printf( "the default of %s differs in SSV_OV.cfg\n", key.c_str() );
+		}
+		for (int i = 0; i < COUNT; i++)
+		{
+			CHECK( found[i] );// every option of the table is in the file
+			if (!found[i]) printf( "option %s is not in SSV_OV.cfg\n", ITEMS[i].key );
+		}
+	}
+}
+
 int main( int argc, char** argv )
 {
 	srand( 12345 );
@@ -1026,6 +1359,8 @@ int main( int argc, char** argv )
 	test_safing_and_brakes();
 	test_apu_model();
 	test_rms_reaction();
+	test_settings( (argc > 1) ? argv[1] : NULL );
+	test_free_move();
 	test_lighting();
 	test_panel_lighting_table();
 	test_mass_props();

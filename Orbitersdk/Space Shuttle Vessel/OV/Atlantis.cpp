@@ -347,6 +347,9 @@ Date         Developer
 #include "HUD.h"
 #include "APU.h"
 #include "CabinLighting.h"
+#include "SettingsMFD.h"
+#include "FreeMoveMath.h"
+#include "RMSMath.h"
 #include "MassProps.h"
 #include "vc/AtlantisPanel.h"
 #include "RHC.h"
@@ -733,6 +736,9 @@ pActiveLatches( 5, NULL ), pXRSound(NULL)
 	hOVAirfoilH = NULL;
 
 	orbiter_ofs = _V(0, 0, 0);
+	vcFreeMove = false;
+	vcMoveOfs = vcBaseOfs = vcAppliedOfs = _V( 0.0, 0.0, 0.0 );
+	for (int i = 0; i < 6; i++) vcMoveKey[i] = false;
 	currentCoG = _V(0.0, 0.0, 0.0);
 	basePMI = _V( 0.0, 0.0, 0.0 );
 	appliedPMI = _V( 0.0, 0.0, 0.0 );
@@ -826,6 +832,8 @@ pActiveLatches( 5, NULL ), pXRSound(NULL)
 	aerosurfaces.SILTSPOD = false;
 
 	ControlRMS = false;
+	RMSControlOverride = false;
+	RMSControlStation = -1;
 	lastRMSSJCommand = 0;
 
 	SERCstop = true;
@@ -885,6 +893,14 @@ pActiveLatches( 5, NULL ), pXRSound(NULL)
 	spec.context = NULL;
 	spec.msgproc = CRT::MsgProc;
 	mfdID = RegisterMFDMode( spec );
+
+	static char *nameSettings = "SSV Settings";
+	MFDMODESPECEX specSettings;
+	specSettings.name = nameSettings;
+	specSettings.key = OAPI_KEY_V;
+	specSettings.context = NULL;
+	specSettings.msgproc = SettingsMFD::MsgProc;
+	mfdSettingsID = RegisterMFDMode( specSettings );
 }
 
 // --------------------------------------------------------------
@@ -919,6 +935,7 @@ Atlantis::~Atlantis()
 	ClearMissionManagementMemory();
 
 	UnregisterMFDMode( mfdID );
+	UnregisterMFDMode( mfdSettingsID );
 
 	if (hOVTexture) oapiReleaseTexture( hOVTexture );
 	if (hLOMSTexture) oapiReleaseTexture( hLOMSTexture );
@@ -932,6 +949,7 @@ void Atlantis::clbkSetClassCaps( FILEHANDLE cfg )
 	{
 		oapiWriteLogV( "(SSV_OV) [INFO] Reading cfg file" );
 		options->Parse( cfg );
+		options->LoadUser();// the settings of the user replace the ones of the class
 	}
 	catch (std::exception &e)
 	{
@@ -1555,6 +1573,8 @@ void Atlantis::clbkPreStep( double simt, double simdt, double mjd )
 
 		if (status > STATE_PRELAUNCH) UpdateMassAndCoG(); // TODO: refine
 
+		UpdateVCMove( simdt );
+
 	}
 	catch (std::exception &e)
 	{
@@ -2001,6 +2021,20 @@ int Atlantis::clbkConsumeBufferedKey( DWORD key, bool down, char* kstate )
 			RecordEvent( "KEY", cbuf );
 		}
 
+		if (!down)
+		{
+			// the keys that move the head
+			switch (key)
+			{
+				case OAPI_KEY_UP: vcMoveKey[0] = false; break;
+				case OAPI_KEY_DOWN: vcMoveKey[1] = false; break;
+				case OAPI_KEY_LEFT: vcMoveKey[2] = false; break;
+				case OAPI_KEY_RIGHT: vcMoveKey[3] = false; break;
+				case OAPI_KEY_INSERT: vcMoveKey[4] = false; break;
+				case OAPI_KEY_DELETE: vcMoveKey[5] = false; break;
+			}
+		}
+
 		if (!down) {
 			if (KEYMOD_ALT(kstate)) {
 				if (VCMode >= VC_PLBCAMA && VCMode <= VC_RMSCAM) {
@@ -2086,9 +2120,9 @@ int Atlantis::clbkConsumeBufferedKey( DWORD key, bool down, char* kstate )
 			case OAPI_KEY_A:
 				if (pRMS)
 				{
-					ControlRMS = !ControlRMS;
-					if (ControlRMS) DisplayCameraLabel(TEXT_RMSCONTROL);
-					else DisplayCameraLabel(TEXT_RCSCONTROL);
+					RMSControlOverride = !RMSControlOverride;
+					UpdateRMSControl();
+					DisplayCameraLabel( ControlRMS ? TEXT_RMSCONTROL : TEXT_RCSCONTROL );
 					return 1;
 				}
 				else return 0;
@@ -2114,6 +2148,15 @@ int Atlantis::clbkConsumeBufferedKey( DWORD key, bool down, char* kstate )
 				}
 				else hcView = !hcView;
 				return 1;
+			case OAPI_KEY_M:// free movement of the head in the cockpit
+				if (options->VCFreeMove() && oapiCameraInternal() && freemove::StationAllowsMove( VCMode, VC_DOCKCAM, VC_LEECAM, VC_EXT_AL ))
+				{
+					vcFreeMove = !vcFreeMove;
+					if (!vcFreeMove) ResetVCMove();
+					DisplayCameraLabel( vcFreeMove ? "Free movement: arrows, Ins/Del (Ctrl+M to end)" : "Free movement off" );
+					return 1;
+				}
+				return 0;
 			case OAPI_KEY_W:// write the current RMS POR position and attitude to the log (auto sequence point)
 				if (pRMS) pRMS->LogPOR();
 				return 1;
@@ -2175,6 +2218,18 @@ int Atlantis::clbkConsumeBufferedKey( DWORD key, bool down, char* kstate )
 			}
 		}
 		else /*if (!KEYMOD_SHIFT(kstate) && !KEYMOD_ALT(kstate))*/ { // unmodified keys
+			if (vcFreeMove)
+			{
+				switch (key)
+				{
+					case OAPI_KEY_UP: vcMoveKey[0] = true; return 1;
+					case OAPI_KEY_DOWN: vcMoveKey[1] = true; return 1;
+					case OAPI_KEY_LEFT: vcMoveKey[2] = true; return 1;
+					case OAPI_KEY_RIGHT: vcMoveKey[3] = true; return 1;
+					case OAPI_KEY_INSERT: vcMoveKey[4] = true; return 1;
+					case OAPI_KEY_DELETE: vcMoveKey[5] = true; return 1;
+				}
+			}
 			switch (key) {
 				/*case OAPI_KEY_TAB:
 					pCommModeHandler->EnterCommMode();
@@ -2620,6 +2675,12 @@ bool Atlantis::clbkLoadVC( int id )
 			}
 		}
 		oapiCameraSetCockpitDir(0, 0);
+
+		// the position of the station is the base of the free movement of the head
+		vcMoveOfs = vcAppliedOfs = _V( 0.0, 0.0, 0.0 );
+		for (int i = 0; i < 6; i++) vcMoveKey[i] = false;
+		GetCameraOffset( vcBaseOfs );
+		vcBaseOfs -= orbiter_ofs;
 		return ok;
 	}
 	catch (std::exception &e)
@@ -4073,9 +4134,9 @@ void Atlantis::UpdateHCButtons( void )
 	{
 		if (controltoggle && pRMS)
 		{
-			ControlRMS = !ControlRMS;
-			if (ControlRMS) DisplayCameraLabel( TEXT_RMSCONTROL );
-			else DisplayCameraLabel( TEXT_RCSCONTROL );
+			RMSControlOverride = !RMSControlOverride;
+			UpdateRMSControl();
+			DisplayCameraLabel( ControlRMS ? TEXT_RMSCONTROL : TEXT_RCSCONTROL );
 		}
 		hcButtonPrev[4] = controltoggle;
 	}
@@ -4178,6 +4239,7 @@ void Atlantis::UpdateControllers( double dt )
 	UpdateHCView();
 
 	// RHC and THC input (RMS included)
+	UpdateRMSControl();
 	if (ControlRMS)
 	{
 		// use RHC/THC input to control RMS
@@ -5494,6 +5556,67 @@ void Atlantis::UpdateMPSManifold(void)
 	LO2LowLevelSensor[2].SetValue(lvl);
 	LO2LowLevelSensor[3].SetValue(lvl);
 	return;
+}
+
+void Atlantis::UpdateRMSControl( void )
+{
+	// the RMS is operated from the aft station of the RMS: the hand controllers and the keys are for the RMS when the view is there, and
+	// for the RCS everywhere else (Ctrl+A inverts it, until the station is changed)
+	const bool focused = oapiCameraInternal() && (oapiGetFocusObject() == GetHandle());
+	const bool inStation = (pRMS != NULL) && focused && (VCMode == VC_RMSSTATION);
+	if (VCMode != RMSControlStation)
+	{
+		const bool changed = (RMSControlStation != -1);
+		RMSControlStation = VCMode;
+		RMSControlOverride = false;
+		if (changed && focused && pRMS && (inStation || ControlRMS)) DisplayCameraLabel( inStation ? TEXT_RMSCONTROL : TEXT_RCSCONTROL );
+	}
+	ControlRMS = RMSMath::ControlsRMS( pRMS != NULL, inStation, RMSControlOverride );
+}
+
+void Atlantis::ResetVCMove( void )
+{
+	vcMoveOfs = _V( 0.0, 0.0, 0.0 );
+	for (int i = 0; i < 6; i++) vcMoveKey[i] = false;
+	if (vcAppliedOfs.x != 0.0 || vcAppliedOfs.y != 0.0 || vcAppliedOfs.z != 0.0)
+	{
+		vcAppliedOfs = _V( 0.0, 0.0, 0.0 );
+		if (oapiCameraInternal()) SetCameraOffset( orbiter_ofs + vcBaseOfs );
+	}
+}
+
+void Atlantis::UpdateVCMove( double dt )
+{
+	if (!vcFreeMove) return;
+	if (!oapiCameraInternal() || (oapiGetFocusObject() != GetHandle()) || !freemove::StationAllowsMove( VCMode, VC_DOCKCAM, VC_LEECAM, VC_EXT_AL ))
+	{
+		// the view is not the one of a station (or another vessel has the focus): the mode ends
+		vcFreeMove = false;
+		ResetVCMove();
+		return;
+	}
+
+	const double fwd = (vcMoveKey[0] ? 1.0 : 0.0) - (vcMoveKey[1] ? 1.0 : 0.0);
+	const double right = (vcMoveKey[3] ? 1.0 : 0.0) - (vcMoveKey[2] ? 1.0 : 0.0);
+	const double up = (vcMoveKey[4] ? 1.0 : 0.0) - (vcMoveKey[5] ? 1.0 : 0.0);
+	bool changed = false;
+	if ((fwd != 0.0) || (right != 0.0) || (up != 0.0))
+	{
+		// the direction of the view, in the frame of the vessel
+		VECTOR3 gdir;
+		oapiCameraGlobalDir( &gdir );
+		MATRIX3 R;
+		GetRotationMatrix( R );
+		const VECTOR3 ldir = tmul( R, gdir );
+		const VECTOR3 forward = freemove::HorizontalForward( ldir, _V( 0.0, 0.0, 1.0 ) );
+		vcMoveOfs = freemove::Move( vcMoveOfs, fwd, right, up, forward, oapiGetSysStep() );// real time: the head also moves with a high time acceleration
+		changed = true;
+	}
+	if (changed || (vcAppliedOfs.x != vcMoveOfs.x) || (vcAppliedOfs.y != vcMoveOfs.y) || (vcAppliedOfs.z != vcMoveOfs.z))
+	{
+		vcAppliedOfs = vcMoveOfs;
+		SetCameraOffset( orbiter_ofs + vcBaseOfs + vcMoveOfs );
+	}
 }
 
 void Atlantis::SetPanelLighting( int channel, double scale )
