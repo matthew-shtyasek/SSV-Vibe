@@ -16,6 +16,7 @@ static char g_debugstring[1024];
 #include "../OV/RMSReaction.h"
 #include "../OV/RMSKin.h"
 #include "../OV/PDRSLogic.h"
+#include "../OV/PDRSProtocol.h"
 #include "../OV/HydModel.h"
 #include "../OV/ParameterValues.h"
 #include "../OV/SettingsModel.h"
@@ -1891,6 +1892,59 @@ static void test_pdrs_logic( void )
 		logic.GetStatus( st );
 		for (int i = 0; i < 3; i++) CHECK_NEAR( st.pos[i], logic.GetControl().endpos[i], 0.5 );
 		CHECK( logic.GetAutoState() == pdrs::AUTO_IDLE );
+	}
+
+	// the frames of the bus
+	{
+		const double q[6] = {-123.4567, 12.3456, -99.9999, 150.0, -170.5, 300.25};
+		pdrs::Input a = pdrs_input( q, pdrs::MODE_PL );
+		a.jointSwitch = 4;
+		a.enter = a.directMinus = a.rateHoldPB = a.safeSwitch = true;
+		a.eeCapture = a.payload = a.massEffect = true;
+		a.rhc[0] = 5.0; a.rhc[1] = -2.5; a.thc[2] = 0.123;
+		a.payloadMass = 14500.55;
+		a.porOffset = _V( 1.25, -0.5, 3.0 );
+		a.payloadAxes[0] = _V( 1.0, 0.0, 0.0 );
+		a.payloadAxes[1] = _V( 0.0, 0.6, 0.8 );
+		a.payloadAxes[2] = _V( 0.0, -0.8, 0.6 );
+		unsigned short frame[pdrs::FRAME_IN_WORDS];
+		pdrs::PackInput( a, frame );
+		pdrs::Input b;
+		pdrs::UnpackInput( frame, b );
+		CHECK( b.modeSwitch == pdrs::MODE_PL && b.jointSwitch == 4 );
+		CHECK( b.enter && b.directMinus && !b.directPlus && b.rateHoldPB && b.safeSwitch && b.powered && b.armFree && b.selected );
+		CHECK( b.eeCapture && !b.eeRigid && b.payload && b.massEffect );
+		for (int i = 0; i < 6; i++) CHECK_NEAR( b.joint[i], q[i], 1e-4 );
+		for (int i = 0; i < 3; i++) CHECK_NEAR( b.rhc[i], a.rhc[i], 2e-4 );
+		CHECK_NEAR( b.thc[2], 0.123, 2e-4 );
+		CHECK_NEAR( b.payloadMass, 14500.55, 0.01 );
+		CHECK_VEC( b.porOffset, a.porOffset, 1e-5 );
+		for (int i = 0; i < 3; i++) CHECK_VEC( b.payloadAxes[i], a.payloadAxes[i], 1e-6 );
+
+		pdrs::Output o, p;
+		for (int i = 0; i < 6; i++) o.rate[i] = (i - 2.5) * 1.2345;
+		o.safingCancel = false; o.ready = true; o.inProg = false; o.softStop = true; o.rateMin = true;
+		o.effMode = pdrs::MODE_AUTO_3;
+		unsigned short of[pdrs::FRAME_OUT_WORDS];
+		pdrs::PackOutput( o, of );
+		pdrs::UnpackOutput( of, p );
+		for (int i = 0; i < 6; i++) CHECK_NEAR( p.rate[i], o.rate[i], 6e-4 );
+		CHECK( !p.safingCancel && p.ready && !p.inProg && p.softStop && p.rateMin && p.effMode == pdrs::MODE_AUTO_3 );
+		o.effMode = -1;
+		pdrs::PackOutput( o, of );
+		pdrs::UnpackOutput( of, p );
+		CHECK( p.effMode == -1 );
+
+		// the MCIU: limits of the joints and of the rates, and no motion when the software does not answer
+		double j[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+		const double r[6] = {1000.0, -1.0, 0.0, 0.0, 0.0, 0.0};
+		pdrs::ApplyJointRates( r, false, 1.0, j );
+		CHECK_NEAR( j[0], 0.0, 1e-12 );
+		pdrs::ApplyJointRates( r, true, 1.0, j );
+		CHECK_NEAR( j[0], pdrs::JOINT_MAX_SPEED[0], 1e-9 );
+		CHECK_NEAR( j[1], -1.0, 1e-9 );
+		for (int i = 0; i < 20; i++) pdrs::ApplyJointRates( r, true, 1.0, j );
+		CHECK( j[0] <= rmskin::JOINT_LIMITS[1][0] );
 	}
 
 	// parser of the auto sequences

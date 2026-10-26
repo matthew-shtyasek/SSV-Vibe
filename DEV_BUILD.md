@@ -26,6 +26,19 @@ Run the simulation with the Atlantis or any SSV scenario. Quick start with the a
 - On the ground (on the launch pad or landed) the payload bay doors, radiators, MPM and the arm cannot be moved (they can not in the real vehicle: they are not designed for 1 g).
 - The hand controllers of the shuttle are read at the position of the user (commander, pilot or aft station). The aft THC left-right direction of the keyboard and of the controllers is the same.
 
+### RMS control through the GPC (PDRS software)
+
+As in the real vehicle, the computer supported modes of the arm do not run inside the arm: they run in the software of the SM GPC (SM OPS 2, major modes 201 and 202).
+
+- **How the data goes.** The MCIU (the interface unit of the arm) puts a frame on the data bus every cycle: the hand controllers, the switches of panel A8U (MODE, ENTER, joint select, RATE, AUTO SEQ, SAFING, RMS POWER), the angles of the joints, the end effector talkbacks and the payload that the arm holds. The PDRS software runs at 12.5 Hz (80 ms), computes the commands of rate of the six joints and returns them. The MCIU applies them to the joints. Because of this loop the motion lags the hand controller by about one software cycle.
+- **What runs in the software:** SINGLE, ORB UNL, END EFF, ORB LD, PL, TEST, OPR CMD, AUTO 1 to 4, RATE HOLD, the soft stops, the points of resolution (POR), the DISP 95 overrides and the displays SPEC 94 PDRS CONTROL, DISP 95 PDRS OVERRIDE, DISP 96 PDRS FAULTS and DISP 169 PDRS STATUS (they show the data of the software).
+- **What does not use the computer (hardware):** DIRECT drive, the BACKUP control (RMS POWER in BACKUP and the BACKUP CONTROL switches), the brakes and the SAFING. Therefore, **if the GPC does not run the software (major mode other than 2xx, or the SM GPC is not working), the arm cannot be driven with the hand controllers: use DIRECT or BACKUP.**
+- **Loss of the software:** if the software does not answer for 0.5 s the MCIU holds the commands at zero and the arm stops (the mode lights go out until the software answers again).
+- **ENTER:** the mode selected with MODE is taken only when ENTER is pushed (as before); DIRECT does not need it.
+- **Option** `RMSViaGPC` (on by default; Settings MFD, group RMS). Off gives the old direct control, which works in any major mode.
+- The scenario keeps `ACCEPTED_MODE` and `PDRS_ID`, the other data of SPEC 94 start from the defaults.
+- **Not validated in the simulator yet:** the behaviour is covered by unit tests of the logic (the closed loop of the modes, the frames of the bus) but nobody has flown it. Please report the lag, the modes that do not engage, and the cases where the arm does not move.
+
 ### Game controllers (any number)
 - Any number of DirectInput devices, independent of the joystick of the Orbiter launchpad (RHC and THC on two sticks, gamepads, FPV radios in USB joystick mode). The configuration files have the format of the Vesim module of NASSP, one file per device (`Config\SSV\Controllers`). **Read `GUIDE_RU.md` (Russian) or `README.txt` there**, with examples for the Thrustmaster T16000M, a gamepad and an FPV radio.
 - Axes: RHC pitch, yaw, roll, THC X, Y, Z, **rudder pedals (RPTA), the speedbrake/throttle lever (SBTC), toe brakes**. Buttons: RMS capture, release, rate hold, rate, control toggle, and **any switch or pushbutton of a panel** (`PANEL A8A1/BRAKES:TOGGLE ...`). The operations of the buttons are recorded for playback like the mouse.

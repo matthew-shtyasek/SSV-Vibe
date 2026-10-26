@@ -170,6 +170,15 @@ constexpr double LIGHT_ATT2 = 0.05;// [1]
 RMS::RMS( AtlantisSubsystemDirector *_director, const std::string& _ident, bool portside, const mission::MissionRMS& missionrms )
 	: MPM( _director, _ident, "GF", portside, MAX_GRAPPLING_DIST, MAX_GRAPPLING_ANGLE ), bFirstStep(true), stowed_and_latched(true), missionrms(missionrms)
 {
+	gpcLogic = NULL;
+	memset( &gpcOut, 0, sizeof( gpcOut ) );
+	gpcOut.effMode = -1;
+	gpcValid = false;
+	lastCounterOut = lastCounterRead = 0;
+	lastAnswerTime = -1.0e9;
+	simtNow = 0.0;
+	enterLatch = rateHoldLatch = false;
+	hwMode = -1;
 	joint_angle[SHOULDER_YAW] = 0.0;
 	joint_angle[SHOULDER_PITCH] = 0.0;
 	joint_angle[ELBOW_PITCH] = 0.0;
@@ -608,7 +617,12 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 	}
 
 	// make sure RMS is powered and can be operated
-	if(!Powered()) return;
+	if(!Powered())
+	{
+		// the MCIU is off: the software sees an arm without power
+		mailbox.toGpc[pdrs::W_FLAGS] = 0;
+		return;
+	}
 
 	// MODE switch position
 	int curmode = -1;
@@ -616,20 +630,32 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 	{
 		if (RMSMode[i].IsSet()) curmode = i;
 	}
-	if (ovr.mode_ena && (ovr.mode >= 0)) curmode = ovr.mode;// MODE SW OVRD
-	// the mode selected with MODE is entered with ENTER (not needed for DIRECT); if the MODE switch is moved, the software is idle until ENTER is pushed
-	bool enter = EnterPB.IsSet() || ovr.enter;
-	ovr.enter = false;
-	if (acceptedMode == -2) acceptedMode = curmode;// nothing stored in the scenario
-	if (enter && !bEnterPrev) acceptedMode = curmode;
-	bEnterPrev = enter;
-	if (curmode == MODE_DIRECT) effMode = MODE_DIRECT;
-	else if (curmode == acceptedMode) effMode = curmode;
-	else effMode = -1;
-
-	// with RMS POWER in BACKUP, only the BACKUP CONTROL switches work (no computer supported modes)
+	hwMode = curmode;
 	const bool backup = PowerBackup.IsSet() && !PowerPrimary.IsSet();
-	if (backup) effMode = -1;
+	const bool viaGpc = UsingGpc();
+	if (viaGpc)
+	{
+		// the computer supported modes are selected and accepted in the software of the GPC; DIRECT is hardware and does not need it
+		GpcReceive( simt );
+		effMode = (curmode == MODE_DIRECT) ? MODE_DIRECT : (gpcValid ? gpcOut.effMode : -1);
+		if (backup) effMode = -1;
+	}
+	else
+	{
+		if (ovr.mode_ena && (ovr.mode >= 0)) curmode = ovr.mode;// MODE SW OVRD
+		// the mode selected with MODE is entered with ENTER (not needed for DIRECT); if the MODE switch is moved, the software is idle until ENTER is pushed
+		bool enter = EnterPB.IsSet() || ovr.enter;
+		ovr.enter = false;
+		if (acceptedMode == -2) acceptedMode = curmode;// nothing stored in the scenario
+		if (enter && !bEnterPrev) acceptedMode = curmode;
+		bEnterPrev = enter;
+		if (curmode == MODE_DIRECT) effMode = MODE_DIRECT;
+		else if (curmode == acceptedMode) effMode = curmode;
+		else effMode = -1;
+
+		// with RMS POWER in BACKUP, only the BACKUP CONTROL switches work (no computer supported modes)
+		if (backup) effMode = -1;
+	}
 
 	// detect mode changes: RATE HOLD is cancelled and the soft stop logic of SINGLE mode is initialized
 	if (effMode != lastRMSMode)
@@ -650,7 +676,7 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 	// the brakes hold the arm; SAFING brings the arm to rest until it is cancelled
 	// SAFING: the switch in SAFE brings the arm to rest, and the safing is maintained when the switch goes back to AUTO until it is cancelled
 	// with the switch momentarily in CANCEL (or SAFING CAN of the PDRS OVERRIDE display)
-	safingLatched = RMSMath::SafingLatch( safingLatched, SafingOn.IsSet(), SafingCancel.IsSet(), ovr.safing_cancel );
+	safingLatched = RMSMath::SafingLatch( safingLatched, SafingOn.IsSet(), SafingCancel.IsSet(), viaGpc ? (gpcValid && gpcOut.safingCancel) : ovr.safing_cancel );
 	if (!SafingOn.IsSet()) ovr.safing_cancel = false;
 	const bool safing = safingLatched;
 	if (safing) SafingActive.SetLine();
@@ -663,7 +689,7 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 
 	// RATE HOLD pushbutton (RHC grip): push to hold the commanded rates, push again to release
 	bool ratehold_pb = RateHoldPB.IsSet();
-	if (ratehold_pb && !bRateHoldPBPrev)
+	if (!viaGpc && ratehold_pb && !bRateHoldPBPrev)
 	{
 		if (bRateHold) bRateHold = false;
 		else if (armfree && ManualAugmentedMode())
@@ -680,6 +706,13 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 	bRateHoldPBPrev = ratehold_pb;
 
 	transRateCmd = rotRateCmd = _V( 0.0, 0.0, 0.0 );
+
+	// the MCIU: data to the GPC and the commands of the GPC to the joints
+	if (viaGpc)
+	{
+		GpcSend( backup, armfree );
+		GpcApply( simdt, backup, armfree );
+	}
 
 	// BACKUP CONTROL: the selected joint is driven with the DIRECT DRIVE switch
 	if (backup && armfree)
@@ -700,7 +733,18 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 	}
 
 	//rotate joints
-	if(armfree) {
+	if (armfree && viaGpc && ModeIs(MODE_DIRECT))
+	{
+		// DIRECT does not use the computer
+		int dir = DirectDrivePlus ? 1 : (DirectDriveMinus ? -1 : 0);
+		const int joint = GetSelectedJoint();
+		if ((dir != 0) && (joint != -1))
+		{
+			DriveSingleJoint( joint, dir, simdt );
+			update_vectors = true;
+		}
+	}
+	if(armfree && !viaGpc) {
 		if(ModeIs(MODE_SINGLE) || ModeIs(MODE_DIRECT)) { // joint-by-joint drive
 			int dir = 0;
 			if(DirectDrivePlus) dir = 1;
@@ -781,9 +825,12 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 	}
 
 	// OPR CMD, AUTO 1-4
-	RunAutoModes( simdt, armfree );
+	if (!viaGpc)
+	{
+		RunAutoModes( simdt, armfree );
+		CheckSoftwareStop();
+	}
 
-	CheckSoftwareStop();
 	// the software drops out of mode (idle) when a joint reaches a soft stop, which cancels RATE HOLD
 	if (bSoftStop) bRateHold = false;
 
@@ -1090,10 +1137,16 @@ bool RMS::OnParseLine(const char* line)
 	}
 	else if(!_strnicmp(line, "ACCEPTED_MODE", 13)) {
 		sscanf_s(line+13, "%d", &acceptedMode);
+		if (gpcLogic != NULL) gpcLogic->SetAcceptedMode( acceptedMode );
 		return true;
 	}
 	else if(!_strnicmp(line, "PDRS_ID", 7)) {
 		sscanf_s(line+7, "%d %d", &pdrs.plid, &pdrs.eeid);
+		if (gpcLogic != NULL)
+		{
+			gpcLogic->GetControl().plid = pdrs.plid;
+			gpcLogic->GetControl().eeid = pdrs.eeid;
+		}
 		return true;
 	}
 
@@ -1110,8 +1163,9 @@ void RMS::OnSaveState(FILEHANDLE scn) const
 		joint_angle[WRIST_PITCH], joint_angle[WRIST_YAW], joint_angle[WRIST_ROLL] );
 	oapiWriteScenario_string( scn, "ANGLES", cbuf );
 	oapiWriteScenario_float(scn, "SHOULDER_BRACE", shoulder_brace);
-	oapiWriteScenario_int( scn, "ACCEPTED_MODE", acceptedMode );
-	sprintf_s( cbuf, 256, "%d %d", pdrs.plid, pdrs.eeid );
+	const bool saveGpc = (gpcLogic != NULL) && STS()->GetOptions()->RMSViaGPC();
+	oapiWriteScenario_int( scn, "ACCEPTED_MODE", saveGpc ? gpcLogic->GetAcceptedMode() : acceptedMode );
+	sprintf_s( cbuf, 256, "%d %d", saveGpc ? gpcLogic->GetControl().plid : pdrs.plid, saveGpc ? gpcLogic->GetControl().eeid : pdrs.eeid );
 	oapiWriteScenario_string( scn, "PDRS_ID", cbuf );
 	WriteScenario_state(scn, "GRAPPLE", Grapple_State);
 	WriteScenario_state(scn, "RIGIDIZE", Rigid_State);
@@ -1270,11 +1324,13 @@ void RMS::LoadAutoSequences( void )
 	int count = 0;
 	for (int i = 0; i < 20; i++) if (!autoseq[i].empty()) count++;
 	oapiWriteLogV( "(SSV_OV) [INFO] RMS: %d auto sequence(s) loaded", count );
+	if (gpcLogic != NULL) gpcLogic->SetAutoSequences( autoseq );
 	return;
 }
 
 int RMS::GetAutoSequenceSize( int id ) const
 {
+	if (UsingGpc()) return gpcLogic->GetAutoSequenceSize( id );
 	if ((id < 1) || (id > 20)) return 0;
 	return (int)autoseq[id - 1].size();
 }
@@ -1515,6 +1571,8 @@ void RMS::LogPOR( void ) const
 
 bool RMS::PDRSItemInput( int item, const char* data )
 {
+	if (UsingGpc()) return gpcLogic->ItemInput( item, data );
+
 	int n;
 	double d;
 	const bool nodata = (strlen( data ) == 0);
@@ -1624,7 +1682,8 @@ bool RMS::Powered( void ) const
 bool RMS::RateCoarse( void ) const
 {
 	// the RATE switch of the RHC, or the override of the PDRS OVERRIDE display
-	return ovr.rate_ena ? ovr.rate_coarse : RMSCoarseRateCMD.IsSet();
+	const PDRSOverride& o = GetPDRSOverride();
+	return o.rate_ena ? o.rate_coarse : RMSCoarseRateCMD.IsSet();
 }
 
 double RMS::GetLoadScale( void ) const
@@ -1633,7 +1692,7 @@ double RMS::GetLoadScale( void ) const
 	// the effect of the mass is an option of the vessel configuration (RMSPayloadMassEffect, off by default)
 	if (attachedPayload == NULL) return 1.0;
 	// LOADED RATE override: the loaded rate limits are in effect even for light payloads
-	return RMSMath::LoadScale( attachedPayload->GetMass(), STS()->GetOptions()->RMSPayloadMassEffect(), ovr.loaded_rate );
+	return RMSMath::LoadScale( attachedPayload->GetMass(), STS()->GetOptions()->RMSPayloadMassEffect(), GetPDRSOverride().loaded_rate );
 }
 
 void RMS::UpdateRates( double dt )
@@ -1670,6 +1729,12 @@ void RMS::UpdateRates( double dt )
 
 void RMS::GetPDRSStatus( PDRSStatus& st ) const
 {
+	if (UsingGpc())
+	{
+		gpcLogic->GetStatus( st );
+		return;
+	}
+
 	st.selected = RMSSelect.IsSet();
 	st.power = PowerOff.IsSet() ? 0 : ((PowerBackup.IsSet() && !PowerPrimary.IsSet()) ? 2 : 1);
 	for (int i = 0; i < 6; i++)
@@ -1725,6 +1790,8 @@ bool RMS::GetGrappleHint( double& distance, double& angle ) const
 
 bool RMS::PDRSOverrideItem( int item, const char* data )
 {
+	if (UsingGpc()) return gpcLogic->OverrideItem( item, data );
+
 	if (strlen( data ) != 0) return false;
 
 	switch (item)
@@ -2363,4 +2430,120 @@ void RMS::GetMassPoints( massprops::Point& arm, massprops::Point& armStowed, mas
 		payload.m = GetMassAndCoGOfAttachedObject( STS(), hAttach, cog );
 		payload.r = cog - STS()->GetOrbiterCoGOffset();// to the frame of the mesh
 	}
+}
+
+
+bool RMS::UsingGpc( void ) const
+{
+	return (gpcLogic != NULL) && STS()->GetOptions()->RMSViaGPC();
+}
+
+void RMS::SetGpcLogic( pdrs::Logic* logic )
+{
+	gpcLogic = logic;
+	if (logic == NULL) return;
+	// the data that the scenario had given to the arm
+	logic->SetAcceptedMode( acceptedMode );
+	logic->GetControl().plid = pdrs.plid;
+	logic->GetControl().eeid = pdrs.eeid;
+	logic->SetAutoSequences( autoseq );
+	oapiWriteLog( "(SSV_OV) [INFO] RMS: the software of the GPC runs the computer supported modes" );
+}
+
+void RMS::GpcReceive( double simt )
+{
+	simtNow = simt;
+	// the software answers with a new frame in every cycle; the MCIU stops the arm if it does not
+	if (mailbox.counterOut != lastCounterOut)
+	{
+		lastCounterOut = mailbox.counterOut;
+		lastAnswerTime = simt;
+	}
+	gpcValid = ((simt - lastAnswerTime) < pdrs::COMM_TIMEOUT);
+	if (gpcValid) pdrs::UnpackOutput( mailbox.fromGpc, gpcOut );
+	else
+	{
+		for (int i = 0; i < 6; i++) gpcOut.rate[i] = 0.0;
+		gpcOut.safingCancel = gpcOut.ready = gpcOut.inProg = gpcOut.softStop = gpcOut.rateMin = false;
+		gpcOut.effMode = -1;
+	}
+
+	autoState = gpcOut.inProg ? AUTO_RUN : (gpcOut.ready ? AUTO_READY : AUTO_IDLE);
+	bSoftStop = gpcOut.softStop;
+}
+
+void RMS::GpcSend( bool backup, bool armfree )
+{
+	// a pushbutton that was pressed is kept until the software has read a frame
+	if (mailbox.counterRead != lastCounterRead)
+	{
+		lastCounterRead = mailbox.counterRead;
+		enterLatch = false;
+		rateHoldLatch = false;
+	}
+	if (EnterPB.IsSet()) enterLatch = true;
+	if (RateHoldPB.IsSet()) rateHoldLatch = true;
+
+	pdrs::Input in;
+	in.dt = pdrs::GPC_CYCLE;
+	in.selected = RMSSelect.IsSet();
+	in.powerOff = PowerOff.IsSet();
+	in.powerPrimary = PowerPrimary.IsSet();
+	in.powerBackup = PowerBackup.IsSet();
+	in.powered = Powered();
+	in.backup = backup;
+	in.modeSwitch = hwMode;
+	in.enter = enterLatch;
+	in.jointSwitch = -1;
+	for (int i = 0; i < 6; i++)
+	{
+		if (JointSelect[i]) in.jointSwitch = i;
+	}
+	in.directPlus = DirectDrivePlus.IsSet();
+	in.directMinus = DirectDriveMinus.IsSet();
+	for (int i = 0; i < 3; i++)
+	{
+		in.rhc[i] = RHCInput[i].GetVoltage();
+		in.thc[i] = THCInput[i].GetVoltage();
+	}
+	in.rateCoarse = RMSCoarseRateCMD.IsSet();
+	in.rateHoldPB = rateHoldLatch;
+	in.autoProceed = AutoSeqProceed.IsSet();
+	in.safeSwitch = SafingOn.IsSet();
+	in.armFree = armfree;
+	for (int i = 0; i < 6; i++) in.joint[i] = joint_angle[i];
+	in.eeRigid = bEERigidized;
+	in.eeClose = bEEClosed;
+	in.eeCapture = bEECapture;
+	in.eeDerigid = bEEDerigidized;
+	in.eeOpen = bEEOpened;
+	in.eeExtend = bEEExtended;
+
+	VECTOR3 axes[3];
+	in.payload = GetPayloadPOR( in.porOffset, axes );
+	for (int i = 0; i < 3; i++) in.payloadAxes[i] = in.payload ? axes[i] : _V( 0.0, 0.0, 0.0 );
+	in.payloadMass = (attachedPayload != NULL) ? attachedPayload->GetMass() : 0.0;
+	in.massEffect = STS()->GetOptions()->RMSPayloadMassEffect();
+
+	pdrs::PackInput( in, mailbox.toGpc );
+	mailbox.counterIn++;
+}
+
+void RMS::GpcApply( double simdt, bool backup, bool armfree )
+{
+	if (!armfree || !gpcValid || backup || ModeIs( MODE_DIRECT )) return;
+
+	double angles[6];
+	for (int i = 0; i < 6; i++) angles[i] = joint_angle[i];
+	pdrs::ApplyJointRates( gpcOut.rate, true, simdt, angles );
+	bool moved = false;
+	for (int i = 0; i < 6; i++)
+	{
+		if (angles[i] != joint_angle[i])
+		{
+			SetJointAngle( static_cast<RMS_JOINT>(i), angles[i] );
+			moved = true;
+		}
+	}
+	if (moved) update_vectors = true;
 }

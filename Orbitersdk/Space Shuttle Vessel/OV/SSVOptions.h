@@ -198,6 +198,11 @@ class SSVOptions
 			return values[settings::RMS_INERTIA] != 0.0;
 		}
 
+		bool RMSViaGPC( void ) const
+		{
+			return values[settings::RMS_VIA_GPC] != 0.0;
+		}
+
 		bool CabinLighting( void ) const
 		{
 			return values[settings::CABIN_LIGHTING] != 0.0;

@@ -82,6 +82,7 @@ Date         Developer
 #include "Software/SystemDisplays.h"
 #include "Software/GNC/GNCDisplays.h"
 #include "Software/SM/SMDisplays.h"
+#include "Software/SM/PDRS_SOP.h"
 #include "Software/GNC/MEC_SOP.h"
 #include "Software/GNC/RHC_RM.h"
 #include "Software/GNC/THC_RM.h"
@@ -223,6 +224,7 @@ GNC(_GNC)
 
 		vSoftware.push_back( new SSB_PL_BAY_DOORS( this ) );
 		vSoftware.push_back( new SSO_SP_DATA_OUT( this ) );
+		vSoftware.push_back( new PDRS_SOP( this ) );
 		vSoftware.push_back( pUserDisplays = new SMDisplays( this ) );
 	}
 
