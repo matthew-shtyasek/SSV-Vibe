@@ -67,7 +67,7 @@ namespace vc
 		assert( bHasDirection && "DimmerKnob.bHasDirection" );
 		assert( (ang > 0.0) && "DimmerKnob.ang" );
 
-		// the direction of the axis points away from the user, so that a positive angle turns the knob clockwise
+		// the direction of the axis points to the user (the normal of the panel): in the left handed frame of Orbiter a positive angle turns clockwise as seen from the tip of the axis
 		// the group is in the middle of its travel: the first component takes it to the first stop (counterclockwise), the second to the other stop
 		rotStart = new MGROUP_ROTATE( vc_idx, &grpIndex, 1, GetReference(), GetDirection(), static_cast<float>((offset - (0.5 * ang)) * RAD) );
 		rotTravel = new MGROUP_ROTATE( vc_idx, &grpIndex, 1, GetReference(), GetDirection(), static_cast<float>(ang * RAD) );

@@ -384,6 +384,15 @@ namespace pdrs
 
 			if (!in.powered) return;
 
+			// I/O OFF (item 6 of SPEC 94): the software does not command the arm, only DIRECT and BACKUP (hardware) work
+			if (!ctrl.io)
+			{
+				effMode = -1;
+				autoState = AUTO_IDLE;
+				out.effMode = -1;
+				return;
+			}
+
 			// MODE switch position
 			int curmode = in.modeSwitch;
 			if (ovr.mode_ena && (ovr.mode >= 0)) curmode = ovr.mode;// MODE SW OVRD

@@ -151,6 +151,7 @@ Date         Developer
 
 #include <Orbitersdk.h>
 #include <vector>
+#include <array>
 #include <PanelGroup.h>
 #include <discsignals.h>
 #include <Sensor.h>
@@ -681,6 +682,9 @@ class Atlantis: public VESSEL4
 		 ****************************************************************/
 		UINT mesh_orbiter;                         // index for orbiter mesh
 		UINT mesh_vcexternal;                         // index for cockpit mesh for external view
+		double cabinBrightness;
+		bool cabinBrightnessDirty;
+		std::vector<std::array<float, 6>> cabinBaseVC, cabinBaseMiddeck;// ambient and emissive (rgb) of the materials in the meshes
 		UINT mesh_vc;                              // index for virtual cockpit mesh
 		UINT mesh_middeck;                         // index for mid deck mesh
 		UINT mesh_verticaltail;
@@ -828,6 +832,8 @@ class Atlantis: public VESSEL4
 		 * @param scale [0, 1], 1 = the panel as it is in the mesh
 		 */
 		void SetPanelLighting( int channel, double scale );
+		/** Brightness of the cabin shell and the middeck (ambient and self illumination of the materials): 1 = as in the meshes. */
+		void SetCabinBrightness( double scale );
 
 		~Atlantis();
 

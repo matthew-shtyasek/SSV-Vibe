@@ -835,6 +835,8 @@ pActiveLatches( 5, NULL ), pXRSound(NULL)
 	RMSControlOverride = false;
 	RMSControlStation = -1;
 	RMSControlShown = -1;
+	cabinBrightness = 1.0;
+	cabinBrightnessDirty = false;
 	lastRMSSJCommand = 0;
 
 	SERCstop = true;
@@ -1862,6 +1864,7 @@ void Atlantis::clbkVisualCreated( VISHANDLE vis, int refcount )
 		oapiWriteLog("(SSV_OV) [INFO] (Atlantis::clbkVisualCreated) Entered.");
 		if (refcount > 1) return; // we don't support more than one visual per object
 		this->vis = vis;
+		cabinBrightnessDirty = true;
 
 		// get device-specific mesh handles
 		hDevOrbiterMesh = GetDevMesh( vis, mesh_orbiter );
@@ -5668,6 +5671,41 @@ void Atlantis::SetPanelLighting( int channel, double scale )
 			vc::AtlantisPanel* ap = dynamic_cast<vc::AtlantisPanel*>(panel);
 			if ((ap != NULL) && (ap->GetLightingChannel() == channel)) ap->SetGlow( scale );
 		} );
+	}
+}
+
+void Atlantis::SetCabinBrightness( double scale )
+{
+	if ((fabs( scale - cabinBrightness ) < 0.005) && !cabinBrightnessDirty) return;
+	cabinBrightness = scale;
+	if (Get_vis() == 0) return;
+	cabinBrightnessDirty = false;
+
+	const UINT meshes[2] = {mesh_vc, mesh_middeck};
+	std::vector<std::array<float, 6>>* bases[2] = {&cabinBaseVC, &cabinBaseMiddeck};
+	for (int m = 0; m < 2; m++)
+	{
+		DEVMESHHANDLE hDev = GetDevMesh( Get_vis(), meshes[m] );
+		if (hDev == NULL) continue;
+		for (DWORD i = 0; i < 512; i++)
+		{
+			MATERIAL mat;
+			if (oapiMeshMaterial( hDev, i, &mat ) != 0) break;
+			if (bases[m]->size() <= i)
+			{
+				bases[m]->resize( i + 1 );
+				(*bases[m])[i] = {mat.ambient.r, mat.ambient.g, mat.ambient.b, mat.emissive.r, mat.emissive.g, mat.emissive.b};
+			}
+			const std::array<float, 6>& b = (*bases[m])[i];
+			const float s = static_cast<float>(scale);
+			mat.ambient.r = b[0] * s;
+			mat.ambient.g = b[1] * s;
+			mat.ambient.b = b[2] * s;
+			mat.emissive.r = b[3] * s;
+			mat.emissive.g = b[4] * s;
+			mat.emissive.b = b[5] * s;
+			oapiSetMaterial( hDev, i, &mat );
+		}
 	}
 }
 

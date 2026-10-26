@@ -22,6 +22,7 @@ namespace
 	const VECTOR3 CONSOLE_SHIFT_CDR = _V( 0.45, -0.25, 0.20 );
 	const VECTOR3 CONSOLE_SHIFT_PLT = _V( -0.45, -0.25, 0.20 );
 
+	constexpr double CABIN_MIN_BRIGHTNESS = 0.3;// ambient and self illumination of the cabin with all the lamps off
 	constexpr double RAMP_RATE = 4.0;// [1/s] fluorescent lamps and the eye: the level does not jump
 
 	// color of the light (fluorescent lamps are cold white, the incandescent lamps of the seat lights are warm)
@@ -153,7 +154,9 @@ void CabinLighting::OnPostStep( double simt, double simdt, double mjd )
 	}
 	if (moved) PlaceLights();
 
-	// the panels
-	for (int i = 1; i < cabinlight::PNL_COUNT; i++) STS()->SetPanelLighting( i, panelScale[i] );
+	// the cabin: the brightness of the shell and of the middeck follows the lamps that are on (the light of the sun through the windows is the minimum)
+	double total = 0.0;
+	for (int i = 0; i < FLOOD_COUNT; i++) total += level[i];
+	STS()->SetCabinBrightness( enabled ? (CABIN_MIN_BRIGHTNESS + ((1.0 - CABIN_MIN_BRIGHTNESS) * ((total > 2.0) ? 1.0 : (total / 2.0)))) : 1.0 );
 	return;
 }

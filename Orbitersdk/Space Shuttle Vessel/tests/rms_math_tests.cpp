@@ -1936,6 +1936,26 @@ static void test_pdrs_logic( void )
 		CHECK( logic.GetAutoState() == pdrs::AUTO_IDLE );
 	}
 
+	// I/O OFF: the software does not command the arm
+	{
+		pdrs::Logic logic;
+		double q[6] = {10.0, 30.0, -80.0, 20.0, 10.0, 0.0};
+		pdrs::Output out;
+		pdrs::Input in = pdrs_input( q, pdrs::MODE_ORB_UNL );
+		in.thc[0] = 5.0;
+		CHECK( logic.ItemInput( 6, "" ) );
+		logic.Step( in, out );
+		for (int i = 0; i < 6; i++) CHECK_NEAR( out.rate[i], 0.0, 1e-12 );
+		CHECK( !logic.ModeIs( pdrs::MODE_ORB_UNL ) );
+		CHECK( logic.ItemInput( 5, "" ) );
+		logic.Step( in, out );
+		logic.Step( in, out );
+		CHECK( logic.ModeIs( pdrs::MODE_ORB_UNL ) );
+		double sum = 0.0;
+		for (int i = 0; i < 6; i++) sum += fabs( out.rate[i] );
+		CHECK( sum > 0.0 );
+	}
+
 	// the frames of the bus
 	{
 		const double q[6] = {-123.4567, 12.3456, -99.9999, 150.0, -170.5, 300.25};

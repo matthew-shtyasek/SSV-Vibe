@@ -1140,6 +1140,13 @@ bool RMS::OnParseLine(const char* line)
 		if (gpcLogic != NULL) gpcLogic->SetAcceptedMode( acceptedMode );
 		return true;
 	}
+	else if(!_strnicmp(line, "PDRS_IO", 7)) {
+		int io = 1;
+		sscanf_s(line+7, "%d", &io);
+		pdrs.io = (io != 0);
+		if (gpcLogic != NULL) gpcLogic->GetControl().io = pdrs.io;
+		return true;
+	}
 	else if(!_strnicmp(line, "PDRS_ID", 7)) {
 		sscanf_s(line+7, "%d %d", &pdrs.plid, &pdrs.eeid);
 		if (gpcLogic != NULL)
@@ -1167,6 +1174,7 @@ void RMS::OnSaveState(FILEHANDLE scn) const
 	oapiWriteScenario_int( scn, "ACCEPTED_MODE", saveGpc ? gpcLogic->GetAcceptedMode() : acceptedMode );
 	sprintf_s( cbuf, 256, "%d %d", saveGpc ? gpcLogic->GetControl().plid : pdrs.plid, saveGpc ? gpcLogic->GetControl().eeid : pdrs.eeid );
 	oapiWriteScenario_string( scn, "PDRS_ID", cbuf );
+	oapiWriteScenario_int( scn, "PDRS_IO", (saveGpc ? gpcLogic->GetControl().io : pdrs.io) ? 1 : 0 );
 	WriteScenario_state(scn, "GRAPPLE", Grapple_State);
 	WriteScenario_state(scn, "RIGIDIZE", Rigid_State);
 	WriteScenario_state(scn, "EXTEND", Extend_State);
@@ -2446,6 +2454,7 @@ void RMS::SetGpcLogic( pdrs::Logic* logic )
 	logic->SetAcceptedMode( acceptedMode );
 	logic->GetControl().plid = pdrs.plid;
 	logic->GetControl().eeid = pdrs.eeid;
+	logic->GetControl().io = pdrs.io;
 	logic->SetAutoSequences( autoseq );
 	oapiWriteLog( "(SSV_OV) [INFO] RMS: the software of the GPC runs the computer supported modes" );
 }
