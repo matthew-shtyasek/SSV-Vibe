@@ -88,6 +88,8 @@ namespace vc
 		StdSwitch2* pBlrN2Supply[3];
 
 		LockableLever3* pAPUOperate[3];
+		StdSwitch2* pAPUSpeedSelect[3];// NORM, HIGH
+		StdSwitch2* pAPUAutoShutdown[3];// INHIBIT, ENABLE
 		LockableLever2* pHydPumpPress[3];
 		LockableLever2* pAPUCntlrPwr[3];
 		LockableLever2* pAPUFuelTkVlv[3];

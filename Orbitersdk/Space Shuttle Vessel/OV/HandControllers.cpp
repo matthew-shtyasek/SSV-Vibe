@@ -44,17 +44,23 @@
 
 namespace
 {
-	enum SubDeviceType {SUB_AXIS = 0, SUB_BUTTON, SUB_POV};
-
-	// axis identifiers of DIJOYSTATE2
-	enum {AX_X = 0, AX_Y, AX_Z, AX_RX, AX_RY, AX_RZ, AX_SLIDER0, AX_SLIDER1};
+	using ctrlmath::SubDeviceType;
+	using ctrlmath::SUB_AXIS;
+	using ctrlmath::SUB_BUTTON;
+	using ctrlmath::SUB_POV;
+	using ctrlmath::AX_X;
+	using ctrlmath::AX_Y;
+	using ctrlmath::AX_Z;
+	using ctrlmath::AX_RX;
+	using ctrlmath::AX_RY;
+	using ctrlmath::AX_RZ;
+	using ctrlmath::AX_SLIDER0;
+	using ctrlmath::AX_SLIDER1;
 
 	constexpr const char* CONFIG_PATH = ".\\Config\\SSV\\Controllers\\";
 
-	const char* const INPUT_NAMES[HandControllers::INPUT_COUNT] = {
-		"RHC_PITCH", "RHC_YAW", "RHC_ROLL", "THC_X", "THC_Y", "THC_Z", "RPTA", "SBTC", "BRAKE_LEFT", "BRAKE_RIGHT",
-		"RMS_CAPTURE", "RMS_RELEASE", "RMS_RATE_HOLD", "RMS_RATE_TOGGLE", "RMS_CONTROL_TOGGLE"
-	};
+	using ctrlmath::INPUT_NAMES;
+	static_assert( ctrlmath::INPUT_NAME_COUNT == HandControllers::INPUT_COUNT, "the names of the inputs" );
 
 	struct Connection
 	{
@@ -188,51 +194,7 @@ namespace
 
 bool HandControllers::Impl::ParseSubDevice( const std::string& text, int& type, int& id ) const
 {
-	std::string t = Lower( Trim( text ) );
-	if (t.compare( 0, 4, "axis" ) == 0)
-	{
-		std::string a = Trim( t.substr( 4 ) );
-		type = SUB_AXIS;
-		if (a == "x") id = AX_X;
-		else if (a == "y") id = AX_Y;
-		else if (a == "z") id = AX_Z;
-		else if (a == "rx") id = AX_RX;
-		else if (a == "ry") id = AX_RY;
-		else if (a == "rz") id = AX_RZ;
-		else return false;
-		return true;
-	}
-	else if (t.compare( 0, 6, "slider" ) == 0)
-	{
-		std::string a = Trim( t.substr( 6 ) );
-		type = SUB_AXIS;
-		if (a == "0") id = AX_SLIDER0;
-		else if (a == "1") id = AX_SLIDER1;
-		else return false;
-		return true;
-	}
-	else if (t.compare( 0, 6, "button" ) == 0)
-	{
-		int n = atoi( Trim( t.substr( 6 ) ).c_str() );
-		if ((n < 0) || (n > 127)) return false;
-		type = SUB_BUTTON;
-		id = n;
-		return true;
-	}
-	else if (t.compare( 0, 3, "pov" ) == 0)
-	{
-		// "POV 0H": horizontal (+1 = right), "POV 0V": vertical (+1 = down)
-		std::string a = Trim( t.substr( 3 ) );
-		if (a.length() != 2) return false;
-		int n = a[0] - '0';
-		if ((n < 0) || (n > 3)) return false;
-		if (a[1] == 'h') id = n * 2;
-		else if (a[1] == 'v') id = (n * 2) + 1;
-		else return false;
-		type = SUB_POV;
-		return true;
-	}
-	return false;
+	return ctrlmath::ParseSubDevice( text, type, id );
 }
 
 void HandControllers::Impl::LoadConfig( int deviceindex )
@@ -329,25 +291,9 @@ void HandControllers::Impl::LoadConfig( int deviceindex )
 
 bool HandControllers::Impl::ParsePanelInput( const std::string& text, std::string& panel, std::string& component, int& action ) const
 {
-	// "PANEL A8A1/BRAKES:UP"
-	size_t sp = text.find( ' ' );
-	if (sp == std::string::npos) return false;
-	std::string rest = Trim( text.substr( sp + 1 ) );
-	size_t slash = rest.find( '/' );
-	size_t colon = rest.rfind( ':' );
-	if ((slash == std::string::npos) || (colon == std::string::npos) || (colon < slash)) return false;
-	panel = Trim( rest.substr( 0, slash ) );
-	component = Trim( rest.substr( slash + 1, colon - slash - 1 ) );
-	std::string a = Lower( Trim( rest.substr( colon + 1 ) ) );
-	if (a == "up") action = HandControllers::PA_UP;
-	else if (a == "down") action = HandControllers::PA_DOWN;
-	else if (a == "mid") action = HandControllers::PA_MID;
-	else if (a == "toggle") action = HandControllers::PA_TOGGLE;
-	else if (a == "hold_up") action = HandControllers::PA_HOLD_UP;
-	else if (a == "hold_down") action = HandControllers::PA_HOLD_DOWN;
-	else if (a == "press") action = HandControllers::PA_PRESS;
-	else return false;
-	return !panel.empty() && !component.empty();
+	// the values of the actions are the same in both enumerations
+	static_assert( (ctrlmath::ACT_UP == HandControllers::PA_UP) && (ctrlmath::ACT_DOWN == HandControllers::PA_DOWN) && (ctrlmath::ACT_MID == HandControllers::PA_MID) && (ctrlmath::ACT_TOGGLE == HandControllers::PA_TOGGLE) && (ctrlmath::ACT_HOLD_UP == HandControllers::PA_HOLD_UP) && (ctrlmath::ACT_HOLD_DOWN == HandControllers::PA_HOLD_DOWN) && (ctrlmath::ACT_PRESS == HandControllers::PA_PRESS), "the actions of the panel buttons" );
+	return ctrlmath::ParsePanelInput( text, panel, component, action );
 }
 
 HandControllers::Impl::PanelBinding* HandControllers::Impl::FindBinding( const std::string& panel, const std::string& component, int action )

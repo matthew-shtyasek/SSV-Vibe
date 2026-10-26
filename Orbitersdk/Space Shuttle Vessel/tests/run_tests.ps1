@@ -25,5 +25,5 @@ $bat = Join-Path $out 'build_tests.bat'
 ) | Set-Content -Path $bat -Encoding ASCII
 & $bat
 if ($LASTEXITCODE -ne 0) { throw 'build of the tests failed' }
-& $exe
+& $exe (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 exit $LASTEXITCODE

@@ -257,6 +257,7 @@ RMS::RMS( AtlantisSubsystemDirector *_director, const std::string& _ident, bool 
 	ovr.hc_ena = false;
 	ovr.safing_cancel = false;
 	safingLatched = false;
+	reactPayload = NULL;
 	backupDrive = false;
 	ratesvalid = false;
 	lastPos = _V( 0.0, 0.0, 0.0 );
@@ -566,6 +567,26 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 	videoswitcher->TimeStep();
 
 	if (bFirstStep) CheckRFL();
+
+	// reaction of the payload on the orbiter: the arm accelerates the payload (relative to the orbiter), and the orbiter feels the opposite
+	// force at the payload (option RMSReaction)
+	if (STS()->GetOptions()->RMSReaction() && (attachedPayload != NULL) && (simdt > 0.0) && (simdt < 0.5))
+	{
+		if (reactPayload != attachedPayload)
+		{
+			reactEst.Reset();
+			reactPayload = attachedPayload;
+		}
+		VECTOR3 gpos, lpos, acc;
+		attachedPayload->GetGlobalPos( gpos );
+		STS()->Global2Local( gpos, lpos );
+		if (reactEst.Update( lpos, simdt, acc )) STS()->AddForce( rmsreact::ReactionForce( attachedPayload->GetMass(), acc ), lpos );
+	}
+	else
+	{
+		reactEst.Reset();
+		reactPayload = NULL;
+	}
 
 	// make sure RMS is powered and can be operated
 	if(!Powered()) return;

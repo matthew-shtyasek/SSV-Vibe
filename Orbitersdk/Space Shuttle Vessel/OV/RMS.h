@@ -85,6 +85,7 @@ Date         Developer
 #define __RMS_H
 
 
+#include "RMSReaction.h"
 #include "MPM.h"
 #include <vector>
 #include "mission/Mission.h"
@@ -424,6 +425,8 @@ private:
 	DiscInPort SafingCancel;// SAFING switch in CANCEL (momentary)
 	DiscOutPort BrakesApplied;// BRAKES talkback: the brakes hold the joints (switch ON, or no power)
 	bool safingLatched;// safing is maintained until it is cancelled
+	rmsreact::AccelEstimator reactEst;// acceleration of the payload relative to the orbiter (option RMSReaction)
+	VESSEL* reactPayload;
 	DiscInPort AutoSeqProceed;// AUTO SEQ switch in PROCEED
 	DiscInPort EnterPB;// ENTER pushbutton
 	DiscOutPort ReadyLight, InProgLight;

@@ -37,9 +37,21 @@ Run the simulation with the Atlantis or any SSV scenario. Quick start with the a
 - **Shuttle FDO MFD** (separate repository, `indy91/Shuttle-FDO-MFD`): the button "Launch from LCC" takes the day and time of liftoff of the countdown of the SSV launch control center (file `Config\SSV\LaunchTime.txt`, written by `SSV_LCC`); a target other than the ISS is chosen when there is no vessel named ISS; fixes of the threads and of the table of instances. These changes are in the repository of the FDO, not here.
 - Earth cloud resolution level 11 in `Config\Earth.cfg` (clouds of high resolution, needs the planetary texture archives).
 
+### APU (shutdown, cooldown, restart)
+- **APU OPERATE** has the three positions of the real switch: START/RUN, OFF and INJECTOR COOL (before, INJECTOR COOL started the APU).
+- **Auto shutdown:** the switches APU AUTO SHUT DOWN (ENABLE/INHIBIT) work. With ENABLE the controller shuts the APU down below 80% (only 10.5 s after the start command) and above 129% of the speed, and closes the fuel tank isolation valves. The outputs for the UNDERSPEED and OVERSPEED lights of panel F7 are in the bundle `R2_To_APUn` (lines 9 and 10), the lights themselves are not connected to the C&W logic yet. **After an auto shutdown the FUEL TK VLV switch has to go to CLOSE before the APU OPERATE switch goes to OFF**; if it is left in OPEN the valves open again and the fuel reaches the (hot) gas generator.
+- **APU SPEED SELECT** (NORM 103%, HIGH 113%).
+- **Restart after a shutdown:** the injector branch is hot after the shutdown (soakback) and needs **about 180 minutes** to get to 400 F, or **3.5 minutes of water cooling** (APU OPERATE in INJECTOR COOL; do not wait more than 1 s in OFF before START/RUN, the injector heats up again quickly). The water tank is common to the three APUs: 21 minutes of flow, six cycles. Starting an APU above the limits (injector 400 F, fuel pump 210 F, gas generator valve module 200 F) can detonate the hydrazine and **destroy the APU**; so can a restart after an overspeed shutdown.
+- For tests: the key `Failure 1` (the speed falls) or `Failure 2` (the speed rises) in the block of the subsystem `APU1` of a scenario makes the speed of a running APU leave the limits, to see the auto shutdown.
+- The temperatures are in the bundle `APU_n_SENSORS` (lines 1, 2, 3); the displays do not show them yet.
+- Fix of an upstream bug: `Atlantis::GetAPU` used the wrong index (SPEC 113 read the wrong objects).
+
+### Reaction of the arm on the orbiter
+Option `RMSReaction` in `Config\Vessels\SSV_OV.cfg` (**off by default**): the payload that the arm moves pushes the orbiter, with the force at the payload (mass times the acceleration relative to the orbiter), so the orbiter turns if the DAP is in FREE. Only the payload is simulated, not the mass of the arm. Not tested in the simulator.
+
 ### Tools and the pipeline of this repository
 - `tools\build.ps1` builds all the modules (also on a PC with limited resources: one thread, low priority), `tools\get-atl.ps1` gets the ATL libraries without a system installation, `tools\assemble.ps1` puts the build in an Orbiter folder, `tools\package.ps1` makes the zip, `tools\check-encoding.py` reports the encoding of the sources, `tools\get-orbiter-sdk.ps1` gets the SDK from the Orbiter release.
-- **Unit tests** (`Orbitersdk\Space Shuttle Vessel\tests`): 8680 checks of the math of the arm, of the UNIV PTG pointing, of the axes, hats and configuration files of the controllers, of the safing and the brakes. `tools\build.ps1 -Orbiter <Orbiter folder> -Tests` runs them, the pipeline too.
+- **Unit tests** (`Orbitersdk\Space Shuttle Vessel\tests`): 33520 checks of the math of the arm, of the UNIV PTG pointing, of the axes, hats, parsers and example configuration files of the controllers, of the safing and the brakes, of the APU (cooldown, restart, auto shutdown) and of the reaction of the arm. `tools\check-data.py` checks the meshes against the group indices of the code and the scenarios (a wrong index shows as a switch or a light that does not work). `tools\build.ps1 -Orbiter <Orbiter folder> -Tests` runs them, the pipeline too.
 - **GitHub Actions** (`.github\workflows\build.yml`): builds, runs the tests and publishes the zip, see below.
 
 ## Known issues and limits

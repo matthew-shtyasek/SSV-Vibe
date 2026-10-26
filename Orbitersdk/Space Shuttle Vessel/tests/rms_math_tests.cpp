@@ -12,6 +12,11 @@ static char g_debugstring[1024];
 #include "../OV/RMSMath.h"
 #include "../OV/PTGMath.h"
 #include "../OV/ControllerMath.h"
+#include "../OV/APUModel.h"
+#include "../OV/RMSReaction.h"
+#include "../OV/HandControllers.h"
+#include <fstream>
+#include <vector>
 
 static int g_checks = 0;
 static int g_failed = 0;
@@ -401,7 +406,332 @@ static void test_safing_and_brakes( void )
 	CHECK( RMSMath::BrakesApplied( true, false ) );
 }
 
-int main( void )
+// shutdown, cooldown and restart of the APUs
+static void test_apu_model( void )
+{
+	using namespace apumodel;
+
+	// the limits of the documents
+	CHECK_NEAR( UNDERSPEED_PCT, 80.0, 1e-12 );
+	CHECK_NEAR( OVERSPEED_PCT, 129.0, 1e-12 );
+	CHECK_NEAR( STARTUP_DELAY, 10.5, 1e-12 );
+	CHECK_NEAR( LIMIT_INJECTOR_F, 400.0, 1e-12 );
+	CHECK_NEAR( LIMIT_PUMP_F, 210.0, 1e-12 );
+	CHECK_NEAR( LIMIT_VALVE_F, 200.0, 1e-12 );
+	CHECK_NEAR( TargetSpeed( false ), 103.0, 1e-12 );
+	CHECK_NEAR( TargetSpeed( true ), 113.0, 1e-12 );
+
+	// underspeed: only after the start delay; overspeed: no delay and strictly above the limit
+	CHECK( !UnderspeedTrip( 50.0, 10.4 ) );
+	CHECK( UnderspeedTrip( 79.9, 10.5 ) );
+	CHECK( !UnderspeedTrip( 80.0, 100.0 ) );
+	CHECK( !UnderspeedTrip( 103.0, 100.0 ) );
+	CHECK( UnderspeedTrip( 0.0, 1000.0 ) );
+	CHECK( OverspeedTrip( 129.1 ) );
+	CHECK( !OverspeedTrip( 129.0 ) );
+	CHECK( !OverspeedTrip( 113.0 ) );
+	// the start ramp (15 %/s) reaches 80 % before the delay ends, so a normal start does not trip
+	CHECK( !UnderspeedTrip( 15.0 * STARTUP_DELAY, STARTUP_DELAY ) );
+
+	// lag
+	CHECK_NEAR( Relax( 100.0, 500.0, 0.0, 1.0 ), 500.0, 1e-12 );
+	CHECK_NEAR( Relax( 100.0, 500.0, 10.0, 0.0 ), 100.0, 1e-9 );
+	CHECK_NEAR( Relax( 100.0, 500.0, 10.0, 1e6 ), 500.0, 1e-9 );
+	CHECK_NEAR( Relax( 100.0, 500.0, 10.0, 10.0 ), 500.0 - (400.0 * exp( -1.0 )), 1e-9 );
+
+	// a cold APU is safe to start, a running one too
+	CHECK( SafeToStart( ColdThermal() ) );
+	CHECK( SafeToStart( RunningThermal() ) );
+	CHECK_NEAR( DetonationProbability( ColdThermal() ), 0.0, 1e-12 );
+
+	// cooldown after a run: the injector is above the limit right after the shutdown (soakback) and gets to the limit after about 180 minutes
+	Thermal t = RunningThermal();
+	double tpeak = 0.0;
+	bool unsafe10 = false;
+	bool safe170 = true;
+	bool safe190 = false;
+	double inj120 = 0.0;
+	for (int s = 1; s <= 200 * 60; s++)
+	{
+		ThermalStep( t, false, false, 1.0 );
+		tpeak = (std::max)( tpeak, t.injector );
+		if (s == (10 * 60)) unsafe10 = !SafeToStart( t );
+		if (s == (120 * 60)) inj120 = t.injector;
+		if (s == (170 * 60)) safe170 = SafeToStart( t );
+		if (s == (190 * 60)) safe190 = SafeToStart( t );
+		// the fuel pump and the valve module have passive cooling: they are inside the limits during the whole cooldown
+		CHECK( t.pump <= LIMIT_PUMP_F );
+		CHECK( t.valve <= LIMIT_VALVE_F );
+	}
+	CHECK( unsafe10 );
+	CHECK( inj120 > LIMIT_INJECTOR_F );
+	CHECK( !safe170 );
+	CHECK( safe190 );
+	CHECK( tpeak > 700.0 );
+	CHECK( tpeak <= PEAK_INJECTOR_F + 1.0 );
+
+	// water cooling of the injector: a hot injector gets below the limit in 3.5 minutes at most, and heats up again when the water stops
+	for (int minutes = 1; minutes <= 150; minutes += 7)
+	{
+		Thermal h = RunningThermal();
+		for (int s = 0; s < minutes * 60; s++) ThermalStep( h, false, false, 1.0 );
+		const double before = h.injector;
+		double time = 0.0;
+		for (int s = 0; (s < 600) && (h.injector > LIMIT_INJECTOR_F); s++)
+		{
+			ThermalStep( h, false, true, 1.0 );
+			time += 1.0;
+		}
+		if (before > LIMIT_INJECTOR_F)
+		{
+			CHECK( h.injector <= LIMIT_INJECTOR_F );
+			CHECK( time <= COOLING_CYCLE );
+		}
+		// 3.5 minutes of cooling (the cycle of the checklist) is enough to restart
+		for (int s = 0; s < (int)COOLING_CYCLE; s++) ThermalStep( h, false, true, 1.0 );
+		CHECK( SafeToStart( h ) );
+		// the cooling stops: the injector heats up quickly (more than 1 s before the start is risky)
+		const double cooled = h.injector;
+		for (int s = 0; s < 120; s++) ThermalStep( h, false, false, 1.0 );
+		CHECK( h.injector >= cooled );
+		if (minutes < 120) CHECK( h.injector > LIMIT_INJECTOR_F );
+	}
+
+	// running keeps the temperatures at the operating values
+	Thermal r = ColdThermal();
+	for (int s = 0; s < 3600; s++) ThermalStep( r, true, false, 1.0 );
+	CHECK_NEAR( r.injector, RUN_INJECTOR_F, 1.0 );
+	CHECK_NEAR( r.pump, RUN_PUMP_F, 1.0 );
+	CHECK_NEAR( r.valve, RUN_VALVE_F, 1.0 );
+	CHECK_NEAR( r.soak, 1.0, 1e-12 );
+
+	// detonation: nothing inside the limits, growing above them, certain at the end of the scale
+	Thermal d = ColdThermal();
+	d.injector = 400.0;
+	CHECK_NEAR( DetonationProbability( d ), 0.0, 1e-12 );
+	d.injector = 500.0;
+	CHECK_NEAR( DetonationProbability( d ), 0.5, 1e-12 );
+	d.injector = 700.0;
+	CHECK_NEAR( DetonationProbability( d ), 1.0, 1e-12 );
+	d = ColdThermal();
+	d.pump = 240.0;
+	CHECK_NEAR( DetonationProbability( d ), 0.5, 1e-12 );
+	d = ColdThermal();
+	d.valve = 230.0;
+	CHECK_NEAR( DetonationProbability( d ), 0.5, 1e-12 );
+	for (int i = 0; i < 100; i++)
+	{
+		Thermal a = ColdThermal();
+		a.injector = frand( 70.0, 900.0 );
+		Thermal b = a;
+		b.injector = a.injector + frand( 0.0, 100.0 );
+		CHECK( DetonationProbability( b ) >= DetonationProbability( a ) );
+		CHECK( (DetonationProbability( a ) > 0.0) == !SafeToStart( a ) );
+	}
+
+	// the water of the injector cooling: 21 minutes of flow, six cycles of 3.5 minutes
+	CHECK_NEAR( WATER_FLOW_TIME, 21.0 * 60.0, 1e-9 );
+	double water = WATER_FLOW_TIME;
+	for (int cycle = 0; cycle < 6; cycle++)
+	{
+		CHECK( water > 0.0 );
+		for (int s = 0; s < (int)COOLING_CYCLE; s++) water = WaterAfter( water, 1, 1.0 );
+	}
+	CHECK_NEAR( water, 0.0, 1e-9 );
+	CHECK_NEAR( WaterAfter( 100.0, 2, 10.0 ), 80.0, 1e-12 );// two valves use it twice as fast
+	CHECK_NEAR( WaterAfter( 5.0, 3, 10.0 ), 0.0, 1e-12 );
+	CHECK_NEAR( WaterAfter( 100.0, 0, 10.0 ), 100.0, 1e-12 );
+}
+
+// reaction of the payload that the arm moves on the orbiter
+static void test_rms_reaction( void )
+{
+	using namespace rmsreact;
+
+	// force and torque
+	CHECK_VEC( ReactionForce( 1000.0, _V( 0.1, -0.2, 0.0 ) ), _V( -100.0, 200.0, 0.0 ), 1e-9 );
+	CHECK_VEC( ReactionForce( 0.0, _V( 1.0, 1.0, 1.0 ) ), _V( 0.0, 0.0, 0.0 ), 1e-12 );
+	CHECK_VEC( ReactionTorque( _V( 0.0, 10.0, 0.0 ), _V( 5.0, 0.0, 0.0 ) ), _V( 0.0, 0.0, -50.0 ), 1e-9 );
+
+	// the estimator needs two steps of data
+	AccelEstimator e;
+	VECTOR3 a;
+	CHECK( !e.Update( _V( 0.0, 0.0, 0.0 ), 0.1, a ) );
+	CHECK( !e.Update( _V( 0.1, 0.0, 0.0 ), 0.1, a ) );
+	CHECK( e.Update( _V( 0.2, 0.0, 0.0 ), 0.1, a ) );
+	CHECK( !e.Update( _V( 0.3, 0.0, 0.0 ), 0.0, a ) );// no time step
+	// a point that moves with constant velocity has no acceleration
+	for (int i = 0; i < 100; i++) e.Update( _V( 0.1 * (3 + i), 0.0, 0.0 ), 0.1, a );
+	CHECK_VEC( a, _V( 0.0, 0.0, 0.0 ), 1e-9 );
+	// a point at rest has none
+	AccelEstimator r;
+	for (int i = 0; i < 50; i++)
+	{
+		const bool got = r.Update( _V( 1.0, 2.0, 3.0 ), 0.05, a );
+		if (i >= 2)
+		{
+			CHECK( got );
+			CHECK( length( a ) < 1e-12 );
+		}
+	}
+	// reset
+	e.Reset();
+	CHECK( !e.Update( _V( 5.0, 5.0, 5.0 ), 0.1, a ) );
+
+	// constant acceleration: the estimate converges to it
+	AccelEstimator c;
+	const double a0 = 0.03;
+	const double dt = 0.05;
+	for (int i = 0; i < 400; i++)
+	{
+		const double t = i * dt;
+		c.Update( _V( 0.5 * a0 * t * t, 0.0, 0.0 ), dt, a );
+	}
+	CHECK_NEAR( a.x, a0, 1e-3 );
+
+	// a jump of the position (the grapple, the release) is limited
+	AccelEstimator j;
+	for (int i = 0; i < 20; i++) j.Update( _V( 0.0, 0.0, 0.0 ), 0.05, a );
+	j.Update( _V( 5.0, 0.0, 0.0 ), 0.05, a );
+	CHECK( length( a ) <= MAX_ACCELERATION + 1e-12 );
+
+	// conservation of the momentum: the payload (m) moves relative to the orbiter (M) from rest to rest, the orbiter receives the opposite
+	// impulses and the center of mass of both does not move
+	const double M = 100000.0;
+	const double m = 11000.0;
+	const double T = 30.0;
+	const double travel = 2.0;
+	AccelEstimator est;
+	double xs = 0.0;// orbiter position
+	double vs = 0.0;// orbiter velocity
+	double impulse = 0.0;
+	double maxv = 0.0;
+	double xrel_end = 0.0;
+	for (int i = 0; i <= (int)((T + 20.0) / dt); i++)
+	{
+		const double t = i * dt;
+		// payload relative to the orbiter: smooth move (cosine) of 2 m in 30 s
+		const double xrel = (t >= T) ? travel : (travel * 0.5 * (1.0 - cos( 3.14159265358979 * t / T )));
+		xrel_end = xrel;
+		VECTOR3 acc;
+		if (est.Update( _V( xrel, 0.0, 0.0 ), dt, acc ))
+		{
+			const VECTOR3 f = ReactionForce( m, acc );
+			impulse += f.x * dt;
+			vs += (f.x / M) * dt;
+			xs += vs * dt;
+			maxv = (std::max)( maxv, fabs( vs ) );
+		}
+	}
+	// the net impulse is zero when the payload is at rest again, and so is the velocity of the orbiter
+	CHECK_NEAR( impulse, 0.0, 5.0 );
+	CHECK_NEAR( vs, 0.0, 1e-4 );
+	CHECK( maxv > 1e-4 );// the orbiter did move
+	// the orbiter moved opposite to the payload, in the ratio of the masses (a lag of the filter, a few percent)
+	const double expected = -(m / M) * xrel_end;
+	CHECK_NEAR( xs, expected, fabs( expected ) * 0.08 );
+}
+
+// the configuration files of the controllers of the repository (examples) must be valid: the names of the inputs, the columns and the numbers
+static void test_controller_examples( const char* root )
+{
+	if ((root == NULL) || (root[0] == 0)) return;
+	const char* const files[] = {"FPV_Radio.cfg.example", "Gamepad_THC.cfg.example", "Joystick1.cfg.example", "Joystick2.cfg.example", "Pedals.cfg.example", "T16000M_RHC.cfg.example", "T16000M_THC.cfg.example"};
+	for (const char* name : files)
+	{
+		const std::string path = std::string( root ) + "/Config/SSV/Controllers/" + name;
+		std::ifstream f( path );
+		CHECK( f.is_open() );
+		if (!f.is_open()) continue;
+		std::string line;
+		int connections = 0;
+		while (std::getline( f, line ))
+		{
+			const std::vector<std::string> col = ctrlmath::SplitColumns( line );
+			if (col.empty()) continue;
+			std::string input = col[0];
+			for (auto& c : input) c = (char)toupper( (unsigned char)c );
+			if (input == "INPUT") continue;// header
+			CHECK( col.size() >= 2 );
+			if (col.size() < 2) continue;
+
+			int type = -1;
+			int id = -1;
+			CHECK( ctrlmath::ParseSubDevice( col[1], type, id ) );
+			if (input.compare( 0, 6, "PANEL " ) == 0)
+			{
+				std::string panel, comp;
+				int act = -1;
+				CHECK( ctrlmath::ParsePanelInput( col[0], panel, comp, act ) );
+			}
+			else
+			{
+				bool known = false;
+				for (int i = 0; i < ctrlmath::INPUT_NAME_COUNT; i++) known = known || (input == ctrlmath::INPUT_NAMES[i]);
+				CHECK( known );
+				if (!known) printf( "unknown input %s in %s\n", input.c_str(), name );
+				// REVERSE, DEADZONE, EXPO and CENTER
+				if ((col.size() > 2) && !col[2].empty()) CHECK( (ctrlmath::Lower( col[2] ) == "true") || (ctrlmath::Lower( col[2] ) == "false") );
+				if ((col.size() > 3) && !col[3].empty()) { const double v = atof( col[3].c_str() ); CHECK( (v >= 0.0) && (v <= 0.9) ); }
+				if ((col.size() > 4) && !col[4].empty()) { const double v = atof( col[4].c_str() ); CHECK( (v >= 0.0) && (v <= 1.0) ); }
+				if ((col.size() > 5) && !col[5].empty()) { const double v = atof( col[5].c_str() ); CHECK( (v >= -1.0) && (v <= 1.0) ); }
+			}
+			connections++;
+		}
+		CHECK( connections > 0 );
+	}
+}
+
+static void test_controller_parsers( void )
+{
+	int type = -1;
+	int id = -1;
+	CHECK( ctrlmath::ParseSubDevice( "Axis X", type, id ) && (type == ctrlmath::SUB_AXIS) && (id == ctrlmath::AX_X) );
+	CHECK( ctrlmath::ParseSubDevice( "  axis rz ", type, id ) && (type == ctrlmath::SUB_AXIS) && (id == ctrlmath::AX_RZ) );
+	CHECK( ctrlmath::ParseSubDevice( "Slider 0", type, id ) && (id == ctrlmath::AX_SLIDER0) );
+	CHECK( ctrlmath::ParseSubDevice( "Slider 1", type, id ) && (id == ctrlmath::AX_SLIDER1) );
+	CHECK( ctrlmath::ParseSubDevice( "Button 0", type, id ) && (type == ctrlmath::SUB_BUTTON) && (id == 0) );
+	CHECK( ctrlmath::ParseSubDevice( "Button 127", type, id ) && (id == 127) );
+	CHECK( !ctrlmath::ParseSubDevice( "Button 128", type, id ) );
+	CHECK( !ctrlmath::ParseSubDevice( "Button -1", type, id ) );
+	CHECK( !ctrlmath::ParseSubDevice( "Button x", type, id ) );
+	CHECK( ctrlmath::ParseSubDevice( "POV 0H", type, id ) && (type == ctrlmath::SUB_POV) && (id == 0) );
+	CHECK( ctrlmath::ParseSubDevice( "POV 0V", type, id ) && (id == 1) );
+	CHECK( ctrlmath::ParseSubDevice( "POV 3V", type, id ) && (id == 7) );
+	CHECK( !ctrlmath::ParseSubDevice( "POV 4H", type, id ) );
+	CHECK( !ctrlmath::ParseSubDevice( "POV 0X", type, id ) );
+	CHECK( !ctrlmath::ParseSubDevice( "Axis Q", type, id ) );
+	CHECK( !ctrlmath::ParseSubDevice( "Slider 2", type, id ) );
+	CHECK( !ctrlmath::ParseSubDevice( "", type, id ) );
+
+	std::string panel, comp;
+	int act = -1;
+	CHECK( ctrlmath::ParsePanelInput( "PANEL A8A1/BRAKES:UP", panel, comp, act ) && (panel == "A8A1") && (comp == "BRAKES") && (act == ctrlmath::ACT_UP) );
+	CHECK( ctrlmath::ParsePanelInput( "PANEL A8A1/AUTO SEQ:toggle", panel, comp, act ) && (comp == "AUTO SEQ") && (act == ctrlmath::ACT_TOGGLE) );
+	CHECK( ctrlmath::ParsePanelInput( "PANEL A8A1/SAFING:HOLD_DOWN", panel, comp, act ) && (act == ctrlmath::ACT_HOLD_DOWN) );
+	CHECK( ctrlmath::ParsePanelInput( "PANEL A8A1/ENTER:PRESS", panel, comp, act ) && (act == ctrlmath::ACT_PRESS) );
+	CHECK( !ctrlmath::ParsePanelInput( "PANEL A8A1/ENTER", panel, comp, act ) );
+	CHECK( !ctrlmath::ParsePanelInput( "PANEL A8A1:ENTER", panel, comp, act ) );
+	CHECK( !ctrlmath::ParsePanelInput( "PANEL /ENTER:PRESS", panel, comp, act ) );
+	CHECK( !ctrlmath::ParsePanelInput( "PANEL A8A1/ENTER:PUSH", panel, comp, act ) );
+	CHECK( !ctrlmath::ParsePanelInput( "PANEL", panel, comp, act ) );
+	// the names of the inputs are unique
+	for (int i = 0; i < ctrlmath::INPUT_NAME_COUNT; i++)
+	{
+		for (int j = i + 1; j < ctrlmath::INPUT_NAME_COUNT; j++) CHECK( std::string( ctrlmath::INPUT_NAMES[i] ) != ctrlmath::INPUT_NAMES[j] );
+	}
+	// and agree with the enumeration of the inputs
+	CHECK( ctrlmath::INPUT_NAME_COUNT == HandControllers::INPUT_COUNT );
+	CHECK( std::string( ctrlmath::INPUT_NAMES[HandControllers::RHC_PITCH] ) == "RHC_PITCH" );
+	CHECK( std::string( ctrlmath::INPUT_NAMES[HandControllers::RPTA] ) == "RPTA" );
+	CHECK( std::string( ctrlmath::INPUT_NAMES[HandControllers::BRAKE_RIGHT] ) == "BRAKE_RIGHT" );
+	CHECK( std::string( ctrlmath::INPUT_NAMES[HandControllers::RMS_CONTROL_TOGGLE] ) == "RMS_CONTROL_TOGGLE" );
+	// the actions have the values of the enumeration of the code
+	CHECK( ctrlmath::ACT_UP == HandControllers::PA_UP );
+	CHECK( ctrlmath::ACT_PRESS == HandControllers::PA_PRESS );
+}
+
+int main( int argc, char** argv )
 {
 	srand( 12345 );
 	test_frames();
@@ -416,6 +746,10 @@ int main( void )
 	test_controller_config();
 	test_load_scale();
 	test_safing_and_brakes();
+	test_apu_model();
+	test_rms_reaction();
+	test_controller_parsers();
+	test_controller_examples( (argc > 1) ? argv[1] : NULL );
 	printf( "%d checks, %d failed\n", g_checks, g_failed );
 	return (g_failed == 0) ? 0 : 1;
 }

@@ -69,6 +69,7 @@ Date         Developer
 
 
 #include "AtlantisSubsystem.h"
+#include "APUModel.h"
 #include <DiscInPort.h>
 #include <DiscOutPort.h>
 #include <Sensor.h>
@@ -82,6 +83,32 @@ inline constexpr double APU_FUEL_TANK_FLOWRATE[2] = {3.25/60.0, 1.5/60.0};
 using namespace discsignals;
 
 
+/**
+ * Water tank of the injector cooling of the three APUs (one tank, 21 minutes of flow of one valve).
+ * The APUs ask for the water with the lines 0 to 2 of the bundle APU_INJ_WATER and read the lines 3 to 5 (there is water).
+ */
+class APUInjectorWater: public AtlantisSubsystem
+{
+public:
+	APUInjectorWater(AtlantisSubsystemDirector* _director, const string& _ident);
+	~APUInjectorWater();
+
+	bool SingleParamParseLine() const override {return true;};
+	void Realize() override;
+	void OnPreStep(double simt, double simdt, double mjd) override;
+	void OnSaveState(FILEHANDLE scn) const override;
+	bool OnParseLine(const char* line) override;
+
+	/** Water left [s of flow of one valve]. */
+	double GetWater( void ) const {return water;}
+
+private:
+	double water;
+	DiscInPort cmd[3];
+	DiscOutPort ok[3];
+};
+
+
 class APU: public AtlantisSubsystem
 {
 public:
@@ -92,6 +119,12 @@ public:
 	virtual double GetHydraulicPressure() const;
 	virtual double GetFuelLevel() const;
 	virtual double GetAPUSpeed() const;
+	/** Temperatures [F]: injector branch, fuel pump and gas generator valve module. */
+	double GetInjectorTemperature() const {return th.injector;}
+	double GetPumpTemperature() const {return th.pump;}
+	double GetValveTemperature() const {return th.valve;}
+	/** True if the APU was destroyed (detonation of the hydrazine, uncontained overspeed). */
+	bool IsFailed() const {return failed;}
 	bool SingleParamParseLine() const override {return true;};
 	double GetSubsystemMass() const override;
 	void Realize() override;
@@ -106,6 +139,7 @@ public:
 	typedef enum {OFF, START, ON, SHUTDOWN} APU_STATE;
 private:
 	bool ReadyToStart() const;
+	void Fail( const char* reason );
 
 	int ID;
 
@@ -116,13 +150,27 @@ private:
 
 	APU_STATE State;
 
+	double timeSinceStart;// since the start command [s]
+	bool autoShutdownLatch;// the controller closed the fuel tank isolation valves (auto shutdown), until the APU OPERATE switch is in OFF
+	bool overspeedShutdown;// the last auto shutdown was an overspeed: the APU must not be restarted
+	bool failed;// destroyed
+	int failure;// failure for tests (scenario): 0 = none, 1 = the speed falls (underspeed), 2 = the speed rises (overspeed)
+	apumodel::Thermal th;
+	bool thermalLoaded;
+	double coolingTime;// continuous time of injector cooling [s]
+
 	DiscInPort APU_Run, APU_HydPumpPress;
 	DiscInPort APU_CntlrPwr, APU_FuelTankValves;
+	DiscInPort APU_InjectorCool, APU_SpeedHigh, APU_AutoShutdownEnable;
 	DiscInPort WSB_Ready;
+	DiscInPort InjectorWaterOk;
+	DiscOutPort InjectorWaterCmd;
 	DiscOutPort APU_HydraulicPress;
 	DiscOutPort APU_ReadyToStart;
+	DiscOutPort APU_UnderspeedLight, APU_OverspeedLight;
 
 	Sensor FuTkPress;
+	Sensor InjTemp, PumpTemp, ValveTemp;
 	Sensor HYD_MN_PMP_P[3];// A, B, C
 };
 

@@ -9,6 +9,9 @@ game controllers: any number of DirectInput devices (configuration files like th
 recording and replay of the clicks on the panels and of the keys in playback
 UNIV PTG: TRK for TGT ID 3 (LAT, LON, ALT), 4 (Sun) and 5 (RA, DEC)
 corrected the left-right direction of the aft THC for the keyboard and the controllers
+APU: INJECTOR COOL position of APU OPERATE (before it started the APU), APU AUTO SHUT DOWN and APU SPEED SELECT switches, auto shutdown for underspeed and overspeed, injector cooling water tank, temperatures of the injector, fuel pump and valve module, hot restart limits
+added option RMSReaction (the payload that the RMS moves pushes the orbiter, off by default)
+corrected the index of Atlantis::GetAPU
 Earth cloud resolution level set to 11
 build, package and test scripts (tools), unit tests and a GitHub Actions pipeline
 

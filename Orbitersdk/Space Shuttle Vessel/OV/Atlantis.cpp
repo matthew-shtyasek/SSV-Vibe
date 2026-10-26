@@ -5842,7 +5842,7 @@ T0UmbilicalReference* Atlantis::T0UmbRef( void ) const
 APU* Atlantis::GetAPU( int apu ) const
 {
 	assert( (apu >= 1) && (apu <= 3) && "Atlantis::GetAPU.apu" );
-	return pAPU[apu + 1];
+	return pAPU[apu - 1];
 }
 
 MPM_Base* Atlantis::GetPortMPM( void ) const
@@ -6012,6 +6012,7 @@ void Atlantis::CreateSubsystems( void )
 	psubsystems->AddSubsystem( new SBTC( psubsystems, "LeftSBTC", 1 ) );
 	psubsystems->AddSubsystem( new SBTC( psubsystems, "RightSBTC", 2 ) );
 
+	psubsystems->AddSubsystem( new APUInjectorWater( psubsystems, "APUWATER" ) );
 	psubsystems->AddSubsystem(pAPU[0] = new APU(psubsystems, "APU1", 1));
 	psubsystems->AddSubsystem(pAPU[1] = new APU(psubsystems, "APU2", 2));
 	psubsystems->AddSubsystem(pAPU[2] = new APU(psubsystems, "APU3", 3));

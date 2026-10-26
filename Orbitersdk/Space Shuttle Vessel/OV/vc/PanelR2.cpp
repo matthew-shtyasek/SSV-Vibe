@@ -68,6 +68,14 @@ namespace vc
 		Add(pAPUOperate[1] = new LockableLever3(psts, "APU OPERATE 2"));
 		Add(pAPUOperate[2] = new LockableLever3(psts, "APU OPERATE 3"));
 
+		Add(pAPUSpeedSelect[0] = new StdSwitch2(psts, "APU SPEED SELECT 1"));
+		Add(pAPUSpeedSelect[1] = new StdSwitch2(psts, "APU SPEED SELECT 2"));
+		Add(pAPUSpeedSelect[2] = new StdSwitch2(psts, "APU SPEED SELECT 3"));
+
+		Add(pAPUAutoShutdown[0] = new StdSwitch2(psts, "APU AUTO SHUT DOWN 1"));
+		Add(pAPUAutoShutdown[1] = new StdSwitch2(psts, "APU AUTO SHUT DOWN 2"));
+		Add(pAPUAutoShutdown[2] = new StdSwitch2(psts, "APU AUTO SHUT DOWN 3"));
+
 		Add(pHydPumpPress[0] = new LockableLever2(psts, "HYD MAIN PUMP PRESS 1"));
 		Add(pHydPumpPress[1] = new LockableLever2(psts, "HYD MAIN PUMP PRESS 2"));
 		Add(pHydPumpPress[2] = new LockableLever2(psts, "HYD MAIN PUMP PRESS 3"));
@@ -109,6 +117,12 @@ namespace vc
 			pAPUOperate[i]->SetLabel(0, "INJECTOR COOL");
 			pAPUOperate[i]->SetLabel(1, "OFF");
 			pAPUOperate[i]->SetLabel(2, "START/RUN");
+			pAPUSpeedSelect[i]->SetLabel(0, "NORM");
+			pAPUSpeedSelect[i]->SetLabel(1, "HIGH");
+			pAPUSpeedSelect[i]->SetInitialPosition(0);
+			pAPUAutoShutdown[i]->SetLabel(0, "INHIBIT");
+			pAPUAutoShutdown[i]->SetLabel(1, "ENABLE");
+			pAPUAutoShutdown[i]->SetInitialPosition(1);
 			pHydPumpPress[i]->SetLabel(0, "LOW");
 			pHydPumpPress[i]->SetLabel(1, "NORM");
 			pAPUCntlrPwr[i]->SetLabel(0, "OFF");
@@ -282,6 +296,34 @@ namespace vc
 		pAPUFuelTkVlv[2]->SetPullDirection(switch_pull);
 		pAPUFuelTkVlv[2]->DefineGroup( GRP_S37_R2_VC );
 		pAPUFuelTkVlv[2]->SetInitialAnimState(0.5f);
+
+		// APU SPEED SELECT and APU AUTO SHUT DOWN (the groups are boxes: the pivot is at the lower end of the box)
+		const static VECTOR3 box_base = _V(0.0, -0.0115, 0.0);
+		pAPUSpeedSelect[0]->SetMouseRegion( AID_R2, 0.355f, 0.456f, 0.420f, 0.499f);
+		pAPUSpeedSelect[0]->SetReference(_V(1.1414, 1.8554, 14.2470) + box_base, switch_rot);
+		pAPUSpeedSelect[0]->DefineGroup( GRP_S19_R2_VC );
+		pAPUSpeedSelect[0]->SetInitialAnimState(0.5f);
+		pAPUSpeedSelect[1]->SetMouseRegion( AID_R2, 0.436f, 0.456f, 0.501f, 0.499f);
+		pAPUSpeedSelect[1]->SetReference(_V(1.1795, 1.8665, 14.2458) + box_base, switch_rot);
+		pAPUSpeedSelect[1]->DefineGroup( GRP_S20_R2_VC );
+		pAPUSpeedSelect[1]->SetInitialAnimState(0.5f);
+		pAPUSpeedSelect[2]->SetMouseRegion( AID_R2, 0.519f, 0.456f, 0.584f, 0.499f);
+		pAPUSpeedSelect[2]->SetReference(_V(1.2182, 1.8778, 14.2449) + box_base, switch_rot);
+		pAPUSpeedSelect[2]->DefineGroup( GRP_S21_R2_VC );
+		pAPUSpeedSelect[2]->SetInitialAnimState(0.5f);
+
+		pAPUAutoShutdown[0]->SetMouseRegion( AID_R2, 0.496f, 0.678f, 0.562f, 0.721f);
+		pAPUAutoShutdown[0]->SetReference(_V(1.2093, 1.8511, 14.0635) + box_base, switch_rot);
+		pAPUAutoShutdown[0]->DefineGroup( GRP_S22_R2_VC );
+		pAPUAutoShutdown[0]->SetInitialAnimState(0.5f);
+		pAPUAutoShutdown[1]->SetMouseRegion( AID_R2, 0.583f, 0.678f, 0.649f, 0.721f);
+		pAPUAutoShutdown[1]->SetReference(_V(1.2502, 1.8631, 14.0626) + box_base, switch_rot);
+		pAPUAutoShutdown[1]->DefineGroup( GRP_S60_R2_VC );
+		pAPUAutoShutdown[1]->SetInitialAnimState(0.5f);
+		pAPUAutoShutdown[2]->SetMouseRegion( AID_R2, 0.667f, 0.678f, 0.733f, 0.721f);
+		pAPUAutoShutdown[2]->SetReference(_V(1.2904, 1.8748, 14.0610) + box_base, switch_rot);
+		pAPUAutoShutdown[2]->DefineGroup( GRP_S61_R2_VC );
+		pAPUAutoShutdown[2]->SetInitialAnimState(0.5f);
 
 		pAPUReadyToStart[0]->DefineMeshGroups( GetVCMeshIndex(), GRP_DS1_U_R2_VC, GRP_DS1_L_R2_VC );
 		pAPUReadyToStart[1]->DefineMeshGroups( GetVCMeshIndex(), GRP_DS2_U_R2_VC, GRP_DS2_L_R2_VC );
@@ -570,8 +612,10 @@ namespace vc
 			sprintf_s(cbuf, 255, "R2_To_APU%d", i+1);
 			DiscreteBundle *pBundle=STS()->BundleManager()->CreateBundle(cbuf, 16);
 
-			pAPUOperate[i]->ConnectPort(0, pBundle, 0);
-			pAPUOperate[i]->ConnectPort(2, pBundle, 0); // temporary; THIS IS NOT CORRECT
+			pAPUOperate[i]->ConnectPort(0, pBundle, 6);// INJECTOR COOL
+			pAPUOperate[i]->ConnectPort(2, pBundle, 0);// START/RUN
+			pAPUSpeedSelect[i]->ConnectPort(1, pBundle, 7);// HIGH
+			pAPUAutoShutdown[i]->ConnectPort(1, pBundle, 8);// ENABLE
 			pAPUCntlrPwr[i]->ConnectPort(1, pBundle, 1);
 			pAPUFuelTkVlv[i]->ConnectPort(1, pBundle, 2);
 			pHydPumpPress[i]->ConnectPort(1, pBundle, 3);

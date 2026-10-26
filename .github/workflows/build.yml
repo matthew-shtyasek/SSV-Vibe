@@ -43,6 +43,10 @@ jobs:
         shell: pwsh
         run: ./tools/get-orbiter-sdk.ps1 -Out orbiter-sdk
 
+      - name: Check the data (meshes and the group indices of the code, scenarios)
+        shell: pwsh
+        run: python tools/check-data.py
+
       - name: Version
         id: ver
         shell: pwsh
