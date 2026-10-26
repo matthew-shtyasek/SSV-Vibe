@@ -36,9 +36,9 @@
 namespace freemove
 {
 	inline constexpr double SPEED = 0.35;// [m/s] speed of the head
-	inline constexpr double RADIUS_HORIZONTAL = 0.5;// [m] distance from the position of the station on the horizontal plane
-	inline constexpr double RADIUS_UP = 0.3;// [m] up
-	inline constexpr double RADIUS_DOWN = 0.4;// [m] down
+	inline constexpr double RADIUS_HORIZONTAL = 0.7;// [m] distance from the position of the station on the horizontal plane
+	inline constexpr double RADIUS_UP = 0.35;// [m] up
+	inline constexpr double RADIUS_DOWN = 0.7;// [m] down
 	inline constexpr double MAX_STEP = 0.1;// [s] longest time step used
 
 	/**

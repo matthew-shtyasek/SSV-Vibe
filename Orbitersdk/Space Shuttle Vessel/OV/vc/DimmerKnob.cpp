@@ -15,6 +15,7 @@ namespace vc
 	{
 		pos = defaultPos;
 		ang = -1.0;
+		offset = 0.0;
 		grpIndex = (UINT)-1;
 		rotStart = NULL;
 		rotTravel = NULL;
@@ -68,7 +69,7 @@ namespace vc
 
 		// the direction of the axis points away from the user, so that a positive angle turns the knob clockwise
 		// the group is in the middle of its travel: the first component takes it to the first stop (counterclockwise), the second to the other stop
-		rotStart = new MGROUP_ROTATE( vc_idx, &grpIndex, 1, GetReference(), GetDirection(), static_cast<float>(-0.5 * ang * RAD) );
+		rotStart = new MGROUP_ROTATE( vc_idx, &grpIndex, 1, GetReference(), GetDirection(), static_cast<float>((offset - (0.5 * ang)) * RAD) );
 		rotTravel = new MGROUP_ROTATE( vc_idx, &grpIndex, 1, GetReference(), GetDirection(), static_cast<float>(ang * RAD) );
 		anim_rot = STS()->CreateAnimation( START_STATE );
 		STS()->AddAnimationComponent( anim_rot, 0.0, START_STATE, rotStart );

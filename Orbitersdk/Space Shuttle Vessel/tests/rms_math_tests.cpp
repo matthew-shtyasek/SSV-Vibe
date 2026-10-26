@@ -1052,7 +1052,7 @@ static void test_free_move( void )
 		CHECK_NEAR( sqrt( (o.x * o.x) + (o.z * o.z) ), RADIUS_HORIZONTAL, 1e-12 );
 	}
 	CHECK( IsInside( _V( 0.0, 0.0, 0.0 ) ) );
-	CHECK( !IsInside( _V( 0.6, 0.0, 0.0 ) ) );
+	CHECK( !IsInside( _V( 0.8, 0.0, 0.0 ) ) );
 	CHECK( !IsInside( _V( 0.0, 0.5, 0.0 ) ) );
 	CHECK( IsInside( _V( 0.0, -0.39, 0.0 ) ) );
 

@@ -43,6 +43,7 @@ namespace vc
 		private:
 			double pos;// [0:1]
 			double ang;// travel [deg]
+			double offset;// [deg] clockwise: the pointer of the mesh is this much counterclockwise from the middle of the travel
 
 			DiscOutPort output;
 
@@ -64,6 +65,8 @@ namespace vc
 			bool GetStateString( unsigned long ulBufferSize, char* pszBuffer ) override;
 			void DefineGroup( UINT _grpIndex );
 			void SetAngleRange( double ang );
+			/** The pointer of the mesh at rest is this many degrees counterclockwise from the middle of the travel (12 o'clock) */
+			void SetPointerOffset( double deg ) { offset = deg; }
 			void Connect( DiscreteBundle* pBundle, unsigned short usLine );
 			void DefineVCAnimations( UINT vc_idx ) override;
 			void Realize( void ) override;
