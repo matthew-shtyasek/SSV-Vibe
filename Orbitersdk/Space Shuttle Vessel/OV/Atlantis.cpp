@@ -834,6 +834,7 @@ pActiveLatches( 5, NULL ), pXRSound(NULL)
 	ControlRMS = false;
 	RMSControlOverride = false;
 	RMSControlStation = -1;
+	RMSControlShown = -1;
 	lastRMSSJCommand = 0;
 
 	SERCstop = true;
@@ -5602,6 +5603,13 @@ void Atlantis::UpdateRMSControl( void )
 		if (changed && focused && pRMS) DisplayCameraLabel( inStation ? TEXT_RMSCONTROL : TEXT_RCSCONTROL );
 	}
 	ControlRMS = RMSMath::ControlsRMS( pRMS != NULL, inStation || external, RMSControlOverride );
+	// the user is told whenever the hand controllers change between the arm and the RCS (also from an external view)
+	const int shown = ControlRMS ? 1 : 0;
+	if (pRMS && (oapiGetFocusObject() == GetHandle()))
+	{
+		if (RMSControlShown != shown) DisplayCameraLabel( ControlRMS ? TEXT_RMSCONTROL : TEXT_RCSCONTROL );
+		RMSControlShown = shown;
+	}
 }
 
 void Atlantis::ResetVCMove( void )

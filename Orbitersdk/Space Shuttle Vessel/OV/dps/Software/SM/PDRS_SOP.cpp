@@ -46,4 +46,17 @@ namespace dps
 		pdrs::PackOutput( out, mb.fromGpc );
 		mb.counterOut++;
 	}
+
+	bool PDRS_SOP::OnMajorModeChange( unsigned int newMajorMode )
+	{
+		// the software is active in SM OPS 2 (as the other SM software of the on-orbit major modes)
+		switch (newMajorMode)
+		{
+			case 201:
+			case 202:
+				return true;
+			default:
+				return false;
+		}
+	}
 }

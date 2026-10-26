@@ -571,6 +571,7 @@ class Atlantis: public VESSEL4
 
 		bool ControlRMS;// the hand controllers and keys operate the RMS (effective state)
 		bool RMSControlOverride;// Ctrl+A: the opposite of what the station gives (the RMS is controlled in the RMS station, the RCS elsewhere)
+		int RMSControlShown;// last state of the control shown to the user (-1 none, 0 RCS, 1 RMS)
 		int RMSControlStation;// station in which the control was last updated
 		void UpdateRMSControl( void );
 		// controller inputs
