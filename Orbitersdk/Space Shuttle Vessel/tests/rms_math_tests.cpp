@@ -1029,6 +1029,18 @@ static void test_panel_lighting_table( void )
 // free movement of the head in the cockpit
 static void test_free_move( void )
 {
+	// the lower deck has no limits
+	{
+		VECTOR3 o = _V( 0.0, 0.0, 0.0 );
+		VECTOR3 u = _V( 0.0, 0.0, 0.0 );
+		for (int i = 0; i < 200; i++)
+		{
+			o = freemove::Move( o, 0.0, 1.0, 0.0, _V( 0.0, 0.0, 1.0 ), 0.1, true );
+			u = freemove::Move( u, 0.0, 1.0, 0.0, _V( 0.0, 0.0, 1.0 ), 0.1, false );
+		}
+		CHECK( o.x > 2.0 );
+		CHECK( u.x <= freemove::RADIUS_HORIZONTAL + 1e-9 );
+	}
 	using namespace freemove;
 
 	// limits: inside is not changed, outside is moved to the surface on the line to the center
@@ -1847,7 +1859,7 @@ static void test_pdrs_logic( void )
 		for (int j = 0; j < 6; j++) in.joint[j] = q[j];
 		logic.Step( in, out );
 		logic.GetEEState( p1, a0 );
-		CHECK_NEAR( length( p1 - p0 ), 4.0 * 24.0, 5.0 );// 4 s at 24 in/s
+		CHECK_NEAR( length( p1 - p0 ), 4.0 * 24.0, 10.0 );// 4 s at 24 in/s (a little less: the software slows the joints that would go too fast)
 
 		// RATE HOLD keeps the rate with the hand controller in detent
 		in.rateHoldPB = true;
@@ -1858,6 +1870,36 @@ static void test_pdrs_logic( void )
 		logic.Step( in, out );
 		CHECK( logic.IsRateHold() );
 		CHECK( (fabs( out.rate[rmskin::ELBOW_PITCH] ) + fabs( out.rate[rmskin::SHOULDER_PITCH] )) > 0.0 );
+	}
+
+	// toward the edge of the workspace: no joint jumps or leaves its limits, the pose does not bend
+	{
+		const int dirs[3] = {0, 1, 2};
+		for (int d = 0; d < 3; d++)
+		{
+			for (int sign = -1; sign <= 1; sign += 2)
+			{
+				pdrs::Logic logic;
+				double q[6] = {10.0, 30.0, -80.0, 20.0, 10.0, 0.0};
+				pdrs::Output out;
+				pdrs::Input in = pdrs_input( q, pdrs::MODE_ORB_UNL );
+				logic.Step( in, out );
+				in.thc[dirs[d]] = 5.0 * sign;
+				for (int i = 0; i < 600; i++)
+				{
+					for (int j = 0; j < 6; j++) in.joint[j] = q[j];
+					logic.Step( in, out );
+					for (int j = 0; j < 6; j++)
+					{
+						const double step = out.rate[j] * in.dt;
+						CHECK( fabs( step ) <= (pdrs::JOINT_SOFTWARE_SPEED * in.dt) + 1e-3 );
+						q[j] += step;
+						CHECK( q[j] >= rmskin::JOINT_LIMITS[0][j] - 1e-6 );
+						CHECK( q[j] <= rmskin::JOINT_LIMITS[1][j] + 1e-6 );
+					}
+				}
+			}
+		}
 	}
 
 	// OPR CMD: the arm goes to the entered position

@@ -58,6 +58,7 @@ namespace pdrs
 
 	// software limits of the rates of the joints of the arm [deg/s], PL ID 0
 	inline constexpr double JOINT_MAX_SPEED[6] = {40.0, 40.0, 40.0, 40.0, 40.0, 40.0};// mechanical limits; numbers are made up
+	inline constexpr double JOINT_SOFTWARE_SPEED = 10.0;// [deg/s] the software slows the motion of the end effector if a joint would go faster
 	inline constexpr double JOINT_COARSE_SPEED[6] = {1.27, 1.27, 1.78, 2.64, 2.64, 2.64};
 	inline constexpr double JOINT_VERN_SPEED[6] = {0.42, 0.42, 0.59, 0.88, 0.88, 0.88};
 
@@ -287,6 +288,9 @@ namespace pdrs
 			singleSoftStopIdle = false;
 			for (int i = 0; i < 6; i++) singleSoftStopDisabled[i] = false;
 			softStop = false;
+			softStopHit = false;
+			dbg = 0;
+			autoDist = autoAngle = 0.0;
 			autoModeLogged = false;
 			autoProceedPrev = false;
 			autoState = AUTO_IDLE;
@@ -315,6 +319,9 @@ namespace pdrs
 		int GetAutoState( void ) const { return autoState; }
 		bool IsRateHold( void ) const { return rateHold; }
 		bool IsSoftStop( void ) const { return softStop; }
+		int DebugCode( void ) const { return dbg; }
+		/** Error of the POR to the target of the auto mode, in the last cycle [m], [rad] */
+		void GetAutoError( double& dist, double& angle ) const { dist = autoDist; angle = autoAngle; }
 
 		/** Copies the state that the scenarios keep (the data of the displays and the accepted mode) from another logic. */
 		void CopyPersistentFrom( const Logic& other )
@@ -357,6 +364,7 @@ namespace pdrs
 				target[i] = joint[i];
 			}
 			targetValid = false;
+			softStopHit = false;
 			out.safingCancel = false;
 			out.effMode = effMode;
 			out.ready = out.inProg = out.softStop = out.rateMin = false;
@@ -735,6 +743,9 @@ namespace pdrs
 		bool singleSoftStopIdle;
 		bool singleSoftStopDisabled[6];
 		bool softStop;
+		int dbg;
+		double autoDist, autoAngle;
+		bool softStopHit;// a step into a soft stop was refused in this cycle
 		bool autoModeLogged, autoProceedPrev;
 		int autoState;
 		int autoPt;
@@ -866,7 +877,7 @@ namespace pdrs
 
 		void CheckSoftwareStop( void )
 		{
-			softStop = singleSoftStopIdle;
+			softStop = singleSoftStopIdle || softStopHit;
 			for (int i = rmskin::SHOULDER_YAW; i <= rmskin::WRIST_ROLL; i++)
 			{
 				if ((joint[i] < rmskin::JOINT_SOFTSTOPS[0][i]) || (joint[i] > rmskin::JOINT_SOFTSTOPS[1][i]))
@@ -915,26 +926,41 @@ namespace pdrs
 		bool MoveEE( const VECTOR3& newPos, const VECTOR3& newDir, const VECTOR3& newRot )
 		{
 			double a[6];// angles in degrees
-			if (!rmskin::Inverse( newPos, newDir, newRot, joint, a )) return false;
+			for (int i = 0; i < 6; i++) a[i] = joint[i];
+			if (!rmskin::Inverse( newPos, newDir, newRot, joint, a )) { dbg = 1; return false; }
+			for (int i = 0; i < 6; i++)
+			{
+				if (!(fabs( a[i] ) < 1.0e4)) { printf( "DBGA %g %g %g %g %g %g\n", a[0], a[1], a[2], a[3], a[4], a[5] ); dbg = 2; return false; }// not a number: the pose is not reachable
+			}
 
-			// make sure the speed of each joint is within the limits
-			bool move = true;
+			// the whole step is slowed down so that no joint goes faster than the software limit: near the edge of the workspace the small joints
+			// would have to move very fast, and the arm slows down instead of bending
+			double r = 1.0;
 			for (int i = rmskin::SHOULDER_YAW; i <= rmskin::WRIST_ROLL; i++)
 			{
-				if (softStop) move = false;
-				const double speed = fabs( a[i] - joint[i] ) / cycleDt;
-				if (speed > JOINT_MAX_SPEED[i]) move = false;
+				const double ratio = (fabs( a[i] - joint[i] ) / cycleDt) / JOINT_SOFTWARE_SPEED;
+				if (ratio > r) r = ratio;
 			}
-			if (!move) return false;
+			if (r > 20.0) { dbg = 3; return false; }// the solution jumps (singularity): no motion
+			for (int i = rmskin::SHOULDER_YAW; i <= rmskin::WRIST_ROLL; i++) a[i] = joint[i] + ((a[i] - joint[i]) / r);
 
+			// a step that goes further into a stop is not made at all, so that the pose does not bend (a joint moving out of a soft stop is free)
 			for (int i = rmskin::SHOULDER_YAW; i <= rmskin::WRIST_ROLL; i++)
 			{
-				// the joint can not go beyond its hard stops
-				double angle = a[i];
-				if (angle < rmskin::JOINT_LIMITS[0][i]) angle = joint[i];
-				if (angle > rmskin::JOINT_LIMITS[1][i]) angle = joint[i];
-				SetTarget( i, angle );
+				if ((a[i] < rmskin::JOINT_LIMITS[0][i]) || (a[i] > rmskin::JOINT_LIMITS[1][i])) { dbg = 10 + i; return false; }
+				if (ctrl.softstop_ena)
+				{
+					if (((a[i] < rmskin::JOINT_SOFTSTOPS[0][i]) && (a[i] < joint[i])) || ((a[i] > rmskin::JOINT_SOFTSTOPS[1][i]) && (a[i] > joint[i])))
+					{
+						softStopHit = true;
+						dbg = 20 + i;
+						return false;
+					}
+				}
 			}
+
+			dbg = 0;
+			for (int i = rmskin::SHOULDER_YAW; i <= rmskin::WRIST_ROLL; i++) SetTarget( i, a[i] );
 			return true;
 		}
 
@@ -1180,8 +1206,10 @@ namespace pdrs
 			double angle;
 			GetPORError( tgtpos, tgtatt, dB, axis, angle );
 			const double dist = length( dB );
+			autoDist = dist;
+			autoAngle = angle;
 
-			if ((dist < 0.003) && (angle < (0.1 * RAD)))
+			if ((dist < 0.003) && (angle < (0.25 * RAD)))
 			{
 				// target point reached
 				if (ModeIs( MODE_OPR_CMD ))

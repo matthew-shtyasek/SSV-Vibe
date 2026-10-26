@@ -244,6 +244,14 @@ namespace rmskin
 	 * @param[out] angles joint angles [deg]
 	 * @return false if the pose is not reachable
 	 */
+	inline double SafeAcos( double x )
+	{
+		// the unit vectors have rounding errors: a dot product a little over 1 would be a NaN
+		if (x > 1.0) x = 1.0;
+		if (x < -1.0) x = -1.0;
+		return acos( x );
+	}
+
 	inline bool Inverse( const VECTOR3& newPos, const VECTOR3& newDir, const VECTOR3& newRot, const double current[6], double angles[6] )
 	{
 		// NOTE: for cross products, |a x b|=|a||b|sin(theta)
@@ -258,8 +266,8 @@ namespace rmskin
 		normal /= length( normal );
 
 		if (((newDir.z > normal.z) && (newDir.z < boom_plane.z)) || ((newDir.z < normal.z) && (newDir.z > boom_plane.z)))
-			angles[WRIST_YAW] = -DEG * acos( dotp( normal, newDir ) ) + 90.0;
-		else angles[WRIST_YAW] = -90.0 + DEG * acos( dotp( normal, newDir ) );
+			angles[WRIST_YAW] = -DEG * SafeAcos( dotp( normal, newDir ) ) + 90.0;
+		else angles[WRIST_YAW] = -90.0 + DEG * SafeAcos( dotp( normal, newDir ) );
 
 		double phi;
 		// vector in the same plane as the arm booms and perpendicular to the direction of the end effector
@@ -273,11 +281,11 @@ namespace rmskin
 		else
 		{
 			wp_normal /= length( wp_normal );
-			phi = DEG * acos( wp_normal.z );
+			phi = DEG * SafeAcos( wp_normal.z );
 			if (newDir.z > 0.0) phi = -phi;
 		}
 
-		angles[WRIST_ROLL] = -acos( dotp( wp_normal, newRot ) ) * DEG;
+		angles[WRIST_ROLL] = -SafeAcos( dotp( wp_normal, newRot ) ) * DEG;
 
 		VECTOR3 cross_product = crossp( wp_normal, newRot );
 		if (Eq( 1.0, dotp( cross_product / length( cross_product ), newDir ), 0.05 ))
@@ -291,10 +299,10 @@ namespace rmskin
 		double rho = sqrt( (arm_wp_cpos.x * arm_wp_cpos.x) + (arm_wp_cpos.y * arm_wp_cpos.y) );
 		double cos_phibar_e = ((r * r) - (SP_EP_DIST * SP_EP_DIST) - (EP_WP_DIST * EP_WP_DIST)) / (-2 * SP_EP_DIST * EP_WP_DIST);
 		if (fabs( cos_phibar_e ) > 1) return false;// the elbow can not reach the point
-		angles[ELBOW_PITCH] = (DEG * acos( cos_phibar_e )) - 180.0 - EP_NULL_ANGLE - SP_NULL_ANGLE;
+		angles[ELBOW_PITCH] = (DEG * SafeAcos( cos_phibar_e )) - 180.0 - EP_NULL_ANGLE - SP_NULL_ANGLE;
 		double cos_phi_s2 = ((EP_WP_DIST * EP_WP_DIST) - (SP_EP_DIST * SP_EP_DIST) - (r * r)) / (-2 * SP_EP_DIST * r);
 		if (fabs( cos_phi_s2 ) > 1) return false;// the shoulder can not reach the point
-		angles[SHOULDER_PITCH] = (DEG * (-atan2( arm_wp_cpos.z, rho ) + acos( cos_phi_s2 ))) + SP_NULL_ANGLE;
+		angles[SHOULDER_PITCH] = (DEG * (-atan2( arm_wp_cpos.z, rho ) + SafeAcos( cos_phi_s2 ))) + SP_NULL_ANGLE;
 
 		angles[WRIST_PITCH] = phi - angles[SHOULDER_PITCH] - angles[ELBOW_PITCH];
 

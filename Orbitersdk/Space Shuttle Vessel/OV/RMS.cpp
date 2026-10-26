@@ -2029,8 +2029,8 @@ bool RMS::ComputeJointAngles(const VECTOR3 &newPos, const VECTOR3 &newDir, const
 	normal/=length(normal);
 
 	if((newDir.z>normal.z && newDir.z<boom_plane.z) || (newDir.z<normal.z && newDir.z>boom_plane.z))
-		new_joint_angles[WRIST_YAW] = -DEG*acos(dotp(normal, newDir))+90.0;
-	else new_joint_angles[WRIST_YAW] = -90.0+DEG*acos(dotp(normal, newDir));
+		new_joint_angles[WRIST_YAW] = -DEG*rmskin::SafeAcos(dotp(normal, newDir))+90.0;
+	else new_joint_angles[WRIST_YAW] = -90.0+DEG*rmskin::SafeAcos(dotp(normal, newDir));
 
 	double phi;
 	//find vector in same plane as arm booms and perpendicular to EE direction
@@ -2043,11 +2043,11 @@ bool RMS::ComputeJointAngles(const VECTOR3 &newPos, const VECTOR3 &newDir, const
 	}
 	else {
 		wp_normal/=length(wp_normal);
-		phi=DEG*acos(wp_normal.z);
+		phi=DEG*rmskin::SafeAcos(wp_normal.z);
 		if(newDir.z>0.0) phi=-phi;
 	}
 
-	new_joint_angles[WRIST_ROLL]=-acos(dotp(wp_normal, newRot))*DEG;
+	new_joint_angles[WRIST_ROLL]=-rmskin::SafeAcos(dotp(wp_normal, newRot))*DEG;
 
 	VECTOR3 cross_product=crossp(wp_normal, newRot);
 	if(Eq(1.0, dotp(cross_product/length(cross_product), newDir), 0.05))
@@ -2061,10 +2061,10 @@ bool RMS::ComputeJointAngles(const VECTOR3 &newPos, const VECTOR3 &newDir, const
 	double rho=sqrt(arm_wp_cpos.x*arm_wp_cpos.x+arm_wp_cpos.y*arm_wp_cpos.y);
 	double cos_phibar_e=(r*r-RMS_SP_EP_DIST*RMS_SP_EP_DIST-RMS_EP_WP_DIST*RMS_EP_WP_DIST)/(-2*RMS_SP_EP_DIST*RMS_EP_WP_DIST);
 	if (fabs(cos_phibar_e)>1) return false;//Can't reach new point with the elbow
-	new_joint_angles[ELBOW_PITCH]=DEG*acos(cos_phibar_e)-180.0-RMS_EP_NULL_ANGLE-RMS_SP_NULL_ANGLE;
+	new_joint_angles[ELBOW_PITCH]=DEG*rmskin::SafeAcos(cos_phibar_e)-180.0-RMS_EP_NULL_ANGLE-RMS_SP_NULL_ANGLE;
 	double cos_phi_s2=(RMS_EP_WP_DIST*RMS_EP_WP_DIST-RMS_SP_EP_DIST*RMS_SP_EP_DIST-r*r)/(-2*RMS_SP_EP_DIST*r);
 	if(fabs(cos_phi_s2)>1) return false; //Can't reach with shoulder
-	new_joint_angles[SHOULDER_PITCH]=DEG*(-atan2(arm_wp_cpos.z,rho)+acos(cos_phi_s2))+RMS_SP_NULL_ANGLE;
+	new_joint_angles[SHOULDER_PITCH]=DEG*(-atan2(arm_wp_cpos.z,rho)+rmskin::SafeAcos(cos_phi_s2))+RMS_SP_NULL_ANGLE;
 
 	new_joint_angles[WRIST_PITCH]=phi-new_joint_angles[SHOULDER_PITCH]-new_joint_angles[ELBOW_PITCH];
 

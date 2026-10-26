@@ -94,18 +94,20 @@ namespace freemove
 	 * @param up input up (+1) or down (-1)
 	 * @param forward horizontal forward direction of the view (unit vector, see HorizontalForward)
 	 * @param dt time step [s]
+	 * @param unlimited no limits (the lower deck)
 	 * @return the new offset, inside the ellipsoid
 	 */
-	inline VECTOR3 Move( const VECTOR3& offset, double fwd, double right, double up, const VECTOR3& forward, double dt )
+	inline VECTOR3 Move( const VECTOR3& offset, double fwd, double right, double up, const VECTOR3& forward, double dt, bool unlimited = false )
 	{
 		if (dt > MAX_STEP) dt = MAX_STEP;
 		if (dt <= 0.0) return offset;
 		const VECTOR3 r = RightOf( forward );
 		VECTOR3 dir = (forward * fwd) + (r * right) + _V( 0.0, up, 0.0 );
 		const double l = sqrt( (dir.x * dir.x) + (dir.y * dir.y) + (dir.z * dir.z) );
-		if (l < 1e-9) return ClampOffset( offset );// no input (a pair of opposite keys): at most, the clamp of a position out of the limits
+		if (l < 1e-9) return unlimited ? offset : ClampOffset( offset );// no input (a pair of opposite keys): at most, the clamp of a position out of the limits
 		if (l > 1.0) dir = dir / l;// the diagonals are not faster
-		return ClampOffset( offset + (dir * (SPEED * dt)) );
+		const VECTOR3 moved = offset + (dir * (SPEED * dt));
+		return unlimited ? moved : ClampOffset( moved );
 	}
 
 	/** Key (with Ctrl) of the choice of the setting: the order of settings::FREE_MOVE_KEYS. Zero if the choice does not exist. */

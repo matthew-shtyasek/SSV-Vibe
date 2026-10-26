@@ -1345,6 +1345,19 @@ void Atlantis::clbkPreStep( double simt, double simdt, double mjd )
 		// check inputs from GPC and set thrusters
 		//PITCH Commands to Thrusters
 		double pitchcmd = RotThrusterCommands[PITCH].GetVoltage();
+		// diagnostics of the RCS with time acceleration: the hand controller is deflected and no jet is commanded
+		{
+			static double lastRCSLog = -100.0;
+			const double acc = oapiGetTimeAcceleration();
+			const double defl = fabs( LeftRHC[0] ) + fabs( LeftRHC[1] ) + fabs( LeftRHC[2] ) + fabs( RightRHC[0] ) + fabs( RightRHC[1] ) + fabs( RightRHC[2] ) + fabs( AftRHC[0] ) + fabs( AftRHC[1] ) + fabs( AftRHC[2] );
+			const double cmd = fabs( pitchcmd ) + fabs( RotThrusterCommands[YAW].GetVoltage() ) + fabs( RotThrusterCommands[ROLL].GetVoltage() );
+			if ((acc > 1.0) && (defl > 0.3) && (cmd < 0.0001) && ((simt - lastRCSLog) > 10.0))
+			{
+				lastRCSLog = simt;
+				oapiWriteLogV( "(SSV_OV) [INFO] RCS: time acceleration x%.1f, hand controller deflected (L %.2f %.2f %.2f, R %.2f %.2f %.2f, A %.2f %.2f %.2f) and no rotation jet commanded (ControlRMS %d)", acc,
+					LeftRHC[0], LeftRHC[1], LeftRHC[2], RightRHC[0], RightRHC[1], RightRHC[2], AftRHC[0], AftRHC[1], AftRHC[2], ControlRMS ? 1 : 0 );
+			}
+		}
 		if (pitchcmd > 0.0001)
 		{
 			SetThrusterGroupLevel(thg_pitchup, pitchcmd);
@@ -5626,7 +5639,7 @@ void Atlantis::UpdateVCMove( double dt )
 		GetRotationMatrix( R );
 		const VECTOR3 ldir = tmul( R, gdir );
 		const VECTOR3 forward = freemove::HorizontalForward( ldir, _V( 0.0, 0.0, 1.0 ) );
-		vcMoveOfs = freemove::Move( vcMoveOfs, fwd, right, up, forward, oapiGetSysStep() );// real time: the head also moves with a high time acceleration
+		vcMoveOfs = freemove::Move( vcMoveOfs, fwd, right, up, forward, oapiGetSysStep(), VCMode == VC_MIDDECK );// real time: the head also moves with a high time acceleration
 		changed = true;
 	}
 	if (changed || (vcAppliedOfs.x != vcMoveOfs.x) || (vcAppliedOfs.y != vcMoveOfs.y) || (vcAppliedOfs.z != vcMoveOfs.z))
