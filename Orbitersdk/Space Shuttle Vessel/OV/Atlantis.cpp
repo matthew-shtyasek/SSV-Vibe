@@ -2132,6 +2132,14 @@ int Atlantis::clbkConsumeBufferedKey( DWORD key, bool down, char* kstate )
 				ManLandingGearArm();
 				return 1;
 			case OAPI_KEY_A:
+				if (pRMS && KEYMOD_SHIFT(kstate))
+				{
+					// Ctrl+Shift+A: the computer supported modes of the arm run in the software of the GPC (PDRS) or in the arm (old control)
+					options->Set( settings::RMS_VIA_GPC, options->RMSViaGPC() ? 0.0 : 1.0 );
+					options->SaveUser();
+					DisplayCameraLabel( options->RMSViaGPC() ? "RMS modes: GPC software (PDRS, SM OPS 2)" : "RMS modes: direct control (no GPC)" );
+					return 1;
+				}
 				if (pRMS)
 				{
 					RMSControlOverride = !RMSControlOverride;
@@ -4327,9 +4335,11 @@ void Atlantis::UpdateControllers( double dt )
 		double roll;
 		double yaw;
 		bool inOV = oapiGetFocusInterface() == this;
+		// in an external view nobody sits in a seat: the keys and the controllers work like the ones of the commander, whatever station was the last
+		const bool externalView = !oapiCameraInternal();
 
 		// left RHC & THC
-		if (inOV && (VCMode == VC_CDR))
+		if (inOV && ((VCMode == VC_CDR) || externalView))
 		{
 			// user is "here", use input
 			pitch = GetManualControlLevel( THGROUP_ATT_PITCHUP, attrot, MANCTRL_ANYDEVICE ) - GetManualControlLevel( THGROUP_ATT_PITCHDOWN, attrot, MANCTRL_ANYDEVICE );
@@ -4424,7 +4434,7 @@ void Atlantis::UpdateControllers( double dt )
 		}
 
 		// right RHC
-		if (inOV && (VCMode == VC_PLT))
+		if (inOV && (VCMode == VC_PLT) && !externalView)
 		{
 			// user is "here", use input
 			pitch = GetManualControlLevel( THGROUP_ATT_PITCHUP, attrot, MANCTRL_ANYDEVICE ) - GetManualControlLevel( THGROUP_ATT_PITCHDOWN, attrot, MANCTRL_ANYDEVICE );
@@ -4482,7 +4492,7 @@ void Atlantis::UpdateControllers( double dt )
 		}
 
 		// aft RHC & THC
-		if (inOV && ((VCMode == VC_AFTPILOT) || (VCMode == VC_DOCKCAM)))
+		if (inOV && ((VCMode == VC_AFTPILOT) || (VCMode == VC_DOCKCAM)) && !externalView)
 		{
 			// user is "here", use input
 			pitch = GetManualControlLevel( THGROUP_ATT_PITCHUP, attrot, MANCTRL_ANYDEVICE ) - GetManualControlLevel( THGROUP_ATT_PITCHDOWN, attrot, MANCTRL_ANYDEVICE );
@@ -5574,7 +5584,7 @@ void Atlantis::UpdateRMSControl( void )
 		const bool changed = (RMSControlStation != -1);
 		RMSControlStation = VCMode;
 		RMSControlOverride = false;
-		if (changed && focused && pRMS && (inStation || ControlRMS)) DisplayCameraLabel( inStation ? TEXT_RMSCONTROL : TEXT_RCSCONTROL );
+		if (changed && focused && pRMS) DisplayCameraLabel( inStation ? TEXT_RMSCONTROL : TEXT_RCSCONTROL );
 	}
 	ControlRMS = RMSMath::ControlsRMS( pRMS != NULL, inStation, RMSControlOverride );
 }
