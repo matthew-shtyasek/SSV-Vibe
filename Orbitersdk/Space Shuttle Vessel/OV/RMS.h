@@ -438,6 +438,11 @@ private:
 	double lastAnswerTime, simtNow;
 	bool enterLatch, rateHoldLatch;
 	int hwMode;// position of the MODE switch
+	// pose of the payload in the end effector (kept when the payload is attached, so it does not jump to the nominal pose)
+	bool capOffsetValid;
+	VECTOR3 capPos, capDir, capRot;// in the frame of the end effector (dir, rot, dir x rot)
+	void ApplyAttachmentParams( void );
+	void OnBeforePhysicalAttach( void ) override;
 	void GpcReceive( double simt );
 	void GpcSend( bool backup, bool armfree );
 	void GpcApply( double simdt, bool backup, bool armfree );

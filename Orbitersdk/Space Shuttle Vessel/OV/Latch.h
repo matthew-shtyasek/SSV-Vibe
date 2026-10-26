@@ -112,6 +112,10 @@ protected:
 	 * Called to signal payload attachment, both during simulation and at start for already attached payloads.
 	 */
 	virtual void OnAttach( void ) = 0;
+
+	/** Called just before the payload is physically attached (the attachment of Orbiter aligns the payload to the attachment point of the orbiter). */
+	virtual void OnBeforePhysicalAttach( void ) {}
+
 	/**
 	 * Called to signal payload detachment.
 	 */

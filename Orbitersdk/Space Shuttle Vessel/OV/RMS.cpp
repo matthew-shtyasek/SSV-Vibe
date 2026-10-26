@@ -170,6 +170,7 @@ constexpr double LIGHT_ATT2 = 0.05;// [1]
 RMS::RMS( AtlantisSubsystemDirector *_director, const std::string& _ident, bool portside, const mission::MissionRMS& missionrms )
 	: MPM( _director, _ident, "GF", portside, MAX_GRAPPLING_DIST, MAX_GRAPPLING_ANGLE ), bFirstStep(true), stowed_and_latched(true), missionrms(missionrms)
 {
+	capOffsetValid = false;
 	gpcLogic = NULL;
 	memset( &gpcOut, 0, sizeof( gpcOut ) );
 	gpcOut.effMode = -1;
@@ -551,7 +552,7 @@ void RMS::CreateAttachment()
 
 void RMS::UpdateAttachment( void )
 {
-	if (hAttach) STS()->SetAttachmentParams( hAttach, STS()->GetOrbiterCoGOffset() + posEE + RMS_MESH_OFFSET, dirEE, rotEE );
+	ApplyAttachmentParams();
 
 	// also update light and camera position
 	UpdateEELight();
@@ -969,7 +970,7 @@ void RMS::OnPostStep(double simt, double simdt, double mjd)
 
 		// if arm was moved, update attachment position and IK vectors/angles
 		// due to bug in orbiter_ng/D3D9 client, this needs to be done on second timestep
-		if(hAttach) STS()->SetAttachmentParams(hAttach, STS()->GetOrbiterCoGOffset()+posEE+RMS_MESH_OFFSET, dirEE, rotEE);
+		ApplyAttachmentParams();
 
 		CheckRFL();
 
@@ -2170,6 +2171,7 @@ void RMS::OnAttach( void )
 void RMS::OnDetach( void )
 {
 	MPM::OnDetach();
+	capOffsetValid = false;
 	bEECapture = false;
 	return;
 }
@@ -2555,4 +2557,61 @@ void RMS::GpcApply( double simdt, bool backup, bool armfree )
 		}
 	}
 	if (moved) update_vectors = true;
+}
+
+
+void RMS::ApplyAttachmentParams( void )
+{
+	if (hAttach == NULL) return;
+	const VECTOR3 pos = STS()->GetOrbiterCoGOffset() + posEE + RMS_MESH_OFFSET;
+	if (!capOffsetValid)
+	{
+		STS()->SetAttachmentParams( hAttach, pos, dirEE, rotEE );
+		return;
+	}
+	// the payload keeps the pose that it had when it was attached (position, direction and roll about the axis of the grapple fixture)
+	const VECTOR3 e1 = dirEE;
+	const VECTOR3 e2 = rotEE;
+	const VECTOR3 e3 = crossp( e1, e2 );
+	const VECTOR3 p = pos + (e1 * capPos.x) + (e2 * capPos.y) + (e3 * capPos.z);
+	const VECTOR3 d = (e1 * capDir.x) + (e2 * capDir.y) + (e3 * capDir.z);
+	const VECTOR3 r = (e1 * capRot.x) + (e2 * capRot.y) + (e3 * capRot.z);
+	STS()->SetAttachmentParams( hAttach, p, d, r );
+}
+
+void RMS::OnBeforePhysicalAttach( void )
+{
+	capOffsetValid = false;
+	if ((attachedPayload == NULL) || (hAttach == NULL) || (hPayloadAttachment == NULL)) return;
+
+	// attachment point of the payload (grapple fixture) in the frame of the orbiter
+	VECTOR3 cpos, cdir, crot;
+	attachedPayload->GetAttachmentParams( hPayloadAttachment, cpos, cdir, crot );
+	VECTOR3 gpos, gdir, grot;
+	attachedPayload->Local2Global( cpos, gpos );
+	attachedPayload->GlobalRot( cdir, gdir );
+	attachedPayload->GlobalRot( crot, grot );
+	VECTOR3 lpos;
+	STS()->Global2Local( gpos, lpos );
+	MATRIX3 R;
+	oapiGetRotationMatrix( STS()->GetHandle(), &R );
+	const MATRIX3 Rinv = Transpose( R );
+	const VECTOR3 ldir = mul( Rinv, gdir );
+	const VECTOR3 lrot = mul( Rinv, grot );
+
+	// the attachment of the payload to the orbiter has the opposite direction and the same rotation reference
+	const VECTOR3 pdir = -ldir;
+	const VECTOR3 prot = lrot;
+
+	const VECTOR3 pos = STS()->GetOrbiterCoGOffset() + posEE + RMS_MESH_OFFSET;
+	const VECTOR3 e1 = dirEE;
+	const VECTOR3 e2 = rotEE;
+	const VECTOR3 e3 = crossp( e1, e2 );
+	const VECTOR3 dp = lpos - pos;
+	capPos = _V( dotp( dp, e1 ), dotp( dp, e2 ), dotp( dp, e3 ) );
+	capDir = _V( dotp( pdir, e1 ), dotp( pdir, e2 ), dotp( pdir, e3 ) );
+	capRot = _V( dotp( prot, e1 ), dotp( prot, e2 ), dotp( prot, e3 ) );
+	capOffsetValid = true;
+	ApplyAttachmentParams();
+	oapiWriteLogV( "(SSV_OV) [INFO] RMS: payload pose kept at the capture (offset %.3f m, roll %.1f deg)", length( dp ), DEG * atan2( capRot.z, capRot.y ) );
 }

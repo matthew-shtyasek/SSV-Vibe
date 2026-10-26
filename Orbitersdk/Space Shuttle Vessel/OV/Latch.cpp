@@ -73,6 +73,7 @@ void LatchSystem::OnPreStep( double simt, double simdt, double mjd )
 	{
 		if (PayloadIsFree())
 		{
+			OnBeforePhysicalAttach();
 			STS()->AttachChild( attachedPayload->GetHandle(), hAttach, hPayloadAttachment );
 		}
 	}

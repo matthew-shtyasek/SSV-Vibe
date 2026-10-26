@@ -2127,6 +2127,9 @@ int Atlantis::clbkConsumeBufferedKey( DWORD key, bool down, char* kstate )
 		}
 
 		if (KEYMOD_CONTROL(kstate)) {
+			// Ctrl+Up, Left, Right move the head to the positions of SetCameraMovement; stations without them (cameras, middeck, airlock) would take the old ones
+			if (!vcFreeMove && !KEYMOD_ALT( kstate ) && !KEYMOD_SHIFT( kstate ) && ((key == OAPI_KEY_UP) || (key == OAPI_KEY_LEFT) || (key == OAPI_KEY_RIGHT)) &&
+				((VCMode == VC_MIDDECK) || (VCMode == VC_EXT_AL) || ((VCMode >= VC_DOCKCAM) && (VCMode <= VC_LEECAM)))) return 1;
 			// free movement of the head in the cockpit (the key is a setting, because the arrows are used by the THC)
 			if (down && options->VCFreeMove() && (key == freemove::ToggleKey( options->VCFreeMoveKey() )))
 			{
@@ -2358,7 +2361,7 @@ bool Atlantis::clbkLoadVC( int id )
 				DisplayCameraLabel( VC_LBL_CDR );
 				SetCameraOffset( orbiter_ofs + VC_OFFSET + VC_POS_CDR );
 				SetCameraDefaultDirection( VC_DIR_CDR );
-				SetCameraRotationRange( 144 * RAD, 144 * RAD, 100 * RAD, 75 * RAD );
+				SetVCRotationRange( 144 * RAD, 144 * RAD, 100 * RAD, 75 * RAD );
 				SetCameraMovement( VC_OFS_CDR_F, VC_AZ_CDR_F, VC_EL_CDR_F, VC_OFS_CDR_L, VC_AZ_CDR_L, VC_EL_CDR_L, VC_OFS_CDR_R, VC_AZ_CDR_R, VC_EL_CDR_R );
 
 				if (bHasODS) oapiVCSetNeighbours(VC_PANELL4, VC_PLT, VC_DOCKCAM, VC_MS2);
@@ -2378,7 +2381,7 @@ bool Atlantis::clbkLoadVC( int id )
 				DisplayCameraLabel( VC_LBL_PLT );
 				SetCameraOffset( orbiter_ofs + VC_OFFSET + VC_POS_PLT );
 				SetCameraDefaultDirection( VC_DIR_PLT );
-				SetCameraRotationRange( 144 * RAD, 144 * RAD, 100 * RAD, 75 * RAD );
+				SetVCRotationRange( 144 * RAD, 144 * RAD, 100 * RAD, 75 * RAD );
 				SetCameraMovement( VC_OFS_PLT_F, VC_AZ_PLT_F, VC_EL_PLT_F, VC_OFS_PLT_L, VC_AZ_PLT_L, VC_EL_PLT_L, VC_OFS_PLT_R, VC_AZ_PLT_R, VC_EL_PLT_R );
 
 				if (bHasODS) oapiVCSetNeighbours( VC_CDR, VC_PANELR4, VC_DOCKCAM, VC_MS1 );
@@ -2398,7 +2401,7 @@ bool Atlantis::clbkLoadVC( int id )
 				DisplayCameraLabel( VC_LBL_PANELR4 );
 				SetCameraOffset( orbiter_ofs + VC_OFFSET + VC_POS_PANELR4 );
 				SetCameraDefaultDirection( VC_DIR_PANELR4, VC_TILT_PANELR4 );
-				SetCameraRotationRange( 30 * RAD, 30 * RAD, 20 * RAD, 40 * RAD );
+				SetVCRotationRange( 30 * RAD, 30 * RAD, 20 * RAD, 40 * RAD );
 				SetCameraMovement( VC_OFS_PANELR4_F, VC_AZ_PANELR4_F, VC_EL_PANELR4_F, VC_OFS_PANELR4_L, VC_AZ_PANELR4_L, VC_EL_PANELR4_L, VC_OFS_PANELR4_R, VC_AZ_PANELR4_R, VC_EL_PANELR4_R );
 
 				if (bHasODS) oapiVCSetNeighbours( VC_PLT, VC_STBDSTATION, VC_DOCKCAM, VC_MS1 );
@@ -2416,7 +2419,7 @@ bool Atlantis::clbkLoadVC( int id )
 				DisplayCameraLabel( VC_LBL_PANELL4 );
 				SetCameraOffset( orbiter_ofs + VC_OFFSET + VC_POS_PANELL4 );
 				SetCameraDefaultDirection( VC_DIR_PANELL4, VC_TILT_PANELL4 );
-				SetCameraRotationRange( 30 * RAD, 30 * RAD, 20 * RAD, 40 * RAD );
+				SetVCRotationRange( 30 * RAD, 30 * RAD, 20 * RAD, 40 * RAD );
 				SetCameraMovement( VC_OFS_PANELL4_F, VC_AZ_PANELL4_F, VC_EL_PANELL4_F, VC_OFS_PANELL4_L, VC_AZ_PANELL4_L, VC_EL_PANELL4_L, VC_OFS_PANELL4_R, VC_AZ_PANELL4_R, VC_EL_PANELL4_R );
 
 				if (bHasODS) oapiVCSetNeighbours( VC_PORTSTATION, VC_CDR, VC_DOCKCAM, VC_MS2 );
@@ -2434,7 +2437,7 @@ bool Atlantis::clbkLoadVC( int id )
 				DisplayCameraLabel( VC_LBL_STBDSTATION );
 				SetCameraOffset( VC_OFFSET + VC_POS_STBDSTATION + orbiter_ofs );
 				SetCameraDefaultDirection( VC_DIR_STBDSTATION );
-				SetCameraRotationRange( 144 * RAD, 144 * RAD, 72 * RAD, 72 * RAD );
+				SetVCRotationRange( 144 * RAD, 144 * RAD, 72 * RAD, 72 * RAD );
 				SetCameraMovement( VC_OFS_STBDSTATION_F, VC_AZ_STBDSTATION_F, VC_EL_STBDSTATION_F, VC_OFS_STBDSTATION_L, VC_AZ_STBDSTATION_L, VC_EL_STBDSTATION_L, VC_OFS_STBDSTATION_R, VC_AZ_STBDSTATION_R, VC_EL_STBDSTATION_R );
 
 				if (bHasODS) oapiVCSetNeighbours( VC_PLT, VC_AFTPILOT, VC_DOCKCAM, VC_AFTWORKSTATION );
@@ -2521,7 +2524,7 @@ bool Atlantis::clbkLoadVC( int id )
 					SetCameraOffset( _V( orbiter_ofs.x, orbiter_ofs.y + 0.05, orbiter_ofs.z + pExtAirlock->GetZPos() ) );
 					SetCameraDefaultDirection( _V( 0.0, 1.0, 0.0 ), PI );
 					//oapiCameraSetAperture( 15 * RAD );
-					SetCameraRotationRange( 0, 0, 0, 0 );
+					SetVCRotationRange( 0, 0, 0, 0 );
 					oapiVCSetNeighbours( -1, -1, VC_PLBCAMA, VC_AFTPILOT );
 
 					ok = true;
@@ -2532,7 +2535,7 @@ bool Atlantis::clbkLoadVC( int id )
 				SetCameraOffset( VC_OFFSET + VC_POS_AFTPILOT + orbiter_ofs );
 				SetCameraDefaultDirection( VC_DIR_AFTPILOT );
 				//oapiCameraSetAperture( 20 * RAD );
-				SetCameraRotationRange( 144 * RAD, 144 * RAD, 95 * RAD, 72 * RAD );
+				SetVCRotationRange( 144 * RAD, 144 * RAD, 95 * RAD, 72 * RAD );
 				SetCameraMovement( VC_OFS_AFTPILOT_F, VC_AZ_AFTPILOT_F, VC_EL_AFTPILOT_F, VC_OFS_AFTPILOT_L, VC_AZ_AFTPILOT_L, VC_EL_AFTPILOT_L, VC_OFS_AFTPILOT_R, VC_AZ_AFTPILOT_R, VC_EL_AFTPILOT_R );
 
 				if (bHasODS) oapiVCSetNeighbours( VC_STBDSTATION, VC_RMSSTATION, VC_DOCKCAM, VC_AFTWORKSTATION );
@@ -2550,7 +2553,7 @@ bool Atlantis::clbkLoadVC( int id )
 				SetCameraOffset( orbiter_ofs + VC_OFFSET + VC_POS_RMSSTATION );
 				SetCameraDefaultDirection( VC_DIR_RMSSTATION );
 				//oapiCameraSetAperture( 20 * RAD );
-				SetCameraRotationRange( 144 * RAD, 144 * RAD, 95 * RAD, 72 * RAD );
+				SetVCRotationRange( 144 * RAD, 144 * RAD, 95 * RAD, 72 * RAD );
 				SetCameraMovement( VC_OFS_RMSSTATION_F, VC_AZ_RMSSTATION_F, VC_EL_RMSSTATION_F, VC_OFS_RMSSTATION_L, VC_AZ_RMSSTATION_L, VC_EL_RMSSTATION_L, VC_OFS_RMSSTATION_R, VC_AZ_RMSSTATION_R, VC_EL_RMSSTATION_R );
 
 				if (bHasODS) oapiVCSetNeighbours( VC_AFTPILOT, VC_PORTSTATION, VC_DOCKCAM, VC_AFTWORKSTATION );
@@ -2567,7 +2570,7 @@ bool Atlantis::clbkLoadVC( int id )
 				DisplayCameraLabel( VC_LBL_PORTSTATION );
 				SetCameraOffset( orbiter_ofs + VC_OFFSET + VC_POS_PORTSTATION );
 				SetCameraDefaultDirection( VC_DIR_PORTSTATION );
-				SetCameraRotationRange( 144 * RAD, 144 * RAD, 72 * RAD, 72 * RAD );
+				SetVCRotationRange( 144 * RAD, 144 * RAD, 72 * RAD, 72 * RAD );
 				SetCameraMovement( VC_OFS_PORTSTATION_F, VC_AZ_PORTSTATION_F, VC_EL_PORTSTATION_F, VC_OFS_PORTSTATION_L, VC_AZ_PORTSTATION_L, VC_EL_PORTSTATION_L, VC_OFS_PORTSTATION_R, VC_AZ_PORTSTATION_R, VC_EL_PORTSTATION_R );
 
 				if (bHasODS) oapiVCSetNeighbours( VC_RMSSTATION, VC_CDR, VC_DOCKCAM, VC_MIDDECK );
@@ -2584,7 +2587,7 @@ bool Atlantis::clbkLoadVC( int id )
 				DisplayCameraLabel( VC_LBL_AFTWORKSTATION );
 				SetCameraOffset( orbiter_ofs + VC_OFFSET + VC_POS_AFTWORKSTATION );
 				SetCameraDefaultDirection( VC_DIR_AFTWORKSTATION );
-				SetCameraRotationRange( 144 * RAD, 144 * RAD, 72 * RAD, 72 * RAD );
+				SetVCRotationRange( 144 * RAD, 144 * RAD, 72 * RAD, 72 * RAD );
 				SetCameraMovement( VC_OFS_AFTWORKSTATION_F, VC_AZ_AFTWORKSTATION_F, VC_EL_AFTWORKSTATION_F, VC_OFS_AFTWORKSTATION_L, VC_AZ_AFTWORKSTATION_L, VC_EL_AFTWORKSTATION_L, VC_OFS_AFTWORKSTATION_R, VC_AZ_AFTWORKSTATION_R, VC_EL_AFTWORKSTATION_R );
 				oapiVCSetNeighbours( VC_STBDSTATION, VC_PORTSTATION, VC_RMSSTATION, VC_MS1 );
 
@@ -2600,7 +2603,7 @@ bool Atlantis::clbkLoadVC( int id )
 				DisplayCameraLabel( VC_LBL_MS2 );
 				SetCameraOffset( orbiter_ofs + VC_OFFSET + VC_POS_MS2 );
 				SetCameraDefaultDirection( VC_DIR_MS2 );
-				SetCameraRotationRange( 144 * RAD, 144 * RAD, 72 * RAD, 72 * RAD );
+				SetVCRotationRange( 144 * RAD, 144 * RAD, 72 * RAD, 72 * RAD );
 				SetCameraMovement( VC_OFS_MS2_F, VC_AZ_MS2_F, VC_EL_MS2_F, VC_OFS_MS2_L, VC_AZ_MS2_L, VC_EL_MS2_L, VC_OFS_MS2_R, VC_AZ_MS2_R, VC_EL_MS2_R );
 
 				if (bHasODS) oapiVCSetNeighbours( VC_PORTSTATION, VC_MS1, VC_CDR, VC_DOCKCAM );
@@ -2618,7 +2621,7 @@ bool Atlantis::clbkLoadVC( int id )
 				DisplayCameraLabel( VC_LBL_MS1 );
 				SetCameraOffset( orbiter_ofs + VC_OFFSET + VC_POS_MS1 );
 				SetCameraDefaultDirection( VC_DIR_MS1 );
-				SetCameraRotationRange( 144 * RAD, 144 * RAD, 72 * RAD, 72 * RAD );
+				SetVCRotationRange( 144 * RAD, 144 * RAD, 72 * RAD, 72 * RAD );
 				SetCameraMovement( VC_OFS_MS1_F, VC_AZ_MS1_F, VC_EL_MS1_F, VC_OFS_MS1_L, VC_AZ_MS1_L, VC_EL_MS1_L, VC_OFS_MS1_R, VC_AZ_MS1_R, VC_EL_MS1_R );
 
 				if (bHasODS) oapiVCSetNeighbours( VC_MS2, VC_STBDSTATION, VC_PLT, VC_DOCKCAM );
@@ -2636,7 +2639,7 @@ bool Atlantis::clbkLoadVC( int id )
 				DisplayCameraLabel( VC_LBL_MIDDECK );
 				SetCameraOffset( orbiter_ofs + VC_OFFSET + VC_POS_MIDDECK );
 				SetCameraDefaultDirection( VC_DIR_MIDDECK );
-				SetCameraRotationRange( 144 * RAD, 144 * RAD, 72 * RAD, 72 * RAD );
+				SetVCRotationRange( 144 * RAD, 144 * RAD, 72 * RAD, 72 * RAD );
 
 				if (pMission->HasExtAL() || pMission->HasODS()) oapiVCSetNeighbours( -1, -1, VC_PORTSTATION, VC_EXT_AL );
 				else oapiVCSetNeighbours( -1, -1, VC_PORTSTATION, -1 );
@@ -2650,7 +2653,7 @@ bool Atlantis::clbkLoadVC( int id )
 					SetCameraOffset( orbiter_ofs + VC_OFFSET + VC_POS_EXT_AL + _V( 0, 0, pExtAirlock->GetZPos() ) );
 					SetCameraDefaultDirection( VC_DIR_EXT_AL );
 
-					SetCameraRotationRange( 144 * RAD, 144 * RAD, 72 * RAD, 72 * RAD );
+					SetVCRotationRange( 144 * RAD, 144 * RAD, 72 * RAD, 72 * RAD );
 
 					if (bHasODS) oapiVCSetNeighbours( -1, -1, VC_MIDDECK, VC_DOCKCAM );
 					else oapiVCSetNeighbours( -1, -1, VC_MIDDECK, -1 );
@@ -5650,7 +5653,7 @@ void Atlantis::UpdateVCMove( double dt )
 		GetRotationMatrix( R );
 		const VECTOR3 ldir = tmul( R, gdir );
 		const VECTOR3 forward = freemove::HorizontalForward( ldir, _V( 0.0, 0.0, 1.0 ) );
-		vcMoveOfs = freemove::Move( vcMoveOfs, fwd, right, up, forward, oapiGetSysStep(), VCMode == VC_MIDDECK );// real time: the head also moves with a high time acceleration
+		vcMoveOfs = freemove::Move( vcMoveOfs, fwd, right, up, forward, oapiGetSysStep(), (VCMode == VC_MIDDECK) || (VCMode == VC_STBDSTATION) );// real time: the head also moves with a high time acceleration
 		changed = true;
 	}
 	if (changed || (vcAppliedOfs.x != vcMoveOfs.x) || (vcAppliedOfs.y != vcMoveOfs.y) || (vcAppliedOfs.z != vcMoveOfs.z))
@@ -5672,6 +5675,11 @@ void Atlantis::SetPanelLighting( int channel, double scale )
 			if ((ap != NULL) && (ap->GetLightingChannel() == channel)) ap->SetGlow( scale );
 		} );
 	}
+}
+
+void Atlantis::SetVCRotationRange( double left, double right, double up, double down )
+{
+	SetCameraRotationRange( (std::max)( left, 150.0 * RAD ), (std::max)( right, 150.0 * RAD ), (std::max)( up, 100.0 * RAD ), (std::max)( down, 90.0 * RAD ) );
 }
 
 void Atlantis::SetCabinBrightness( double scale )

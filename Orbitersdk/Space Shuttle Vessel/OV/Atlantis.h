@@ -834,6 +834,8 @@ class Atlantis: public VESSEL4
 		void SetPanelLighting( int channel, double scale );
 		/** Brightness of the cabin shell and the middeck (ambient and self illumination of the materials): 1 = as in the meshes. */
 		void SetCabinBrightness( double scale );
+		/** Range of rotation of the head in the virtual cockpit (the ranges of the stations are widened). */
+		void SetVCRotationRange( double left, double right, double up, double down );
 
 		~Atlantis();
 
