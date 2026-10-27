@@ -125,6 +125,7 @@ struct HandControllers::Impl
 	bool raw = false;// read the controllers even if none is configured
 	int learning = -1;// input that waits for an assignment
 	std::vector<Device> devices;
+	std::vector<std::string> numberedUsed;// the files Joystick<N>.cfg that were given to a controller
 	std::vector<Connection> conns[INPUT_COUNT];
 
 	struct PanelBinding
@@ -207,31 +208,18 @@ bool HandControllers::Impl::ParseSubDevice( const std::string& text, int& type, 
 
 void HandControllers::Impl::LoadConfig( int deviceindex )
 {
-	// the configuration is looked for by the name of the controller, and then by its number (Joystick1.cfg, Joystick2.cfg, ...)
-	std::string name = devices[deviceindex].name;
-	std::string candidates[2];
-	candidates[0] = std::string( CONFIG_PATH ) + name + ".cfg";
-	candidates[1] = std::string( CONFIG_PATH ) + "Joystick" + std::to_string( deviceindex + 1 ) + ".cfg";
-
-	std::ifstream file;
-	std::string used;
-	for (int i = 0; i < 2; i++)
+	// the configuration is looked for by the name of the controller, and then in the files Joystick1.cfg, Joystick2.cfg, ...
+	// A file can name its device ("DEVICE<tab>part of the name"): it is for the first controller of that name that has no file yet, so the order of
+	// the controllers (that Windows decides, and changes when one is connected to another port) does not matter: two sticks of the same model
+	// get Joystick1.cfg and Joystick2.cfg in the order in which they are found, with or without the pedals between them.
+	// A file without DEVICE is for the controller with its number (as before), whatever it is (for example a pedal when a stick is not connected).
+	const std::string name = devices[deviceindex].name;
+	auto deviceOf = [&]( const std::string& path, bool& exists ) -> std::string
 	{
-		file.open( candidates[i] );
-		if (file.is_open())
-		{
-			used = candidates[i];
-			break;
-		}
-	}
-	if (!file.is_open()) return;
-
-	// a file can name its device ("DEVICE<tab>part of the name"): it is then used only for a controller with that name. Without it, a file
-	// that is chosen by the number (Joystick1.cfg) is applied to whatever controller is the first one, for example to a pedal when the stick is not connected
-	{
-		std::string wanted;
-		std::string l0;
-		while (std::getline( file, l0 ))
+		std::ifstream f( path );
+		exists = f.is_open();
+		std::string wanted, l0;
+		while (exists && std::getline( f, l0 ))
 		{
 			const std::vector<std::string> c0 = ctrlmath::SplitColumns( l0 );
 			if ((c0.size() >= 2) && (Lower( c0[0] ) == "device"))
@@ -240,14 +228,40 @@ void HandControllers::Impl::LoadConfig( int deviceindex )
 				break;
 			}
 		}
-		file.clear();
-		file.seekg( 0 );
-		if (!wanted.empty() && (Lower( name ).find( Lower( wanted ) ) == std::string::npos))
+		return wanted;
+	};
+	auto matches = [&]( const std::string& wanted ) { return wanted.empty() || (Lower( name ).find( Lower( wanted ) ) != std::string::npos); };
+
+	std::string used;
+	bool exists = false;
+	std::string path = std::string( CONFIG_PATH ) + name + ".cfg";
+	std::string wanted = deviceOf( path, exists );
+	if (exists && matches( wanted )) used = path;
+	else
+	{
+		if (exists) oapiWriteLogV( "(SSV_OV) [INFO] Hand controllers: %s is for the controller \"%s\", not used for \"%s\"", path.c_str(), wanted.c_str(), name.c_str() );
+		for (int n = 1; (n <= 9) && used.empty(); n++)
 		{
-			oapiWriteLogV( "(SSV_OV) [INFO] Hand controllers: %s is for the controller \"%s\", not used for \"%s\"", used.c_str(), wanted.c_str(), name.c_str() );
-			return;
+			path = std::string( CONFIG_PATH ) + "Joystick" + std::to_string( n ) + ".cfg";
+			wanted = deviceOf( path, exists );
+			if (!exists) continue;
+			if (std::find( numberedUsed.begin(), numberedUsed.end(), path ) != numberedUsed.end()) continue;
+			if (wanted.empty())
+			{
+				if (n != (deviceindex + 1)) continue;// without DEVICE: for the controller with this number
+			}
+			else if (!matches( wanted )) continue;
+			used = path;
+			numberedUsed.push_back( path );
 		}
 	}
+	if (used.empty())
+	{
+		oapiWriteLogV( "(SSV_OV) [INFO] Hand controllers: no configuration file for Joystick%d = \"%s\"", deviceindex + 1, name.c_str() );
+		return;
+	}
+	std::ifstream file( used );
+	if (!file.is_open()) return;
 	devices[deviceindex].cfgpath = used;
 
 	int count = 0;

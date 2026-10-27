@@ -16,8 +16,10 @@ How to set it up
    list) or to "Joystick<number>.cfg" (useful if you have two controllers with the same name), and edit it.
    A controller without configuration file is ignored.
    The number is the position in the list of the controllers that are connected: it changes when one is not connected (the first of the
-   rest becomes Joystick1). To keep a file for its controller, add a line with a part of its name: "DEVICE<tab>T16000M". The file is then
-   used only for a controller whose name contains it. The controllers page of the SSV Settings MFD writes this line.
+   rest becomes Joystick1, and the order that Windows gives can change). To keep a file for its controller, add a line with a part of its
+   name: "DEVICE<tab>T16000M". The file is then used only for a controller whose name contains it, and it is given to the first such controller
+   that has no file yet: two sticks of the same model get Joystick1.cfg and Joystick2.cfg in the order in which they are found, with or without
+   other controllers between them. A file without DEVICE is for the controller with its number. The controllers page of the SSV Settings MFD writes this line.
    An axis of a stick (RHC, THC, rudder) that is not at its center at its first reading is ignored for the whole session (the toe brakes
    of a pedal that was taken for a stick would otherwise rotate the orbiter or move the arm); the log says so. Keep the sticks in their detent
    when the simulation starts.
