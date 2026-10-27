@@ -837,6 +837,7 @@ pActiveLatches( 5, NULL ), pXRSound(NULL)
 	RMSControlStation = -1;
 	RMSControlShown = -1;
 	cabinBrightness = 1.0;
+	cabinBrightnessMiddeck = 1.0;
 	cabinBrightnessDirty = false;
 	lastRMSSJCommand = 0;
 
@@ -5727,10 +5728,11 @@ void Atlantis::SetVCRotationRange( double left, double right, double up, double 
 	SetCameraRotationRange( (std::max)( left, 2.0 * PI ), (std::max)( right, 2.0 * PI ), (std::max)( up, 100.0 * RAD ), (std::max)( down, 90.0 * RAD ) );
 }
 
-void Atlantis::SetCabinBrightness( double scale )
+void Atlantis::SetCabinBrightness( double scale, double middeckScale )
 {
-	if ((fabs( scale - cabinBrightness ) < 0.005) && !cabinBrightnessDirty) return;
+	if ((fabs( scale - cabinBrightness ) < 0.005) && (fabs( middeckScale - cabinBrightnessMiddeck ) < 0.005) && !cabinBrightnessDirty) return;
 	cabinBrightness = scale;
+	cabinBrightnessMiddeck = middeckScale;
 	if (Get_vis() == 0) return;
 	cabinBrightnessDirty = false;
 
@@ -5750,7 +5752,7 @@ void Atlantis::SetCabinBrightness( double scale )
 				(*bases[m])[i] = {mat.ambient.r, mat.ambient.g, mat.ambient.b, mat.emissive.r, mat.emissive.g, mat.emissive.b};
 			}
 			const std::array<float, 6>& b = (*bases[m])[i];
-			const float s = static_cast<float>(scale);
+			const float s = static_cast<float>((m == 0) ? scale : middeckScale);
 			mat.ambient.r = b[0] * s;
 			mat.ambient.g = b[1] * s;
 			mat.ambient.b = b[2] * s;

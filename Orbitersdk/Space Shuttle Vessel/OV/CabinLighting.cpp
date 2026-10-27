@@ -38,7 +38,7 @@ namespace
 
 
 CabinLighting::CabinLighting( AtlantisSubsystemDirector* _director, const string& _ident )
-	: AtlantisSubsystem( _director, _ident ), lightsCreated( false )
+	: AtlantisSubsystem( _director, _ident ), lightsCreated( false ), panelGlow( -1.0 )
 {
 	for (int i = 0; i < FLOOD_COUNT; i++)
 	{
@@ -171,9 +171,19 @@ void CabinLighting::OnPostStep( double simt, double simdt, double mjd )
 
 	vc::DimmerKnob::RefreshAll();// calibration settings of the pointers, live
 
-	// the cabin: the brightness of the shell and of the middeck follows the lamps that are on (the light of the sun through the windows is the minimum)
-	double total = 0.0;
-	for (int i = 0; i < FLOOD_COUNT; i++) total += level[i];
-	STS()->SetCabinBrightness( enabled ? (CABIN_MIN_BRIGHTNESS + ((1.0 - CABIN_MIN_BRIGHTNESS) * ((total > 2.0) ? 1.0 : (total / 2.0)))) : 1.0 );
+	// the cabin: the brightness of the shell follows the lamps of the flight deck that are on, and the one of the middeck follows the lamps of the middeck
+	// (the light of the sun through the windows is the minimum); the panels follow the shell (the option PanelGlow is their glow with the lamps off)
+	double deck = 0.0;
+	for (int i = 0; i < FLOOD_MID_FWD; i++) deck += level[i];
+	const double middeckLit = level[FLOOD_MID_FWD] + level[FLOOD_MID_AFT];
+	const double deckLit = (deck > 2.0) ? 1.0 : (deck / 2.0);
+	const double midLit = (middeckLit > 2.0) ? 1.0 : (middeckLit / 2.0);
+	STS()->SetCabinBrightness( enabled ? (CABIN_MIN_BRIGHTNESS + ((1.0 - CABIN_MIN_BRIGHTNESS) * deckLit)) : 1.0, enabled ? (CABIN_MIN_BRIGHTNESS + ((1.0 - CABIN_MIN_BRIGHTNESS) * midLit)) : 1.0 );
+	const double glow = enabled ? lightmath::PanelGlow( STS()->GetOptions()->PanelGlow(), deckLit ) : 1.0;
+	if (fabs( glow - panelGlow ) > 0.002)
+	{
+		panelGlow = glow;
+		for (int ch = 1; ch < cabinlight::PNL_COUNT; ch++) STS()->SetPanelLighting( ch, glow );
+	}
 	return;
 }

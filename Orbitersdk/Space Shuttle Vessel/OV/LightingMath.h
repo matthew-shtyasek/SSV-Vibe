@@ -82,6 +82,17 @@ namespace lightmath
 		return emergency ? 1.0 : level;
 	}
 
+	/**
+	 * Self illumination of the panels (1 = as in the meshes) from the option for the lamps off and how much the cabin is lit (0 = lamps off, 1 = lit):
+	 * the panels follow the cabin, so they do not shine in a dark cabin.
+	 */
+	inline double PanelGlow( double glowLampsOff, double cabinLit )
+	{
+		const double g = (glowLampsOff < 0.0) ? 0.0 : ((glowLampsOff > 1.0) ? 1.0 : glowLampsOff);
+		const double c = (cabinLit < 0.0) ? 0.0 : ((cabinLit > 1.0) ? 1.0 : cabinLit);
+		return g + ((1.0 - g) * c);
+	}
+
 	/** Level of the middeck floodlights from the option: 0 = all off, 1 = half of the fixtures (half of the light), 2 = all on. */
 	inline double MiddeckLevel( int choice )
 	{

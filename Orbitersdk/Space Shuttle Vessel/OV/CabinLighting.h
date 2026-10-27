@@ -87,6 +87,7 @@ private:
 	double level[FLOOD_COUNT];
 	int seatMode[2];// 0 = off, 1 = seat, 2 = console (CDR, PLT)
 	bool lightsCreated;
+	double panelGlow;// glow that was given to the panels (to give it only when it changes)
 
 	DiscInPort sw[SW_COUNT];
 	DiscInPort knob[KNOB_COUNT];

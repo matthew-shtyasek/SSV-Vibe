@@ -231,6 +231,13 @@ class SSVOptions
 			return ((i >= 0) && (i < settings::RCS_FULL_THRUST_COUNT)) ? settings::RCS_FULL_THRUST_ACC[i] : 1.0;
 		}
 
+		/** @return self illumination of the panels when the lamps of the cabin are off [0, 1] (1 = as in the meshes) */
+		double PanelGlow( void ) const
+		{
+			const double v = values[settings::PANEL_GLOW];
+			return (v < 0.0) ? 0.0 : ((v > 1.0) ? 1.0 : v);
+		}
+
 		/** @return option of the middeck floodlights: 0 = off, 1 = half, 2 = all */
 		int MiddeckLights( void ) const
 		{

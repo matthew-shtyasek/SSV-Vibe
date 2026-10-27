@@ -2201,6 +2201,15 @@ static void test_emergency_lighting( void )
 	CHECK_NEAR( EmergencyLevel( 0.3, false ), 0.3, 1e-12 );
 	CHECK_NEAR( EmergencyLevel( 0.0, false ), 0.0, 1e-12 );
 
+	// the panels follow the cabin: the option is their glow with the lamps off, with the cabin lit they are as in the meshes
+	CHECK_NEAR( PanelGlow( 0.5, 0.0 ), 0.5, 1e-12 );
+	CHECK_NEAR( PanelGlow( 0.5, 1.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( PanelGlow( 0.5, 0.5 ), 0.75, 1e-12 );
+	CHECK_NEAR( PanelGlow( 0.0, 0.0 ), 0.0, 1e-12 );
+	CHECK_NEAR( PanelGlow( 1.0, 0.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( PanelGlow( -1.0, 3.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( PanelGlow( 2.0, -3.0 ), 1.0, 1e-12 );
+
 	// the middeck floodlights
 	CHECK_NEAR( MiddeckLevel( 0 ), 0.0, 1e-12 );
 	CHECK_NEAR( MiddeckLevel( 1 ), 0.5, 1e-12 );

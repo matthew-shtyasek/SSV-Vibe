@@ -104,6 +104,7 @@ namespace settings
 		VC_FREE_MOVE,
 		VC_FREE_MOVE_KEY,
 		MIDDECK_LIGHTS,
+		PANEL_GLOW,
 		HYDRAULIC_THERMAL,
 		HYDRAULIC_RANDOM_FAILURES,
 		COUNT
@@ -140,6 +141,7 @@ namespace settings
 		{"VCFreeMove", "Free head movement", "A key switches it on: then the arrows and Ins/Del move the head around the station", KIND_BOOL, 1.0, 0.0, 1.0, 1.0, false, GROUP_CABIN},
 		{"VCFreeMoveKey", "Free movement key", "Key that switches the free movement of the head on and off (the arrows are used by the THC)", KIND_CHOICE, 0.0, 0.0, FREE_MOVE_KEY_COUNT - 1, 1.0, false, GROUP_CABIN, FREE_MOVE_KEYS},
 		{"MiddeckLights", "Middeck floodlights", "Floodlights of the middeck (panel MO13Q is not in the cockpit)", KIND_CHOICE, 2.0, 0.0, 2.0, 1.0, false, GROUP_CABIN, MIDDECK_LIGHT_NAMES},
+		{"PanelGlow", "Panel glow, lamps off", "Self illumination of the panels when the cabin lamps are off (1 = as in the meshes, 0 = none)", KIND_FLOAT, 0.5, 0.0, 1.0, 0.05, false, GROUP_CABIN},
 		{"HydraulicThermal", "Hydraulic heating", "Heat of the hydraulic fluid and lube oil, boiler cooling and overheating failures", KIND_BOOL, 1.0, 0.0, 1.0, 1.0, false, GROUP_SYSTEMS},
 		{"HydraulicRandomFailures", "Random boiler failures", "Random boiler failures (to train): dice thrown at random 5-25 min intervals; rate per boiler", KIND_CHOICE, 0.0, 0.0, HYD_FAILURE_RATE_COUNT - 1, 1.0, false, GROUP_SYSTEMS, HYD_FAILURE_RATE_NAMES},
 	};

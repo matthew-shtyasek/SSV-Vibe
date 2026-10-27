@@ -71,8 +71,8 @@ namespace
 		double deadzone;
 		double expo;
 		double center;
-		bool armed = true;// a stick axis is used only after it was seen at its center: an axis that rests at the end (the toe brake of a pedal) is ignored
-		bool warned = false;
+		bool checked = true;// false for a stick axis until its first reading: an axis that is not at its center then (the toe brake of a pedal) is not a stick
+		bool rejected = false;// the axis was not at its center at the start: ignored (for the whole session)
 	};
 
 	struct Device
@@ -85,6 +85,7 @@ namespace
 		std::string cfgpath;// file that the configuration was read from (or will be written to), empty if none
 		DIJOYSTATE2 learnState;// state at the moment of BeginLearn
 		double learnAxes[8];
+		bool valid = false;// the last reading of the state was good
 	};
 
 	BOOL CALLBACK EnumDevicesCallback( const DIDEVICEINSTANCE* inst, VOID* ctx );
@@ -314,7 +315,7 @@ void HandControllers::Impl::LoadConfig( int deviceindex )
 		c.center = std::max( -1.0, std::min( 1.0, c.center ) );
 
 		// the stick axes (not the brakes, the speed brake or the throttle) rest at the center
-		c.armed = !((c.type == SUB_AXIS) && (input < RMS_CAPTURE) && (input != SBTC) && (input != BRAKE_LEFT) && (input != BRAKE_RIGHT));
+		c.checked = !((c.type == SUB_AXIS) && (input < RMS_CAPTURE) && (input != SBTC) && (input != BRAKE_LEFT) && (input != BRAKE_RIGHT));
 
 		conns[input].push_back( c );
 		count++;
@@ -462,9 +463,11 @@ void HandControllers::Poll( void )
 			hr = d.dev->Acquire();
 			if (SUCCEEDED( hr )) hr = d.dev->Poll();
 		}
+		d.valid = true;
 		if (FAILED( d.dev->GetDeviceState( sizeof( DIJOYSTATE2 ), &d.state ) ))
 		{
 			// not available (for example, the window has no focus): centered controller
+			d.valid = false;
 			ZeroMemory( &d.state, sizeof( d.state ) );
 			for (int k = 0; k < 4; k++) d.state.rgdwPOV[k] = 0xFFFFFFFF;
 		}
@@ -510,20 +513,18 @@ void HandControllers::Poll( void )
 		for (auto& c : list)
 		{
 			double v = impl->Evaluate( c );
-			if ((c.type == SUB_AXIS) && !c.armed)
+			if (!c.checked && impl->devices[c.device].valid)
 			{
-				// an axis of a stick that is not at its center when the simulation starts is not a stick (or is of another controller): ignored until it is
-				if (fabs( v ) < 0.5) c.armed = true;
-				else
+				// an axis of a stick that is not at its center at its first reading is not a stick (or this is the configuration of another controller):
+				// it is ignored for the whole session (it could not be told from a stick held at the end, but a stick is not held at the start)
+				c.checked = true;
+				if (fabs( v ) >= 0.5)
 				{
-					if (!c.warned)
-					{
-						c.warned = true;
-						oapiWriteLogV( "(SSV_OV) [WARNING] Hand controllers: %s on Joystick%d (%s) is not at its center (%.2f): ignored until it is. Is the configuration of this controller?", INPUT_NAMES[i], c.device + 1, impl->devices[c.device].name.c_str(), v );
-					}
-					v = 0.0;
+					c.rejected = true;
+					oapiWriteLogV( "(SSV_OV) [WARNING] Hand controllers: %s on Joystick%d (%s) is not at its center at the start (%.2f): ignored. Is this the configuration of this controller?", INPUT_NAMES[i], c.device + 1, impl->devices[c.device].name.c_str(), v );
 				}
 			}
+			if (c.rejected || !c.checked) v = 0.0;
 			if (fabs( v ) > fabs( best )) best = v;
 			if (v > 0.7) pressed = true;
 		}

@@ -694,7 +694,7 @@ class Atlantis: public VESSEL4
 		 ****************************************************************/
 		UINT mesh_orbiter;                         // index for orbiter mesh
 		UINT mesh_vcexternal;                         // index for cockpit mesh for external view
-		double cabinBrightness;
+		double cabinBrightness, cabinBrightnessMiddeck;
 		bool cabinBrightnessDirty;
 		std::vector<std::array<float, 6>> cabinBaseVC, cabinBaseMiddeck;// ambient and emissive (rgb) of the materials in the meshes
 		UINT mesh_vc;                              // index for virtual cockpit mesh
@@ -846,7 +846,7 @@ class Atlantis: public VESSEL4
 		 */
 		void SetPanelLighting( int channel, double scale );
 		/** Brightness of the cabin shell and the middeck (ambient and self illumination of the materials): 1 = as in the meshes. */
-		void SetCabinBrightness( double scale );
+		void SetCabinBrightness( double scale, double middeckScale );
 		/** Range of rotation of the head in the virtual cockpit (the ranges of the stations are widened). */
 		void SetVCRotationRange( double left, double right, double up, double down );
 
