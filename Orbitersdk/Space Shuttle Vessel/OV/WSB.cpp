@@ -218,7 +218,7 @@ void WSB::OnPreStep(double simt, double simdt, double mjd)
 	HydTemp.SetLine( static_cast<float>(hydmodel::TemperatureToVolts( th.hyd )) );
 	CwHydTemp.SetLine( static_cast<float>(hydmodel::HydTemperatureToCwVolts( th.hyd )) );
 	WaterQty.SetLine( static_cast<float>(5.0 * hydmodel::Clamp01( th.water / hydmodel::WATER_TANK )) );
-	HydQty.SetLine( static_cast<float>(5.0 * hydmodel::Clamp01( th.hydQty )) );
+	HydQty.SetLine( static_cast<float>(5.0 * hydmodel::Clamp01( hydmodel::Quantity( th ) )) );
 	if (hydmodel::HydraulicsOk( th )) HydOk.SetLine();
 	else HydOk.ResetLine();
 	if (th.seized) LubeSeize.SetLine();

@@ -1447,7 +1447,7 @@ static void test_hyd_model( void )
 		CHECK_NEAR( s.hyd, AMBIENT, 1e-12 );
 		CHECK_NEAR( s.oil, AMBIENT, 1e-12 );
 		CHECK_NEAR( s.water, WATER_TANK, 1e-12 );
-		CHECK_NEAR( s.hydQty, 1.0, 1e-12 );
+		CHECK_NEAR( s.hydQty, QTY_INITIAL, 1e-12 );
 		CHECK( !s.seized );
 		CHECK( HydraulicsOk( s ) );
 		CHECK( !HydCaution( s ) );
@@ -1534,7 +1534,7 @@ static void test_hyd_model( void )
 		CHECK( s.water < WATER_TANK );
 		CHECK( !s.seized );
 		CHECK_NEAR( s.hydDamage, 0.0, 1e-12 );
-		CHECK_NEAR( s.hydQty, 1.0, 1e-12 );
+		CHECK_NEAR( s.hydQty, QTY_INITIAL, 1e-12 );
 		// the spray works with the lube oil (the lube oil needs more) and the water used is in the order of the manual
 		const double used = WATER_TANK - s.water;
 		CHECK( (used > 20.0) && (used < 140.0) );
@@ -1679,7 +1679,7 @@ static void test_hyd_model( void )
 		s.hydLeak = 1.0 / 900.0;
 		const Input in = hyd_input( 0.0, 0.0, 0, true );
 		const double t = hyd_run( s, in, 3600.0, []( const State& st ) {return !HydraulicsOk( st );} );
-		CHECK( (t > 800.0) && (t < 900.0) );// 95% of the reservoir in a little less than 15 minutes
+		CHECK( std::fabs( t - ((QTY_INITIAL - HYD_QTY_MIN_OK) * 900.0) ) < 5.0 );// what is above the minimum of the reservoir, in 15 minutes for the whole reservoir
 	}
 
 	// time acceleration: a long step gives (almost) what the short steps give
@@ -2278,6 +2278,50 @@ static void test_rcs_reduction( void )
 	}
 }
 
+static void test_hyd_quantity( void )
+{
+	using namespace hydmodel;
+
+	// the meter HYDRAULIC QUANTITY (COM 4.1): green from 40 to 80%, red above 95% and below 40%
+	State s = InitialState();
+	CHECK_NEAR( Quantity( s ), QTY_INITIAL, 1e-12 );// at the ambient temperature
+	CHECK( (Quantity( s ) > 0.40) && (Quantity( s ) < 0.80) );
+
+	// the fluid expands with the heat: dV = V * beta * dT, the reservoir takes it (the whole system holds about three reservoirs of fluid)
+	CHECK_NEAR( QTY_PER_F, FLUID_EXPANSION * SYSTEM_VOLUME_RATIO, 1e-15 );
+	s.hyd = AMBIENT + 100.0;
+	CHECK_NEAR( Quantity( s ), QTY_INITIAL + (100.0 * FLUID_EXPANSION * SYSTEM_VOLUME_RATIO), 1e-12 );
+	CHECK( Quantity( s ) > QTY_INITIAL );
+	// the normal range of the temperature of the fluid (up to the spray of the boiler at 208 F) stays in the green range of the meter
+	s.hyd = HYD_SETPOINT;
+	CHECK( Quantity( s ) < 0.80 );
+	s.hyd = 0.0;// cold: the fluid contracts
+	CHECK( Quantity( s ) < QTY_INITIAL );
+	CHECK( Quantity( s ) > 0.40 );
+	// the quantity is never negative
+	s.hydQty = 0.0;
+	s.hyd = -200.0;
+	CHECK_NEAR( Quantity( s ), 0.0, 1e-12 );
+
+	// a leak takes from the volume (not from the expansion): the system with the fluid warm and leaking
+	State w = InitialState();
+	w.hyd = 200.0;
+	w.hydLeak = 1.0 / 900.0;
+	const double before = Quantity( w );
+	Input in;
+	in.speed = 0.0;
+	in.env = AMBIENT;
+	for (int t = 0; t < 60; t++) Step( w, in, 1.0 );
+	CHECK( w.hydQty < QTY_INITIAL );
+	CHECK( Quantity( w ) < before );
+	// the pump can hold the pressure while there is fluid, even when it is cold
+	State c = InitialState();
+	c.hyd = -20.0;
+	CHECK( HydraulicsOk( c ) );
+	c.hydQty = 0.01;
+	CHECK( !HydraulicsOk( c ) );
+}
+
 static void test_emergency_lighting( void )
 {
 	using namespace lightmath;
@@ -2451,6 +2495,7 @@ int main( int argc, char** argv )
 	test_hyd_environment();
 	test_arm_links();
 	test_emergency_lighting();
+	test_hyd_quantity();
 	test_rcs_reduction();
 	test_adi();
 	test_controller_examples( (argc > 1) ? argv[1] : NULL );

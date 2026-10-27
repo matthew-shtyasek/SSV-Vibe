@@ -80,6 +80,13 @@ namespace hydmodel
 	inline constexpr double HYD_LEAK_MAX = 1.0 / 600.0;// [1/s] of the reservoir with the seals damaged (the reservoir is empty in 10 minutes)
 	inline constexpr double HYD_QTY_MIN_OK = 0.05;// the pump can not hold the pressure with less of the reservoir
 
+	// quantity of the reservoir: the meter HYDRAULIC QUANTITY shows the percent of the reservoir (8 gallons: green from 40 to 80%, red above 95% and below 40%, COM 4.1);
+	// the fluid expands with the temperature (the reservoir takes the expansion of the whole system), so the quantity is the volume at the reference temperature plus the expansion
+	inline constexpr double QTY_INITIAL = 0.60;// at the ambient temperature: the middle of the green range
+	inline constexpr double FLUID_EXPANSION = 0.0004;// [1/F] volumetric expansion of the hydraulic fluid (MIL-H-83282, about 7e-4 per C)
+	inline constexpr double SYSTEM_VOLUME_RATIO = 3.0;// fluid of the whole system / the reservoir (about 24 gallons / 8 gallons; approximate)
+	inline constexpr double QTY_PER_F = FLUID_EXPANSION * SYSTEM_VOLUME_RATIO;// change of the quantity (share of the reservoir) per degree F
+
 	// environment, boiler heaters and circulation pumps. Crew Operations Manual 2.1 (HYD CIRC PUMP): in GPC the pump starts when a control
 	// temperature drops below 0 F (or -10 F, depending on the location) and stops when all of them are above 20 F, or after 15 minutes for
 	// system 1 and 10 minutes for systems 2 and 3; the pump circulates the fluid through a Freon/hydraulic fluid heat exchanger; it is
@@ -110,7 +117,7 @@ namespace hydmodel
 		bool through;// the hydraulic fluid goes through the boiler (not around it)
 		double hydDamage;// damage of the seals [0, 1]
 		double oilOver;// time of the lube oil above the limit [s]
-		double hydQty;// quantity of the reservoir [0, 1]
+		double hydQty;// volume of the fluid at the ambient temperature [share of the reservoir]; the leaks take from it (the quantity shown is Quantity())
 		bool seized;// the bearings of the APU seized
 		// failures
 		bool ctrlFail[2];// controller A, B
@@ -153,7 +160,7 @@ namespace hydmodel
 		s.through = false;
 		s.hydDamage = 0.0;
 		s.oilOver = 0.0;
-		s.hydQty = 1.0;
+		s.hydQty = QTY_INITIAL;
 		s.seized = false;
 		s.ctrlFail[0] = s.ctrlFail[1] = false;
 		s.iceHyd = s.iceOil = false;
@@ -210,10 +217,17 @@ namespace hydmodel
 		return in.ambient + (HYD_RISE_MAX * (0.25 + (0.75 * load)) * (in.pumpNorm ? 1.0 : LOW_PRESSURE_HEAT) * Clamp01( in.speed ));
 	}
 
+	/** Quantity of the reservoir [share of the reservoir]: the volume at the ambient temperature and the expansion (or contraction) of the fluid with the temperature. */
+	inline double Quantity( const State& s )
+	{
+		const double q = s.hydQty + (QTY_PER_F * (s.hyd - AMBIENT));
+		return (q < 0.0) ? 0.0 : q;
+	}
+
 	/** True if the hydraulic system can hold the pressure (the reservoir has fluid). */
 	inline bool HydraulicsOk( const State& s )
 	{
-		return s.hydQty > HYD_QTY_MIN_OK;
+		return s.hydQty > HYD_QTY_MIN_OK;// the fluid that is left (the expansion is the same fluid)
 	}
 
 	/**

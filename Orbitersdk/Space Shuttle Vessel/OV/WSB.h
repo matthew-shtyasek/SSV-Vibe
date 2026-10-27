@@ -104,7 +104,7 @@ public:
 	double GetHydraulicFluidTemperature( void ) const {return th.hyd;}// [F]
 	double GetLubeOilTemperature( void ) const {return th.oil;}// [F]
 	double GetWater( void ) const {return th.water;}// [lb]
-	double GetHydraulicQuantity( void ) const {return th.hydQty;}// [0, 1]
+	double GetHydraulicQuantity( void ) const {return hydmodel::Quantity( th );}// share of the reservoir (the volume at the ambient temperature and the expansion)
 	bool BearingsSeized( void ) const {return th.seized;}
 	bool CirculationPumpRunning( void ) const {return th.circ;}
 	bool VentFrozen( void ) const {return th.ventIce;}
