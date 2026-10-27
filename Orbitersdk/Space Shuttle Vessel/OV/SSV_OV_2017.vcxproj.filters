@@ -808,6 +808,9 @@
     <ClCompile Include="MPC3.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="dps\Software\GNC\UniversalPointing.cpp">
+      <Filter>Software\GNC</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="vc\7SegDisp.h">
@@ -1832,6 +1835,12 @@
     </ClInclude>
     <ClInclude Include="vc\PanelA7A3_ISS.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="dps\Software\GNC\UniversalPointing.h">
+      <Filter>Software\GNC</Filter>
+    </ClInclude>
+    <ClInclude Include="dps\Software\GNC\StarCatalog.h">
+      <Filter>Software\GNC</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

@@ -2106,6 +2106,8 @@ C	RIB HI/LO SATURATION STATUS (V94J4137C) (0-up arrow, 1-down arrow, 2-blank)
 	DECLARE RIB_HI_LO_SATURATION_STATUS INTEGER SINGLE;
 C	ROB HI/LO SATURATION STATUS (V94J4138C) (0-up arrow, 1-down arrow, 2-blank)
 	DECLARE ROB_HI_LO_SATURATION_STATUS INTEGER SINGLE;
+C	Time to Universal Pointing maneuver is less than 30 seconds and DAP is not in Auto (V94X4692X)
+	DECLARE SEL_AUTO_CREW_ALERT INTEGER SINGLE;
 C
 C	General coordinate transformation parameters
 C	Unit vector along Earth axis

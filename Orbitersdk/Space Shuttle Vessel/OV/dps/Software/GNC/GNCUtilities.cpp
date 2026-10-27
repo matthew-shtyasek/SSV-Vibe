@@ -128,6 +128,36 @@ namespace dps
 		QV = _V(q[1], q[2], q[3])*T;
 	}
 
+	MATRIX3 QUAT_TO_MAT(double Q_S, VECTOR3 Q_V)
+	{
+		MATRIX3 A;
+		double P2, P3, P4, P5, P6, TEMP;
+
+		P2 = Q_V.x + Q_V.x;
+		P3 = Q_V.y + Q_V.y;
+		P4 = Q_V.z + Q_V.z;
+		P5 = P2 * Q_V.x;
+		P6 = P4 * Q_V.z;
+		TEMP = 1.0 - P3 * Q_V.y;
+		A.m11 = TEMP - P6;
+		A.m22 = 1.0 - P5 - P6;
+		A.m33 = TEMP - P5;
+		P5 = P2 * Q_V.y;
+		P6 = P4 * Q_S;
+		A.m12 = P5 - P6;
+		A.m21 = P5 + P6;
+		P5 = P2 * Q_V.z;
+		P6 = P3 * Q_S;
+		A.m13 = P5 + P6;
+		A.m31 = P5 - P6;
+		P5 = P3 * Q_V.z;
+		P6 = P2 * Q_S;
+		A.m23 = P5 - P6;
+		A.m32 = P5 + P6;
+
+		return A;
+	}
+
 	void RV_TO_QLVLH(VECTOR3 XR, VECTOR3 XV, double &QS, VECTOR3 &QV)
 	{
 		MATRIX3 XM;
@@ -170,6 +200,37 @@ namespace dps
 			XPITCHSINE = -2.0*XYAWSEC*(XQV.x*XQV.z + XQS * XQV.y);
 			XPITCHCOS = XYAWSEC * (1.0 - 2.0*(pow(XQV.y, 2) + pow(XQV.z, 2)));
 		}
+	}
+
+	void QUAT_NORM(double& QS, VECTOR3& QV)
+	{
+		double COEF;
+
+		COEF = QS * QS + dotp(QV, QV);
+
+		if (abs(1.0 - COEF) < pow(2, -11))
+		{
+			COEF = 2.0 * sign(QS) / (1.0 + COEF);
+		}
+		else
+		{
+			COEF = sign(QS) / sqrt(COEF);
+		}
+		QS = QS * COEF;
+		QV = QV * COEF;
+	}
+
+	void QUAT_INTEG(VECTOR3 WBA_B, double DTCON, double& Q_B_A_S, VECTOR3& Q_B_A_V)
+	{
+		// INPUTS:
+		// WBA_B = Rotational rate, frame B wrt frame A, coordinated in frame B (1/s or deg/s)
+		// DT_CON = Multiplicative factor for rate input vector (s or s/deg)
+		// Q_B_A = Past value of output quaternion
+		// OUTPUTS:
+		// Q_B_A = Quaternion, B frame wrt A frame
+
+		QUAT_MULT(1.0, WBA_B * DTCON, Q_B_A_S, Q_B_A_V, Q_B_A_S, Q_B_A_V);
+		QUAT_NORM(Q_B_A_S, Q_B_A_V);
 	}
 
 	GNCUtilities::GNCUtilities(SimpleGPCSystem * _gpc) : SimpleGPCSoftware(_gpc, "GNCUtilities")

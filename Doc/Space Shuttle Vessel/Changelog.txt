@@ -1,4 +1,5 @@
 *** Changes from SSV v1.16 (development version 1.17-dev) ***
+Universal Pointing: the full software of indy91 (https://github.com/indy91/SSV, branch experimental) in place of the simplified UNIV PTG of the OrbitDAP: all target types (orbital object, Earth center, Earth point, Sun, celestial, navigation stars 11-110), star catalog, maneuver, track and rotation options; the altitude of the Earth point (item 13) is in nautical miles; DAP A01-A15 and B01-B15 configurations (google0101-ryan)
 RMS: modes, panel A8U and displays according to the PDRS documents (MODE with ENTER, PL and ORB LD with POR, TEST, RATE HOLD, BRAKES, SAFING, AUTO SEQ, soft stops, backup control, RMS POWER)
 added SPEC 94 items, DISP 95 PDRS OVERRIDE, DISP 96 PDRS FAULTS and DISP 169 PDRS STATUS
 RMS: operator commanded (OPR CMD) and automatic (AUTO 1-4) modes, with sequences read from Config\SSV\RMS\AutoSequences.txt

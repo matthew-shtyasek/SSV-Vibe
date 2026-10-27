@@ -59,6 +59,7 @@ namespace dps
 			bool bTGT_ITER;
 			bool bL_OMS_GMBL;
 			bool bR_OMS_GMBL;
+			bool bSEL_AUTO;
 
 			void ET_SEP_INH( void );
 			void MPS_CMD_X( void );
@@ -75,6 +76,7 @@ namespace dps
 			void TGT_DELTA_T( void );
 			void TGT_EL_ANG( void );
 			void TGT_ITER( void );
+			void SEL_AUTO( void );
 			void L_OMS_GMBL( void );
 			void R_OMS_GMBL( void );
 

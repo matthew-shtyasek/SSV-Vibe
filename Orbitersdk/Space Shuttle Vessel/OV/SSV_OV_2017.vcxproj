@@ -178,6 +178,7 @@
     <ClCompile Include="dps\Software\GNC\GAX.cpp" />
     <ClCompile Include="dps\Software\GNC\GNCUtilities.cpp" />
     <ClCompile Include="dps\Software\GNC\OMS_RM.cpp" />
+    <ClCompile Include="dps\Software\GNC\UniversalPointing.cpp" />
     <ClCompile Include="dps\Software\SM\SSO_SP_DATA_OUT.cpp" />
     <ClCompile Include="dps\Software\SM\PDRS_SOP.cpp" />
     <ClCompile Include="dps\Software\SM\SystemsServicesAnnunciation.cpp" />
@@ -455,6 +456,8 @@
     <ClInclude Include="dps\Software\GNC\GAX.h" />
     <ClInclude Include="dps\Software\GNC\GNCUtilities.h" />
     <ClInclude Include="dps\Software\GNC\OMS_RM.h" />
+    <ClInclude Include="dps\Software\GNC\StarCatalog.h" />
+    <ClInclude Include="dps\Software\GNC\UniversalPointing.h" />
     <ClInclude Include="dps\Software\SM\SSO_SP_DATA_OUT.h" />
     <ClInclude Include="dps\Software\SM\PDRS_SOP.h" />
     <ClInclude Include="PDRSLogic.h" />

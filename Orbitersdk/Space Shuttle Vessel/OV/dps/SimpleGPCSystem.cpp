@@ -54,6 +54,7 @@ Date         Developer
 2022/12/23   GLS
 2023/01/01   GLS
 2023/01/07   GLS
+2026/04/05   indy91
 ********************************************/
 #include <cassert>
 #include "SimpleGPCSystem.h"
@@ -62,6 +63,7 @@ Date         Developer
 #include "Software/GNC/SimpleFCOS_IO_GNC.h"
 #include "Software/SM/SimpleFCOS_IO_SM.h"
 #include "Software/GNC/AscentDAP.h"
+#include "Software/GNC/UniversalPointing.h"
 #include "Software/GNC/OrbitDAP.h"
 #include "Software/GNC/OMSBurnSoftware.h"
 #include "Software/GNC/StateVectorSoftware.h"
@@ -169,6 +171,7 @@ GNC(_GNC)
 		vSoftware.push_back( new SSME_SOP( this ) );
 		vSoftware.push_back( new RSLS( this ) );
 		vSoftware.push_back( new AscentDAP( this ) );
+		vSoftware.push_back( new UniversalPointing( this ) );
 		vSoftware.push_back( new OrbitDAP( this ) );
 		vSoftware.push_back( new StateVectorSoftware( this ) );
 		vSoftware.push_back( new OMSBurnSoftware( this ) );

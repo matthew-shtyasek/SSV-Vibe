@@ -50,6 +50,7 @@ Date         Developer
 2022/10/27   GLS
 2022/11/15   GLS
 2022/12/23   GLS
+2026/04/05   indy91
 ********************************************/
 /****************************************************************************
   This file is part of Space Shuttle Ultra
@@ -95,6 +96,7 @@ namespace dps
 	class OrbitTgtSoftware;
 	class StateVectorSoftware;
 	class OrbitDAP;
+	class UniversalPointing;
 	class MM801;
 
 	class GNCDisplays:public GeneralDisplays
@@ -106,6 +108,7 @@ namespace dps
 			OrbitTgtSoftware* pOrbitTgtSoftware;
 			StateVectorSoftware* pStateVectorSoftware;
 			OrbitDAP* pOrbitDAP;
+			UniversalPointing* pUniversalPointing;
 			MM801* pMM801;
 
 			DiscInPort dipBFCCRTDisplay;

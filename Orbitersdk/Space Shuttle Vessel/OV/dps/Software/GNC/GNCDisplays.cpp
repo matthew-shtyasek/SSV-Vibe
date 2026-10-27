@@ -36,6 +36,7 @@ Date         Developer
 2022/12/01   indy91
 2022/12/23   GLS
 2023/01/02   GLS
+2026/04/05   indy91
 ********************************************/
 #include "GNCDisplays.h"
 #include "../../../Atlantis.h"
@@ -47,6 +48,7 @@ Date         Developer
 #include "StateVectorSoftware.h"
 #include "OMSBurnSoftware.h"
 #include "OrbitDAP.h"
+#include "UniversalPointing.h"
 #include "MM801.h"
 #include "../../../APU.h"
 #include <MathSSV.h>
@@ -145,6 +147,8 @@ namespace dps
 		assert((pStateVectorSoftware != NULL) && "GNCDisplays::Realize.pStateVectorSoftware");
 		pOrbitDAP = static_cast<OrbitDAP*>(FindSoftware( "OrbitDAP" ));
 		assert( (pOrbitDAP != NULL) && "GNCDisplays::Realize.pOrbitDAP" );
+		pUniversalPointing = static_cast<UniversalPointing*>(FindSoftware("UniversalPointing"));
+		assert((pUniversalPointing != NULL) && "GNCDisplays::Realize.pUniversalPointing");
 		pMM801 = static_cast<MM801*>(FindSoftware( "MM801" ));
 		assert( (pMM801 != NULL) && "GNCDisplays::Realize.pMM801" );
 		
@@ -351,7 +355,7 @@ namespace dps
 		switch (spec)
 		{
 			case 20:
-				return pOrbitDAP->ItemInput_DAPCONFIG( item, Data );
+				return pOrbitDAP->ItemInput( item, Data );
 			case 33:
 				return pStateVectorSoftware->ItemInput(item, Data);
 			case 34:
@@ -381,7 +385,7 @@ namespace dps
 					case 303:
 						return pOMSBurnSoftware->ItemInput( item, Data );
 					case 201:
-						return pOrbitDAP->ItemInput_UNIVPTG( item, Data );
+						return pUniversalPointing->ItemInput( item, Data );
 					case 202:
 						return pOMSBurnSoftware->ItemInput( item, Data );
 					case 304:
@@ -709,7 +713,7 @@ namespace dps
 							OnPaint_DISP19_PASS( pMDU );// GNC SYS SUMM 2
 							return true;
 						case 20:
-							pOrbitDAP->PaintDAPCONFIGDisplay( pMDU );
+							pOrbitDAP->OnPaint( pMDU );
 							return true;
 						case 25:
 							OnPaint_SPEC25_PASS( pMDU );// RM ORBIT
@@ -727,7 +731,7 @@ namespace dps
 							switch (GetMajorMode())
 							{
 								case 201:
-									pOrbitDAP->PaintUNIVPTGDisplay( pMDU );// UNIV PTG
+									pUniversalPointing->OnPaint( pMDU );// UNIV PTG
 									return true;
 								case 202:
 									pOMSBurnSoftware->OnPaint( pMDU );// XXXXX MNVR YYYYY

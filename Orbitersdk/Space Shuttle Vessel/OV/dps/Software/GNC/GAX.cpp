@@ -23,6 +23,7 @@ const char* CRTMSG_TGT_EL_ANG =		"    TGT EL ANG     ";
 const char* CRTMSG_TGT_ITER =		"    TGT ITER       ";
 const char* CRTMSG_L_OMS_GMBL =		"    L OMS      GMBL";
 const char* CRTMSG_R_OMS_GMBL =		"    R OMS      GMBL";
+const char* CRTMSG_SEL_AUTO =		"    SEL AUTO       ";
 
 const char* CRTMSG_MINOR_MPS[3] = {	"   C",
 					"   L",
@@ -38,7 +39,7 @@ namespace dps
 	GAX::GAX( SimpleGPCSystem *_gpc ):SimpleGPCSoftware( _gpc, "GAX" ),
 		step(EXEC_DT), bET_SEP_INH(false), bMPS_CMD{false, false, false}, bMPS_DATA{false, false, false}, bMPS_ELEC{false, false, false}, bMPS_HYD{false, false, false},
 		bOTT_ST_IN(false), bROLL_REF(false), bSSME_FAIL{false,false,false}, bSW_TO_MEP(false), bDAP_DNMODE_RHC(false), bFCS_SAT_POS(false), bSPD_BRK(false), bTGT_DELTA_T(false),
-		bTGT_EL_ANG(false), bTGT_ITER(false), bL_OMS_GMBL(false), bR_OMS_GMBL(false)
+		bTGT_EL_ANG(false), bTGT_ITER(false), bL_OMS_GMBL(false), bR_OMS_GMBL(false), bSEL_AUTO(false)
 	{
 		return;
 	}
@@ -499,6 +500,26 @@ namespace dps
 		return;
 	}
 
+	void GAX::SEL_AUTO()
+	{
+		if (ReadCOMPOOL_IS(SCP_SEL_AUTO_CREW_ALERT) == 1)
+		{
+			if (!bSEL_AUTO)
+			{
+				bSEL_AUTO = true;
+				unsigned int j = ReadCOMPOOL_IS(SCP_FAULT_IN_IDX);
+				if (j < 5)
+				{
+					WriteCOMPOOL_AC(SCP_FAULT_IN_MSG, j, CRTMSG_SEL_AUTO, 5, 19);
+					WriteCOMPOOL_AIS(SCP_FAULT_IN_CWCLASS, j, 3, 5);
+					WriteCOMPOOL_IS(SCP_FAULT_IN_IDX, ++j);
+				}
+			}
+		}
+		else bSEL_AUTO = false;
+		return;
+	}
+
 	void GAX::OnPostStep( double simt, double simdt, double mjd )
 	{
 		step += simdt;
@@ -547,6 +568,7 @@ namespace dps
 				TGT_DELTA_T();
 				TGT_EL_ANG();
 				TGT_ITER();
+				SEL_AUTO();
 				break;
 			case 202:
 				TGT_DELTA_T();
@@ -609,6 +631,7 @@ namespace dps
 				SPD_BRK();
 				break;
 			case 801:
+				SEL_AUTO();
 				break;
 			case 901:
 				break;

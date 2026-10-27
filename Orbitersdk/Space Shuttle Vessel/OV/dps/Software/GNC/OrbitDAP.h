@@ -37,6 +37,8 @@ Date         Developer
 2022/09/29   GLS
 2022/12/23   GLS
 2022/12/28   GLS
+2026/04/05   indy91
+2026/10/14   google0101-ryan
 ********************************************/
 #ifndef _dps_ORBITDAP_H_
 #define _dps_ORBITDAP_H_
@@ -55,11 +57,10 @@ const unsigned int convert[69] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 
 struct AttManeuver
 {
-	typedef enum {MNVR, TRK, ROT} TYPE; // at the moment, ROT is not supported
+	typedef enum {MNVR, LVLH_TRK, UP} TYPE; // Inertial or preburn maneuver, LVLH, universal pointing
 	bool IsValid;
 	MATRIX3 tgtMatrix; // target attitude (rotation matrix) in right-handed frame (LVLH or M50, as appropriate)
-	TYPE Type; // at the moment, ROT is not supported
-	bool track; // MNVR maneuver that points a body vector at a target (UNIV PTG TRK for TGT ID 3, 4 and 5): the target attitude is updated every step
+	TYPE Type;
 };
 
 struct DAPConfig
@@ -100,6 +101,7 @@ struct DAPConfig
 class RHC_SOP;
 class THC_SOP;
 class StateVectorSoftware;
+class UniversalPointing;
 
 /**
  * Controls shuttle's attitude during orbital flight.
@@ -139,10 +141,10 @@ private:
 	ROT_MODE RotMode[3];
 	TRANS_MODE TransMode[3]; // 0=X, 1=Y, 2=Z
 
-	bool ERRTOT;// attitude error output: true = "ERR TOT", false = "ERR DAP"
-
 	int editDAP; // -1=None, 0=A, 1=B
-	DAPConfig DAPConfiguration[3]; //0=A, 1=B, 2=Edit
+	int editDAPProfile;
+	int activeAProfile, activeBProfile; // 0-14, specifies profile within either A or B
+	DAPConfig DAPConfiguration[3][15]; //0=A, 1=B, 2=Edit
 
 	// values change depending on DAP mode selected
 	// initialized in Realize() function
@@ -161,8 +163,7 @@ private:
 	enum {MNVR_OFF, MNVR_IN_PROGRESS, MNVR_COMPLETE} ManeuverStatus;
 	// ActiveManeuver is whatever attitude is currently being held (in AUTO, INRTL or LVLH)
 	// Cur/FutManeuver are maneuvers loaded using UNIV PTG; in AUTO mode, Active and Cur maneuvers are always (check this) the same
-	AttManeuver ActiveManeuver, CurManeuver, FutManeuver;
-	double FutMnvrStartTime; // MET when future loaded maneuver starts
+	AttManeuver ActiveManeuver, CurManeuver;
 	double mnvrCompletionMET; // MET when current maneuver will be complete
 	double lastUpdateTime; // time when null rates and final inertial attitude was last estimated for TRK maneuver
 
@@ -177,18 +178,9 @@ private:
 	bool bFirstStep;
 	double lastStepdt;
 
-	// values used in UNIV PTG to store attitude maneuvers
-	int START_TIME[4];
-	VECTOR3 MNVR_OPTION;
-	int TGT_ID, BODY_VECT;
-	double P, Y, OM;
-	double RA;
-	double DEC;
-	double LAT;
-	double LON;
-	double _ALT;
+	VECTOR3 ATT_ERR; // attitudes in degrees in M50 frame
 
-	VECTOR3 CUR_ATT, REQD_ATT, ATT_ERR; // attitudes in degrees in M50 frame
+	VECTOR3 RATE_EST; // Body angular rate estimate [deg/s]
 
 	//PCT
 	bool PCTArmed;
@@ -203,11 +195,8 @@ private:
 	ContactSwitch cdrbodyflap;
 	ContactSwitch sparepbi;
 
-	bool RA_DEC_flash;
-	bool LAT_LON_ALT_flash;
-	bool P_Y_flash;
-
 	StateVectorSoftware* pStateVector;
+	UniversalPointing* pUniversalPointing;
 	RHC_SOP *pRHC_SOP;
 	THC_SOP *pTHC_SOP;
 public:
@@ -219,6 +208,10 @@ public:
 	void UseRCS();
 
 	DAP_CONTROL_MODE GetDAPMode() const;
+	double GetDAPRate() const;
+	double GetDAPDeadband() const;
+	VECTOR3 Get_RATE_EST() const;
+	bool Get_Preburn_Mnvr_In_Progress() const;
 
 	/**
 	 * Starts maneuver to INRTL attitude.
@@ -227,6 +220,12 @@ public:
 	 * \param degINRTLAtt Attitude (in degrees) in M50 frame in standard PRY order
 	 */
 	void ManeuverToINRTLAttitude(const VECTOR3& degINRTLAtt);
+
+	// Start Universal Pointing maneuver
+	void ManeuverToUPAttitude();
+
+	// Stop Universal Pointing maneuver
+	void CancelManeuver();
 
 	void Realize() override;
 
@@ -240,10 +239,8 @@ public:
 	VECTOR3 GetAttitudeErrors( void ) const;
 	bool GetTimeToAttitude( double& time ) const;
 
-	bool ItemInput_UNIVPTG( int item, const char* Data );
-	bool ItemInput_DAPCONFIG( int item, const char* Data );
-	void PaintUNIVPTGDisplay( vc::MDU* pMDU ) const;
-	void PaintDAPCONFIGDisplay( vc::MDU* pMDU ) const;
+	bool ItemInput( int item, const char* Data );
+	void OnPaint( vc::MDU* pMDU ) const;
 
 private:
 	/**
@@ -252,13 +249,7 @@ private:
 	 */
 	void GetAttitudeData();
 
-	void LoadCurLVLHManeuver(const MATRIX3& tgtMatrixLVLH);
-	void LoadFutLVLHManeuver(const MATRIX3& tgtMatrixLVLH);
 	void LoadCurINRTLManeuver(const MATRIX3& tgtMatrixM50);
-	void LoadFutINRTLManeuver(const MATRIX3& tgtMatrixM50);
-	void LoadCurTrackManeuver(const MATRIX3& tgtMatrixM50);
-	void LoadFutTrackManeuver(const MATRIX3& tgtMatrixM50);
-	bool GetTrackAttitude( MATRIX3& tgtMatrixM50 ) const;// attitude that points the body vector of UNIV PTG at the target (TGT ID 3, 4 or 5)
 	void StartCurManeuver();
 	void StartManeuver(const MATRIX3& tgtAtt, AttManeuver::TYPE type);
 
@@ -283,8 +274,6 @@ private:
 	 * \param degNullRatesLocal Rotation rate (in Orbiter body frame) required to maintain constant attitude.
 	 */
 	void CalcMultiAxisRates(const VECTOR3& degNullRatesLocal);
-
-	void UpdateNullRates();
 
 	void SetRates(const VECTOR3 &degRates, double simdt);
 
@@ -321,6 +310,8 @@ private:
 	 * Returns rotation matrix representing current attitude in LVLH frame
 	 */
 	MATRIX3 GetCurrentLVLHAttMatrix() const;
+
+	int GetCurrentProfile(int item);
 };
 
 }

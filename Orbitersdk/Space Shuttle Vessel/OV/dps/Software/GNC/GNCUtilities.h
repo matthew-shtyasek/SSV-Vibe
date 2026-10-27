@@ -66,6 +66,8 @@ namespace dps
 	VECTOR3 GEODETIC_TO_EF(double LAT_GEOD, double LON, double ALT);
 	//Conversion of a matrix to a Quaternion
 	void MAT_TO_QUAT(MATRIX3 M, double &QS, VECTOR3 &QV);
+	//Conversion of a quaternion to a matrix
+	MATRIX3 QUAT_TO_MAT(double Q_S, VECTOR3 Q_V);
 	//Return quaternion from local orbital to M50 frame given position and velocity vectors
 	void RV_TO_QLVLH(VECTOR3 XR, VECTOR3 XV, double &QS, VECTOR3 &QV);
 	//Perform coordinate transformation using quaternion
@@ -74,6 +76,10 @@ namespace dps
 	void QUAT_MULT(double Q1S, VECTOR3 Q1V, double Q2S, VECTOR3 Q2V, double &Q3S, VECTOR3 &Q3V);
 	//Extract ADI angles from quaternion
 	void QUAT_TO_ADI_ANG(double XQS, VECTOR3 XQV, double &XPITCHSINE, double &XPITCHCOS, double &XYAWSINE, double &XYAWCOS, double &XROLLSINE, double &XROLLCOS, bool &XFLAG);
+	//Normalize quaternion
+	void QUAT_NORM(double& QS, VECTOR3& QV);
+	//Integrate quaternion
+	void QUAT_INTEG(VECTOR3 WBA_B, double DTCON, double& Q_B_A_S, VECTOR3& Q_B_A_V);
 
 	class GNCUtilities : public SimpleGPCSoftware
 	{
