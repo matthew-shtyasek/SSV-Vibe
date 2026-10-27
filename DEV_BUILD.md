@@ -2,9 +2,9 @@
 
 This is a **development** version (branch `dev/1.17`), based on SSV v1.16 (Orbiter 2024). It is made for testing, not a release. Nothing here was tested in a long run of the simulator: please report what you find (see the end of this file).
 
-## Build 1.17-dev.3 with the Hubble Space Telescope and STS-31
+## Build 1.17-dev.3
 
-This zip is the full SSV (as dev.2) **plus** the Hubble Space Telescope (vessel `SSV_HST`, based on the add-on "HST(EX) for Orbiter2016" by Donamy, Felix24 and BrianJ; its files and its readme are included) and the historic mission **STS-31** (Discovery): `Missions\SSV\STS-31.json` and the scenarios of `Scenarios\Space Shuttle Vessel\Historic missions\STS-31` (launch T-9 minutes, in orbit, HST on the RMS, landing). A checklist in Russian is in `Doc\SSV-Vibe\STS-31_checklist_RU.pdf`. Install: extract in the Orbiter 2024 folder, overwriting existing files (keep the Mission Editor of the v1.16 release; it is not in the zip).
+Install: extract the zip in the Orbiter 2024 folder (x86), overwriting existing files (keep the Mission Editor of the v1.16 release; it is not in the zip).
 
 **Most of it is not validated in the simulator: please send `Orbiter.log` with the problems.**
 
@@ -81,7 +81,7 @@ As in the real vehicle, the computer supported modes of the arm do not run insid
 ### The mass of the arm and of its payload: four separate options
 All are in `Config\Vessels\SSV_OV.cfg` (and in the settings MFD), **off by default**, and independent:
 - `RMSPayloadMassEffect`: the rates of the arm decrease with the mass of the payload that it holds (it is about the behavior of the arm).
-- `RMSReaction`: the arm and the payload that it moves push the orbiter (force at the center of mass of the payload and of the arm, mass times the acceleration relative to the orbiter), so the orbiter turns when the DAP is in FREE (try it with a heavy payload such as the Hubble).
+- `RMSReaction`: the arm and the payload that it moves push the orbiter (force at the center of mass of the payload and of the arm, mass times the acceleration relative to the orbiter), so the orbiter turns when the DAP is in FREE (try it with a heavy payload).
 - `RMSCenterOfMass`: the center of mass of the orbiter follows the arm and the payload that it holds (the arm is 410.5 kg, in five points along it), so the RCS jets act about the real center of mass.
 - `RMSInertia`: the moments of inertia of the orbiter change with the arm and the payload (parallel axes). With the center of mass option on, the moments are those about the new center.
 These were made from the geometry of the arm and the mass of the payload; they were not tested in the simulator, and the distribution of the mass of the arm along its links is an assumption.
