@@ -15,6 +15,11 @@ How to set it up
 2. For each controller, copy one of the .cfg.example files of this folder to "<controller name>.cfg" (name exactly as in the
    list) or to "Joystick<number>.cfg" (useful if you have two controllers with the same name), and edit it.
    A controller without configuration file is ignored.
+   The number is the position in the list of the controllers that are connected: it changes when one is not connected (the first of the
+   rest becomes Joystick1). To keep a file for its controller, add a line with a part of its name: "DEVICE<tab>T16000M". The file is then
+   used only for a controller whose name contains it. The controllers page of the SSV Settings MFD writes this line.
+   An axis of a stick (RHC, THC, rudder) that is not at its center when the simulation starts is ignored until it is (the toe brakes of a pedal
+   that was taken for a stick would otherwise rotate the orbiter or move the arm); the log says so.
 3. Restart the simulation. The log of Orbiter (Orbiter.log) shows how many connections were read for each controller.
 4. If the Orbiter joystick is also selected in the Orbiter Launchpad, the inputs that are not configured here (and the keyboard) keep
    working, but the same stick would be read twice. Disable the Orbiter joystick if you use the same one here.

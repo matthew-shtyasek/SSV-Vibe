@@ -71,6 +71,8 @@ namespace
 		double deadzone;
 		double expo;
 		double center;
+		bool armed = true;// a stick axis is used only after it was seen at its center: an axis that rests at the end (the toe brake of a pedal) is ignored
+		bool warned = false;
 	};
 
 	struct Device
@@ -222,6 +224,29 @@ void HandControllers::Impl::LoadConfig( int deviceindex )
 		}
 	}
 	if (!file.is_open()) return;
+
+	// a file can name its device ("DEVICE<tab>part of the name"): it is then used only for a controller with that name. Without it, a file
+	// that is chosen by the number (Joystick1.cfg) is applied to whatever controller is the first one, for example to a pedal when the stick is not connected
+	{
+		std::string wanted;
+		std::string l0;
+		while (std::getline( file, l0 ))
+		{
+			const std::vector<std::string> c0 = ctrlmath::SplitColumns( l0 );
+			if ((c0.size() >= 2) && (Lower( c0[0] ) == "device"))
+			{
+				wanted = c0[1];
+				break;
+			}
+		}
+		file.clear();
+		file.seekg( 0 );
+		if (!wanted.empty() && (Lower( name ).find( Lower( wanted ) ) == std::string::npos))
+		{
+			oapiWriteLogV( "(SSV_OV) [INFO] Hand controllers: %s is for the controller \"%s\", not used for \"%s\"", used.c_str(), wanted.c_str(), name.c_str() );
+			return;
+		}
+	}
 	devices[deviceindex].cfgpath = used;
 
 	int count = 0;
@@ -287,6 +312,9 @@ void HandControllers::Impl::LoadConfig( int deviceindex )
 		c.deadzone = std::max( 0.0, std::min( 0.9, c.deadzone ) );
 		c.expo = std::max( 0.0, std::min( 1.0, c.expo ) );
 		c.center = std::max( -1.0, std::min( 1.0, c.center ) );
+
+		// the stick axes (not the brakes, the speed brake or the throttle) rest at the center
+		c.armed = !((c.type == SUB_AXIS) && (input < RMS_CAPTURE) && (input != SBTC) && (input != BRAKE_LEFT) && (input != BRAKE_RIGHT));
 
 		conns[input].push_back( c );
 		count++;
@@ -476,12 +504,26 @@ void HandControllers::Poll( void )
 
 	for (int i = 0; i < INPUT_COUNT; i++)
 	{
-		const std::vector<Connection>& list = impl->conns[i];
+		std::vector<Connection>& list = impl->conns[i];
 		double best = 0.0;
 		bool pressed = false;
-		for (const auto& c : list)
+		for (auto& c : list)
 		{
 			double v = impl->Evaluate( c );
+			if ((c.type == SUB_AXIS) && !c.armed)
+			{
+				// an axis of a stick that is not at its center when the simulation starts is not a stick (or is of another controller): ignored until it is
+				if (fabs( v ) < 0.5) c.armed = true;
+				else
+				{
+					if (!c.warned)
+					{
+						c.warned = true;
+						oapiWriteLogV( "(SSV_OV) [WARNING] Hand controllers: %s on Joystick%d (%s) is not at its center (%.2f): ignored until it is. Is the configuration of this controller?", INPUT_NAMES[i], c.device + 1, impl->devices[c.device].name.c_str(), v );
+					}
+					v = 0.0;
+				}
+			}
 			if (fabs( v ) > fabs( best )) best = v;
 			if (v > 0.7) pressed = true;
 		}
@@ -753,6 +795,8 @@ bool HandControllers::SaveConfigs( std::string& message )
 			continue;
 		}
 		file << "# Written by the controllers page of the SSV settings MFD for: " << d.name << "\n";
+		file << "# The file is used only for a controller whose name contains the text of the line DEVICE\n";
+		file << "DEVICE\t" << d.name << "\n";
 		file << "# INPUT\tSUBDEVID\tREVERSE\tDEADZONE\tEXPO\tCENTER\n";
 		for (const auto& l : lines) file << l << "\n";
 		d.cfgpath = path;

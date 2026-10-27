@@ -150,6 +150,7 @@ Date         Developer
 #define __ATLANTIS_H
 
 #include <Orbitersdk.h>
+#include <deque>
 #include <vector>
 #include <array>
 #include <PanelGroup.h>
@@ -547,6 +548,16 @@ class Atlantis: public VESSEL4
 		UINT ex_main[3];						   // main engine exhaust
 		std::vector<UINT> vExRCS;				   // RCS exhaust
 		std::vector<PSTREAM_HANDLE> vExStreamRCS;  // RCS exhaust stream
+		// visible level of the flames of the RCS: with time acceleration the DAP commands 1/acceleration of the level, so the flames (and the
+		// particles, that Orbiter does not draw then) would not be seen; the flames are drawn with the level times the acceleration
+		struct RCSFlame
+		{
+			THRUSTER_HANDLE th;
+			bool followsLevel;// at no time acceleration the flame follows the level of the thruster (the vernier jets); the others have no flame then
+		};
+		std::deque<double> rcsFlameLevel;// stable addresses: Orbiter reads them every frame
+		std::vector<RCSFlame> rcsFlames;
+		void UpdateRCSFlames( void );
 		PARTICLESTREAMSPEC RCS_PSSpec;
 		SURFHANDLE RCS_Exhaust_tex;
 		AIRFOILHANDLE hStackAirfoil;
@@ -744,6 +755,7 @@ class Atlantis: public VESSEL4
 		void AddVernierRCSExhaust(THRUSTER_HANDLE thX);
 		void AddRCSExhaust(THRUSTER_HANDLE thX, const VECTOR3& pos, const VECTOR3& dir);
 		void AddVRCSExhaust(THRUSTER_HANDLE thX, const VECTOR3& pos, const VECTOR3& dir);
+		void AddRCSFlame( THRUSTER_HANDLE thX, const VECTOR3& pos, const VECTOR3& dir, double length, double width, bool followsLevel );
 
 
 		//-------------------------------------------------

@@ -1325,6 +1325,8 @@ void Atlantis::clbkPreStep( double simt, double simdt, double mjd )
 
 		UpdateControllers( simdt );
 
+		UpdateRCSFlames();// the visible level of the flames of the RCS (with time acceleration)
+
 		//Stopwatch st, stSub;
 		//st.Start();
 
@@ -3065,6 +3067,8 @@ void Atlantis::CreateAttControls_RCS(VECTOR3 center)
 		DelExhaustStream(vExStreamRCS.back());
 		vExStreamRCS.pop_back();
 	}
+	rcsFlames.clear();
+	rcsFlameLevel.clear();
 
 	// set of attitude thrusters (idealised). The arrangement is such that no angular
 	// momentum is created in linear mode, and no linear momentum is created in rotational mode.
@@ -3289,9 +3293,10 @@ void Atlantis::CreateAttControls_RCS(VECTOR3 center)
 
 void Atlantis::AddRCSExhaust(THRUSTER_HANDLE thX, const VECTOR3& pos, const VECTOR3& dir)
 {
-	const double eh = 0;             // exhaust length scale
-	const double ew1 = 0.0; // exhaust width scales
-	vExRCS.push_back(AddExhaust(thX, eh, ew1, pos, dir, RCS_Exhaust_tex));
+	// the primary jets have only the particles; the flame is drawn with time acceleration, when the particles are not
+	const double eh = 1.2;             // exhaust length scale
+	const double ew1 = 0.18; // exhaust width scales
+	AddRCSFlame( thX, pos, dir, eh, ew1, false );
 	vExStreamRCS.push_back(AddExhaustStream(thX, pos, &RCS_PSSpec));
 }
 
@@ -3299,8 +3304,42 @@ void Atlantis::AddVRCSExhaust(THRUSTER_HANDLE thX, const VECTOR3& pos, const VEC
 {
 	const double eh = 0.5754;             // exhaust length scale
 	const double ew1 = 0.1; // exhaust width scales
-	vExRCS.push_back(AddExhaust(thX, eh, ew1, pos, dir, RCS_Exhaust_tex));
+	AddRCSFlame( thX, pos, dir, eh, ew1, true );
 	vExStreamRCS.push_back(AddExhaustStream(thX, pos, &RCS_PSSpec));
+}
+
+void Atlantis::AddRCSFlame( THRUSTER_HANDLE thX, const VECTOR3& pos, const VECTOR3& dir, double length, double width, bool followsLevel )
+{
+	rcsFlameLevel.push_back( 0.0 );
+	RCSFlame f = {thX, followsLevel};
+	rcsFlames.push_back( f );
+
+	EXHAUSTSPEC es;
+	ZeroMemory( &es, sizeof( es ) );
+	es.th = thX;
+	es.level = &rcsFlameLevel.back();
+	es.lpos = const_cast<VECTOR3*>(&pos);
+	es.ldir = const_cast<VECTOR3*>(&dir);
+	es.lsize = length;
+	es.wsize = width;
+	es.lofs = 0.0;
+	es.modulate = 0.0;
+	es.tex = RCS_Exhaust_tex;
+	es.flags = EXHAUST_CONSTANTPOS | EXHAUST_CONSTANTDIR;
+	vExRCS.push_back( AddExhaust( &es ) );
+}
+
+void Atlantis::UpdateRCSFlames( void )
+{
+	const double acc = oapiGetTimeAcceleration();
+	for (size_t i = 0; i < rcsFlames.size(); i++)
+	{
+		const double level = GetThrusterLevel( rcsFlames[i].th );
+		double v;
+		if (acc > 1.0) v = level * acc;
+		else v = rcsFlames[i].followsLevel ? level : 0.0;
+		rcsFlameLevel[i] = (v > 1.0) ? 1.0 : v;
+	}
 }
 
 // --------------------------------------------------------------
