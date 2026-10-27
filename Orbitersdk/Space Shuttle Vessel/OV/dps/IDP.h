@@ -218,7 +218,9 @@ namespace dps
 
 		int GetADIAttitude( void );
 		/** Attitude angles of the ADI in the inertial reference (the same as the UNIV PTG display), degrees; false if they are not available */
-		bool GetADIInertialAttitude( double& roll, double& pitch, double& yaw );
+		bool GetADIAttitudeAngles( int reference, double& roll, double& pitch, double& yaw );
+		/** ATT REF pushbutton: the current attitude is the reference of the position REF of the ADI */
+		void SetADIReference( void );
 		int GetADIError( void );
 		int GetADIRate( void );
 		bool GetMECOConfirmedFlag( void ) const;

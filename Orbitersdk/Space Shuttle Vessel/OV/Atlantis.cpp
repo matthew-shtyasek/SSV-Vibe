@@ -2187,6 +2187,9 @@ int Atlantis::clbkConsumeBufferedKey( DWORD key, bool down, char* kstate )
 			case OAPI_KEY_Y:// RATE HOLD pushbutton of the RMS RHC
 				RMSRateHold.SetLine();
 				return 1;
+				case OAPI_KEY_R:// ATT REF pushbutton: the current attitude is the reference of the position REF of the ADI
+					if (pIDP[0] != NULL) pIDP[0]->SetADIReference();
+					return 1;
 			case OAPI_KEY_J:// live view of the game controllers; with Shift: take the current position of the axes as center
 				if (KEYMOD_SHIFT( kstate ))
 				{

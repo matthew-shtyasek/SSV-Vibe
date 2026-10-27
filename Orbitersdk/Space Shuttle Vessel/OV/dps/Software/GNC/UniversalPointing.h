@@ -26,6 +26,7 @@
 #pragma once
 
 #include "../SimpleGPCSoftware.h"
+#include "../../../ADIMath.h"
 
 namespace dps
 {
@@ -147,6 +148,10 @@ namespace dps
 
 		double lastUpdateSimTime;
 
+		adimath::Mat3 ADI_REF;// attitude (M50 to body) of the last press of ATT REF
+		bool ADI_REF_SET;
+		adimath::Mat3 CurrentBodyMatrix();
+
 		GNCUtilities* pGNCUtilities;
 		OrbitDAP* pOrbitDAP;
 	public:
@@ -170,10 +175,13 @@ namespace dps
 		double Get_GMTR() const;
 
 		/**
-		 * Attitude angles of the body in the inertial ADI coordinates (the ones of the UNIV PTG display, for the ADI), computed from the current attitude.
+		 * Attitude angles of the ADI for a position of the switch ADI ATTITUDE (adimath::Reference: REF, LVLH, INRTL), from the current attitude.
 		 * @param[out] roll, pitch, yaw [deg], 0 to 360
 		 */
-		void GetInertialAttitude( double& roll, double& pitch, double& yaw );
+		void GetADIAttitude( int reference, double& roll, double& pitch, double& yaw );
+
+		/** ATT REF pushbutton: the current attitude is the reference of the position REF of the ADI. */
+		void SetADIReference();
 
 	private:
 		void KLoad();

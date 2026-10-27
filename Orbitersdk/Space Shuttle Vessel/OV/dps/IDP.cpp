@@ -842,11 +842,15 @@ namespace dps {
 		}
 	}
 
-	bool IDP::GetADIInertialAttitude( double& roll, double& pitch, double& yaw )
+	bool IDP::GetADIAttitudeAngles( int reference, double& roll, double& pitch, double& yaw )
 	{
 		if (pUniversalPointing == NULL) return false;
-		pUniversalPointing->GetInertialAttitude( roll, pitch, yaw );
+		pUniversalPointing->GetADIAttitude( reference, roll, pitch, yaw );
 		return true;
+	}
+	void IDP::SetADIReference( void )
+	{
+		if (pUniversalPointing != NULL) pUniversalPointing->SetADIReference();
 	}
 
 	int IDP::GetADIError( void )

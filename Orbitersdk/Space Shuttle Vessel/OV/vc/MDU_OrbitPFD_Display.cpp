@@ -46,11 +46,10 @@ namespace vc
 		ADI_STATIC_ORBIT( hDC );
 		if ((MM == 201) || (MM == 202) || (MM == 801))
 		{
-				// the ADI follows the ATTITUDE switch: LVLH is the horizon of Orbiter, INRTL (and REF) the inertial attitude of the DAP, as in the UNIV PTG display
-				if (GetIDP()->GetADIAttitude() != 1)
+				// the position of the switch ADI ATTITUDE (REF, LVLH, INRTL) is the frame of the angles
 				{
 					double ir, ip, iy;
-					if (GetIDP()->GetADIInertialAttitude( ir, ip, iy ))
+					if (GetIDP()->GetADIAttitudeAngles( GetIDP()->GetADIAttitude(), ir, ip, iy ))
 					{
 						attRoll = ir;
 						attPitch = ip;
@@ -89,11 +88,10 @@ namespace vc
 		ADI_STATIC_ORBIT( skp );
 		if ((MM == 201) || (MM == 202) || (MM == 801))
 		{
-				// the ADI follows the ATTITUDE switch: LVLH is the horizon of Orbiter, INRTL (and REF) the inertial attitude of the DAP, as in the UNIV PTG display
-				if (GetIDP()->GetADIAttitude() != 1)
+				// the position of the switch ADI ATTITUDE (REF, LVLH, INRTL) is the frame of the angles
 				{
 					double ir, ip, iy;
-					if (GetIDP()->GetADIInertialAttitude( ir, ip, iy ))
+					if (GetIDP()->GetADIAttitudeAngles( GetIDP()->GetADIAttitude(), ir, ip, iy ))
 					{
 						attRoll = ir;
 						attPitch = ip;

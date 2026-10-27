@@ -4,6 +4,7 @@
 #include "../../../vc/MDU.h"
 #include "OrbitDAP.h"
 #include "StarCatalog.h"
+#include "../../../ADIMath.h"
 
 namespace dps
 {
@@ -39,6 +40,8 @@ namespace dps
 
 		PLOS = _V(0, 0, 0);
 		TLOS = _V(1, 0, 0);
+		ADI_REF = adimath::Identity();
+		ADI_REF_SET = false;
 		RREL = _V(0, 0, 0);
 		TGPOS = _V(0, 0, 0);
 
@@ -701,7 +704,16 @@ namespace dps
 
 	bool UniversalPointing::OnParseLine(const char* keyword, const char* value)
 	{
-		if (!_strnicmp(keyword, "START_TIME", 10)) {
+		if (!_strnicmp(keyword, "ADI_REF", 7)) {
+			double m[9];
+			if (sscanf_s(value, "%lf %lf %lf %lf %lf %lf %lf %lf %lf", &m[0], &m[1], &m[2], &m[3], &m[4], &m[5], &m[6], &m[7], &m[8]) == 9)
+			{
+				for (int i = 0; i < 9; i++) ADI_REF.m[i / 3][i % 3] = m[i];
+				ADI_REF_SET = true;
+			}
+			return true;
+		}
+		else if (!_strnicmp(keyword, "START_TIME", 10)) {
 			sscanf_s(value, "%d %d %d %d", &START_TIME[0], &START_TIME[1], &START_TIME[2], &START_TIME[3]);
 			return true;
 		}
@@ -790,6 +802,11 @@ namespace dps
 
 		sprintf_s(cbuf, 256, "%d %d %d %d", START_TIME[0], START_TIME[1], START_TIME[2], START_TIME[3]);
 		oapiWriteScenario_string(scn, "START_TIME", cbuf);
+		if (ADI_REF_SET)
+		{
+			sprintf_s(cbuf, 256, "%.9f %.9f %.9f %.9f %.9f %.9f %.9f %.9f %.9f", ADI_REF.m[0][0], ADI_REF.m[0][1], ADI_REF.m[0][2], ADI_REF.m[1][0], ADI_REF.m[1][1], ADI_REF.m[1][2], ADI_REF.m[2][0], ADI_REF.m[2][1], ADI_REF.m[2][2]);
+			oapiWriteScenario_string(scn, "ADI_REF", cbuf);
+		}
 		oapiWriteScenario_vec(scn, "MNVR_OPTION", _V(ROLLI, PITCHI, YAWI));
 		oapiWriteScenario_int(scn, "TGT_ID", TGT_ID);
 		sprintf_s(cbuf, 256, "%f %f %f %f %f", TGT_RA, TGT_DEC, TGT_LAT, TGT_LON, TGT_ALT);
@@ -1556,20 +1573,40 @@ namespace dps
 		}
 	}
 
-	void UniversalPointing::GetInertialAttitude(double& roll, double& pitch, double& yaw)
+
+	adimath::Mat3 UniversalPointing::CurrentBodyMatrix()
 	{
-		// the attitude processor writes the quaternion in each step; the inertial coordinates of the ADI are the ones of the angles of the display
+		// the attitude processor writes the quaternion in each step
 		const double QS = ReadCOMPOOL_VS(SCP_Q_B_I, 1, 4);
 		const VECTOR3 QV = ReadCOMPOOL_VS(SCP_Q_B_I + 2);
-		double QS2;
-		VECTOR3 QV2;
-		QUAT_MULT(QS, QV, Q_M50_INRTL_ORB_S, Q_M50_INRTL_ORB_V, QS2, QV2);
+		return adimath::FromQuaternion(QS, QV.x, QV.y, QV.z);
+	}
 
-		float r, p, y;
-		ATT_ANG(QS2, QV2, r, p, y);
-		roll = r / RAD_PER_DEG;
-		pitch = p / RAD_PER_DEG;
-		yaw = y / RAD_PER_DEG;
+	void UniversalPointing::GetADIAttitude(int reference, double& roll, double& pitch, double& yaw)
+	{
+		// the inertial coordinates of the ADI are the ones of the angles of the UNIV PTG display (Q_M50_INRTL_ORB is the identity)
+		adimath::Mat3 body = CurrentBodyMatrix();
+		if (reference == adimath::REF_LVLH)
+		{
+			const VECTOR3 R = ReadCOMPOOL_VD(SCP_R_AVGG);
+			const VECTOR3 V = ReadCOMPOOL_VD(SCP_V_AVGG);
+			const double r[3] = {R.x, R.y, R.z};
+			const double v[3] = {V.x, V.y, V.z};
+			adimath::Mat3 lvlh;
+			if (adimath::LVLHFrame(r, v, lvlh)) body = adimath::Relative(body, lvlh);
+		}
+		else if ((reference == adimath::REF_REF) && ADI_REF_SET)
+		{
+			body = adimath::Relative(body, ADI_REF);
+		}
+		adimath::Angles(body, roll, pitch, yaw);
+	}
+
+	void UniversalPointing::SetADIReference()
+	{
+		// the ATT REF pushbutton: the attitude of this moment is the reference of the position REF of the ADI
+		ADI_REF = CurrentBodyMatrix();
+		ADI_REF_SET = true;
 	}
 
 	void UniversalPointing::ATT_ANG(double QS, VECTOR3 QV, float& ROLL, float& PITCH, float& YAW) const

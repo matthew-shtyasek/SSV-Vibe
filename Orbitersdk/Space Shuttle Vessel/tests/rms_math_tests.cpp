@@ -13,6 +13,7 @@ static char g_debugstring[1024];
 #include "../OV/PTGMath.h"
 #include "../OV/ControllerMath.h"
 #include "../OV/RCSMath.h"
+#include "../OV/ADIMath.h"
 #include "../OV/APUModel.h"
 #include "../OV/RMSReaction.h"
 #include "../OV/RMSKin.h"
@@ -2164,6 +2165,92 @@ static void test_hyd_environment( void )
 	CHECK( RollChance( 1000.0 ) <= 1.0 );
 }
 
+static void test_adi( void )
+{
+	using namespace adimath;
+
+	// active rotations of the body about its axes (the body axes in the frame are the columns); the matrix M50 to body is the transpose
+	const double pi = 3.14159265358979323846;
+	auto rx = []( double a ) { Mat3 r = {{{1, 0, 0}, {0, std::cos( a ), -std::sin( a )}, {0, std::sin( a ), std::cos( a )}}}; return r; };
+	auto ry = []( double a ) { Mat3 r = {{{std::cos( a ), 0, std::sin( a )}, {0, 1, 0}, {-std::sin( a ), 0, std::cos( a )}}}; return r; };
+	auto rz = []( double a ) { Mat3 r = {{{std::cos( a ), -std::sin( a ), 0}, {std::sin( a ), std::cos( a ), 0}, {0, 0, 1}}}; return r; };
+	double r, p, y;
+
+	// the quaternion of the attitude processor is the one of the matrix M50 to body: the identity is 0, 0, 0
+	Angles( FromQuaternion( 1.0, 0.0, 0.0, 0.0 ), r, p, y );
+	CHECK_NEAR( r, 0.0, 1e-9 );
+	CHECK_NEAR( p, 0.0, 1e-9 );
+	CHECK_NEAR( y, 0.0, 1e-9 );
+
+	// roll to the right, nose up, nose to the right: positive angles
+	Angles( Transpose( rx( 30.0 * pi / 180.0 ) ), r, p, y );
+	CHECK_NEAR( r, 30.0, 1e-9 );
+	CHECK_NEAR( p, 0.0, 1e-9 );
+	CHECK_NEAR( y, 0.0, 1e-9 );
+	Angles( Transpose( ry( 40.0 * pi / 180.0 ) ), r, p, y );
+	CHECK_NEAR( p, 40.0, 1e-9 );
+	CHECK_NEAR( r, 0.0, 1e-9 );
+	Angles( Transpose( rz( 20.0 * pi / 180.0 ) ), r, p, y );
+	CHECK_NEAR( y, 20.0, 1e-9 );
+	// negative angles are from 270 to 360
+	Angles( Transpose( rx( -10.0 * pi / 180.0 ) ), r, p, y );
+	CHECK_NEAR( r, 350.0, 1e-9 );
+	// a quaternion of a roll of 30 degrees (the passive rotation is the one of -30)
+	{
+		const double a = -30.0 * pi / 180.0 / 2.0;
+		Angles( FromQuaternion( std::cos( a ), std::sin( a ), 0.0, 0.0 ), r, p, y );
+		CHECK_NEAR( r, 30.0, 1e-9 );
+	}
+
+	// LVLH: orbit in the plane x-y, circular, the velocity along +y
+	const double R[3] = {7.0e6, 0.0, 0.0};
+	const double V[3] = {0.0, 7500.0, 0.0};
+	Mat3 lvlh;
+	CHECK( LVLHFrame( R, V, lvlh ) );
+	CHECK_NEAR( lvlh.m[0][1], 1.0, 1e-12 );// X along the velocity
+	CHECK_NEAR( lvlh.m[2][0], -1.0, 1e-12 );// Z toward the center of the Earth
+	CHECK_NEAR( lvlh.m[1][2], -1.0, 1e-12 );// Y against the angular momentum
+	// the body in the LVLH attitude (nose along the velocity, belly to the Earth) is 0, 0, 0 in LVLH, and in inertial it is not
+	Angles( Relative( lvlh, lvlh ), r, p, y );
+	CHECK_NEAR( r, 0.0, 1e-9 );
+	CHECK_NEAR( p, 0.0, 1e-9 );
+	CHECK_NEAR( y, 0.0, 1e-9 );
+	// the same nose up by 10 degrees relative to the LVLH, wherever it is in the orbit
+	for (double ang = 0.0; ang < 6.2; ang += 1.3)
+	{
+		const double R2[3] = {7.0e6 * std::cos( ang ), 7.0e6 * std::sin( ang ), 0.0};
+		const double V2[3] = {-7500.0 * std::sin( ang ), 7500.0 * std::cos( ang ), 0.0};
+		Mat3 f;
+		CHECK( LVLHFrame( R2, V2, f ) );
+		const Mat3 body = Mul( Transpose( ry( 10.0 * pi / 180.0 ) ), f );
+		Angles( Relative( body, f ), r, p, y );
+		CHECK_NEAR( p, 10.0, 1e-9 );
+		CHECK_NEAR( r, 0.0, 1e-9 );
+		CHECK_NEAR( y, 0.0, 1e-9 );
+	}
+	// parallel position and velocity: no frame
+	{
+		const double rr[3] = {1.0e6, 0, 0}, vv[3] = {1.0e3, 0, 0};
+		Mat3 f;
+		CHECK( !LVLHFrame( rr, vv, f ) );
+	}
+
+	// REF: 0, 0, 0 at the press, then the angles relative to that attitude
+	{
+		const Mat3 pressed = Transpose( Mul( rz( 50.0 * pi / 180.0 ), ry( 20.0 * pi / 180.0 ) ) );
+		Angles( Relative( pressed, pressed ), r, p, y );
+		CHECK_NEAR( r, 0.0, 1e-9 );
+		CHECK_NEAR( p, 0.0, 1e-9 );
+		CHECK_NEAR( y, 0.0, 1e-9 );
+		// then a roll of 15 degrees about the body axis X of the reference
+		const Mat3 now = Transpose( Mul( Mul( rz( 50.0 * pi / 180.0 ), ry( 20.0 * pi / 180.0 ) ), rx( 15.0 * pi / 180.0 ) ) );
+		Angles( Relative( now, pressed ), r, p, y );
+		CHECK_NEAR( r, 15.0, 1e-9 );
+		CHECK_NEAR( p, 0.0, 1e-9 );
+		CHECK_NEAR( y, 0.0, 1e-9 );
+	}
+}
+
 static void test_rcs_reduction( void )
 {
 	using namespace rcsmath;
@@ -2365,6 +2452,7 @@ int main( int argc, char** argv )
 	test_arm_links();
 	test_emergency_lighting();
 	test_rcs_reduction();
+	test_adi();
 	test_controller_examples( (argc > 1) ? argv[1] : NULL );
 	printf( "%d checks, %d failed\n", g_checks, g_failed );
 	return (g_failed == 0) ? 0 : 1;
