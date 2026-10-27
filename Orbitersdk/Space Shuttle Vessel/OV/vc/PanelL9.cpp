@@ -52,6 +52,7 @@ namespace vc
 		pPSFloodDim->DefineGroup( GRP_R3_L9_VC );
 		pPSFloodDim->SetReference( _V( -1.6322, 2.4919, 12.3666 ), _V( -0.5446, -0.8387, 0.0 ) );
 		pPSFloodDim->SetAngleRange( 300.0 );
+		pPSFloodDim->SetCalibrationGroup( 3 );
 		pPSFloodDim->SetMouseRegion( AID_L9, 0.216456f, 0.275821f, 0.284830f, 0.496442f );
 
 		return;

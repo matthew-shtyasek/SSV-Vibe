@@ -53,11 +53,13 @@ namespace vc
 		pMSFloodDim->DefineGroup( GRP_R3_R10_VC );
 		pMSFloodDim->SetReference( _V( 1.6247, 2.4897, 12.3055 ), _V( 0.5446, -0.8387, 0.0 ) );
 		pMSFloodDim->SetAngleRange( 300.0 );
+		pMSFloodDim->SetCalibrationGroup( 4 );
 		pMSFloodDim->SetMouseRegion( AID_R10, 0.873934f, 0.285688f, 0.946764f, 0.574146f );
 
 		pPanelMS->DefineGroup( GRP_R4_R10_VC );
 		pPanelMS->SetReference( _V( 1.6247, 2.4897, 12.4120 ), _V( 0.5446, -0.8387, 0.0 ) );
 		pPanelMS->SetAngleRange( 300.0 );
+		pPanelMS->SetCalibrationGroup( 4 );
 		pPanelMS->SetMouseRegion( AID_R10, 0.679378f, 0.256269f, 0.752208f, 0.544727f );
 
 		return;

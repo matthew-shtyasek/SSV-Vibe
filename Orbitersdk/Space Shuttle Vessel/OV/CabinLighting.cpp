@@ -1,4 +1,5 @@
 #include "CabinLighting.h"
+#include "vc/DimmerKnob.h"
 #include "Atlantis.h"
 #include "LightingMath.h"
 #include "SSVOptions.h"
@@ -153,6 +154,8 @@ void CabinLighting::OnPostStep( double simt, double simdt, double mjd )
 		moved = true;
 	}
 	if (moved) PlaceLights();
+
+	vc::DimmerKnob::RefreshAll();// calibration settings of the pointers, live
 
 	// the cabin: the brightness of the shell and of the middeck follows the lamps that are on (the light of the sun through the windows is the minimum)
 	double total = 0.0;

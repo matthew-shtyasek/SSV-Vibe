@@ -32,6 +32,7 @@
 
 #include "AtlantisVCComponent.h"
 #include <DiscOutPort.h>
+#include <vector>
 
 
 namespace vc
@@ -48,7 +49,11 @@ namespace vc
 			DiscOutPort output;
 
 			UINT grpIndex;
-			MGROUP_ROTATE* rotStart;
+			int calGroup;// group of the calibration settings (0 none, 1 O6/O8, 2 A6U, 3 L9, 4 R10)
+			double lastOff, lastTrav;
+			bool lastRev;
+			void GetParams( double& off, double& trav, bool& rev ) const;
+			static std::vector<DimmerKnob*>& Registry( void );
 			MGROUP_ROTATE* rotTravel;
 			UINT anim_rot;
 
@@ -67,6 +72,10 @@ namespace vc
 			void SetAngleRange( double ang );
 			/** The pointer of the mesh at rest is this many degrees counterclockwise from the middle of the travel (12 o'clock) */
 			void SetPointerOffset( double deg ) { offset = deg; }
+			/** The pointer offset, travel and direction come from the settings KnobTop, KnobAft, KnobL9, KnobR10 (1 to 4), live. */
+			void SetCalibrationGroup( int group ) { calGroup = group; }
+			/** Applies the settings that changed to all the knobs. */
+			static void RefreshAll( void );
 			void Connect( DiscreteBundle* pBundle, unsigned short usLine );
 			void DefineVCAnimations( UINT vc_idx ) override;
 			void Realize( void ) override;
