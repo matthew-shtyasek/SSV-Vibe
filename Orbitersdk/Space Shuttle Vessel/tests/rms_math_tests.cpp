@@ -2020,6 +2020,265 @@ static void test_pdrs_logic( void )
 	}
 }
 
+static void test_hyd_environment( void )
+{
+	using namespace hydmodel;
+
+	// shadow of the planet
+	const double R = 6.371e6;
+	CHECK( InPlanetShadow( 0.0, 0.0, -7.0e6, 0.0, 0.0, 1.0, R ) );
+	CHECK( !InPlanetShadow( 0.0, 0.0, 7.0e6, 0.0, 0.0, 1.0, R ) );// sunlit side
+	CHECK( !InPlanetShadow( 7.0e6, 0.0, -7.0e6, 0.0, 0.0, 1.0, R ) );// behind the planet but outside of the cylinder
+	CHECK_NEAR( EnvironmentTemperature( false ), AMBIENT, 1e-12 );
+	CHECK_NEAR( EnvironmentTemperature( true ), SHADE_ENV, 1e-12 );
+
+	// the circulation pump (Crew Operations Manual): ON runs it; GPC starts it below 0 F and stops it above 20 F; off with the APU running
+	{
+		State s = InitialState();
+		Input in = hyd_input( 0.0, 0.25, 1, true );
+		CHECK( !CircPumpRuns( s, in ) );// the switch is off
+		in.circOn = true;
+		CHECK( CircPumpRuns( s, in ) );
+		in.speed = 0.5;
+		CHECK( !CircPumpRuns( s, in ) );// the APU runs: the pump is disconnected
+		in.speed = 0.0;
+		in.circOn = false;
+		in.circGpc = true;
+		s.hyd = 30.0;
+		CHECK( !CircPumpRuns( s, in ) );// warm: does not start
+		s.hyd = -5.0;
+		CHECK( CircPumpRuns( s, in ) );// cold: starts
+		in.circAllowed = false;
+		CHECK( !CircPumpRuns( s, in ) );// another pump runs in GPC
+		in.circAllowed = true;
+		s.circ = true;
+		s.hyd = 10.0;
+		CHECK( CircPumpRuns( s, in ) );// between the limits: stays
+		s.hyd = 25.0;
+		CHECK( !CircPumpRuns( s, in ) );// warm: stops
+		s.hyd = 10.0;
+		s.circTime = in.circMaxRun + 1.0;
+		CHECK( !CircPumpRuns( s, in ) );// the longest run
+	}
+	CHECK_NEAR( CIRC_MAX_RUN_SYS1, 900.0, 1e-12 );
+	CHECK_NEAR( CIRC_MAX_RUN, 600.0, 1e-12 );
+
+	// a stopped system in the shadow gets cold; with the pump in GPC it is kept around 0 to 20 F by the heat exchanger
+	{
+		State off = InitialState();
+		State gpc = InitialState();
+		Input in = hyd_input( 0.0, 0.25, 0, true );
+		in.env = SHADE_ENV;
+		Input ing = in;
+		ing.circGpc = true;
+		double lowest = 1000.0;
+		int starts = 0;
+		bool was = false;
+		for (int t = 0; t < 20000; t++)
+		{
+			Step( off, in, 1.0 );
+			Step( gpc, ing, 1.0 );
+			if (gpc.hyd < lowest) lowest = gpc.hyd;
+			if (gpc.circ && !was) starts++;
+			was = gpc.circ;
+		}
+		CHECK( off.hyd < -15.0 );
+		CHECK( !off.circ );
+		CHECK( starts >= 1 );
+		CHECK( lowest > -8.0 );// the pump starts at 0 F and warms the fluid
+		CHECK( gpc.hyd > off.hyd );
+	}
+
+	// the timer stops the pump before the fluid reaches 20 F, and it waits for the fluid to recover before it starts again
+	{
+		State s = InitialState();
+		s.hyd = -30.0;
+		Input in = hyd_input( 0.0, 0.25, 0, true );
+		in.env = -100.0;
+		in.circGpc = true;
+		in.circMaxRun = 100.0;
+		int run = 0;
+		bool timedOut = false;
+		for (int t = 0; t < 1500; t++)
+		{
+			Step( s, in, 1.0 );
+			if (s.circ) run++;
+			else if (run > 0) timedOut = true;
+		}
+		CHECK( timedOut );
+		CHECK( (run >= 99) && (run <= 102) );
+		CHECK( s.circHold && !s.circ );
+	}
+
+	// the vent and the water lines freeze with no heater in the cold, and thaw with the heater on
+	{
+		State s = InitialState();
+		Input in = hyd_input( 0.0, 0.25, 1, true );
+		in.env = SHADE_ENV;
+		in.heater = false;
+		for (int t = 0; t < (int)(VENT_FREEZE_TIME - 10.0); t++) Step( s, in, 1.0 );
+		CHECK( !s.ventIce );
+		for (int t = 0; t < 20; t++) Step( s, in, 1.0 );
+		CHECK( s.ventIce );
+		// no spray, whatever the temperature
+		s.hyd = 225.0;
+		s.through = true;
+		Step( s, in, 1.0 );
+		CHECK_NEAR( s.hydDuty, 0.0, 1e-12 );
+		in.heater = true;
+		for (int t = 0; t < (int)(VENT_FREEZE_TIME / VENT_THAW_RATE) + 5; t++) Step( s, in, 1.0 );
+		CHECK( !s.ventIce );
+	}
+
+	// the sunlit system does not freeze
+	{
+		State s = InitialState();
+		Input in = hyd_input( 0.0, 0.25, 0, true );
+		for (int t = 0; t < 7200; t++) Step( s, in, 1.0 );
+		CHECK( !s.ventIce );
+	}
+
+	// the nitrogen is used as the water goes out
+	{
+		State s = InitialState();
+		s.hyd = 225.0;
+		s.through = true;
+		Input in = hyd_input( 0.5, 0.5, 1, true );
+		const double n2before = s.n2;
+		const double waterBefore = s.water;
+		for (int t = 0; t < 60; t++) Step( s, in, 1.0 );
+		CHECK( s.water < waterBefore );
+		CHECK_NEAR( n2before - s.n2, (waterBefore - s.water) * N2_PER_LB, 1e-9 );
+	}
+
+	// random failures: the dice are thrown at random intervals
+	CHECK_NEAR( NextRollInterval( 0.0 ), ROLL_MIN, 1e-12 );
+	CHECK_NEAR( NextRollInterval( 1.0 ), ROLL_MAX, 1e-12 );
+	CHECK_NEAR( NextRollInterval( 0.5 ), 0.5 * (ROLL_MIN + ROLL_MAX), 1e-12 );
+	CHECK_NEAR( NextRollInterval( 2.0 ), ROLL_MAX, 1e-12 );
+	CHECK_NEAR( RollChance( 0.0 ), 0.0, 1e-12 );
+	// the rate [1/hour] is kept: throws per hour (3600 s / mean interval) times the chance
+	CHECK_NEAR( RollChance( 1.0 ) * 3600.0 / (0.5 * (ROLL_MIN + ROLL_MAX)), 1.0, 1e-9 );
+	CHECK( RollChance( 0.05 ) < RollChance( 0.2 ) );
+	CHECK( RollChance( 1000.0 ) <= 1.0 );
+}
+
+static void test_arm_links( void )
+{
+	using namespace massprops;
+
+	// a rod: m L^2 / 12 about the axes perpendicular to it, nothing about its own axis
+	{
+		const VECTOR3 I = RodInertia( 12.0, _V( 0.0, 0.0, 0.0 ), _V( 2.0, 0.0, 0.0 ) );
+		CHECK_NEAR( I.x, 0.0, 1e-12 );
+		CHECK_NEAR( I.y, 4.0, 1e-12 );
+		CHECK_NEAR( I.z, 4.0, 1e-12 );
+		const VECTOR3 D = RodInertia( 12.0, _V( 0.0, 0.0, 0.0 ), _V( 1.0, 1.0, 0.0 ) );// diagonal: the share of each axis
+		CHECK_NEAR( D.x, 1.0, 1e-12 );
+		CHECK_NEAR( D.y, 1.0, 1e-12 );
+		CHECK_NEAR( D.z, 2.0, 1e-12 );
+	}
+
+	// the arm stretched along x: no inertia about its own axis, the same about the other two
+	const VECTOR3 sp = _V( 0.0, 0.0, 0.0 ), ep = _V( 6.4, 0.0, 0.0 ), wp = _V( 13.4, 0.0, 0.0 ), ee = _V( 15.0, 0.0, 0.0 );
+	const VECTOR3 I = ArmInertia( sp, ep, wp, ee );
+	CHECK_NEAR( I.x, 0.0, 1e-9 );
+	CHECK( I.y > 1000.0 );
+	CHECK_NEAR( I.y, I.z, 1e-9 );
+	// folded, the arm has less inertia about the axis across the folded links than stretched
+	const VECTOR3 Ifolded = ArmInertia( sp, _V( 6.4, 0.0, 0.0 ), _V( 0.0, 0.0, 0.0 ), _V( 1.6, 0.0, 0.0 ) );
+	CHECK( Ifolded.y < I.y );
+
+	// the arm as one body with this inertia is the same as its five pieces
+	{
+		const VECTOR3 hullPMI = _V( 50.0, 60.0, 70.0 );
+		const double hullMass = 70000.0;
+		const VECTOR3 hullCoG = _V( 0.0, 0.0, 0.0 );
+		const VECTOR3 com = ArmCoM( sp, ep, wp, ee );
+		const Point one = {ARM_MASS, com, I};
+		const Point pieces[5] = {
+			{ARM_MASS * SHARE_SHOULDER, sp, _V( 0.0, 0.0, 0.0 )},
+			{ARM_MASS * SHARE_UPPER_BOOM, (sp + ep) * 0.5, RodInertia( ARM_MASS * SHARE_UPPER_BOOM, sp, ep )},
+			{ARM_MASS * SHARE_ELBOW, ep, _V( 0.0, 0.0, 0.0 )},
+			{ARM_MASS * SHARE_LOWER_BOOM, (ep + wp) * 0.5, RodInertia( ARM_MASS * SHARE_LOWER_BOOM, ep, wp )},
+			{ARM_MASS * SHARE_WRIST, (wp + ee) * 0.5, RodInertia( ARM_MASS * SHARE_WRIST, wp, ee )}
+		};
+		VECTOR3 cog1, cog5;
+		double mass1, mass5;
+		const VECTOR3 pmi1 = ComposePMI( hullPMI, hullMass, hullCoG, &one, 1, cog1, mass1 );
+		const VECTOR3 pmi5 = ComposePMI( hullPMI, hullMass, hullCoG, pieces, 5, cog5, mass5 );
+		CHECK_NEAR( mass1, mass5, 1e-9 );
+		CHECK_NEAR( pmi1.x, pmi5.x, 1e-9 );
+		CHECK_NEAR( pmi1.y, pmi5.y, 1e-9 );
+		CHECK_NEAR( pmi1.z, pmi5.z, 1e-9 );
+
+		// the arm and the same arm taken away (negative mass and inertia) leave the vessel as it was
+		const Point gone = {-ARM_MASS, com, _V( -I.x, -I.y, -I.z )};
+		const Point both[2] = {one, gone};
+		VECTOR3 cog2;
+		double mass2;
+		const VECTOR3 pmi2 = ComposePMI( hullPMI, hullMass, hullCoG, both, 2, cog2, mass2 );
+		CHECK_NEAR( pmi2.x, hullPMI.x, 1e-9 );
+		CHECK_NEAR( pmi2.y, hullPMI.y, 1e-9 );
+		CHECK_NEAR( pmi2.z, hullPMI.z, 1e-9 );
+		const VECTOR3 added = AddedPMI( both, 2, hullCoG, hullMass );
+		CHECK_NEAR( added.x + added.y + added.z, 0.0, 1e-9 );
+	}
+}
+
+static void test_controller_assign( void )
+{
+	// every input of a controller is written so it is read back as the same
+	for (int type = 0; type < 3; type++)
+	{
+		const int ids[] = {0, 1, 5, 7};
+		for (int id : ids)
+		{
+			int t = -1, i = -1;
+			const std::string text = ctrlmath::FormatSubDevice( type, id );
+			CHECK( ctrlmath::ParseSubDevice( text, t, i ) );
+			CHECK( t == type );
+			CHECK( i == id );
+		}
+	}
+
+	// a line written for the file is read back by the loader
+	const std::string line = ctrlmath::FormatConfigLine( "RHC_PITCH", ctrlmath::SUB_AXIS, ctrlmath::AX_RY, true, 0.05, 0.25, -0.125 );
+	const std::vector<std::string> col = ctrlmath::SplitColumns( line );
+	CHECK( col.size() == 6 );
+	if (col.size() == 6)
+	{
+		int t, i;
+		CHECK( col[0] == "RHC_PITCH" );
+		CHECK( ctrlmath::ParseSubDevice( col[1], t, i ) && (t == ctrlmath::SUB_AXIS) && (i == ctrlmath::AX_RY) );
+		CHECK( col[2] == "true" );
+		CHECK_NEAR( atof( col[3].c_str() ), 0.05, 1e-9 );
+		CHECK_NEAR( atof( col[4].c_str() ), 0.25, 1e-9 );
+		CHECK_NEAR( atof( col[5].c_str() ), -0.125, 1e-9 );
+	}
+
+	// a button of a panel
+	std::string pnl, comp;
+	int act;
+	const std::string pl = ctrlmath::FormatConfigLine( std::string( "PANEL A8A1/BRAKES:" ) + ctrlmath::ActionName( ctrlmath::ACT_HOLD_DOWN ), ctrlmath::SUB_BUTTON, 12, false, 0.0, 0.0, 0.0 );
+	const std::vector<std::string> pc = ctrlmath::SplitColumns( pl );
+	CHECK( pc.size() == 3 );
+	CHECK( ctrlmath::ParsePanelInput( pc[0], pnl, comp, act ) && (pnl == "A8A1") && (comp == "BRAKES") && (act == ctrlmath::ACT_HOLD_DOWN) );
+
+	// detection of the axis that is moved
+	const double before[8] = {0.0, 0.0, -1.0, 0.1, 0.0, 0.0, 0.0, 0.0};
+	double now[8] = {0.02, 0.1, -1.0, 0.1, 0.0, 0.0, 0.0, 0.0};
+	CHECK( ctrlmath::DetectAxisMove( before, now, 8, 0.5 ) == -1 );
+	now[2] = 0.2;// a throttle moved from the end
+	now[4] = -0.7;
+	CHECK( ctrlmath::DetectAxisMove( before, now, 8, 0.5 ) == 2 );// the largest movement
+	now[2] = -1.0;
+	CHECK( ctrlmath::DetectAxisMove( before, now, 8, 0.5 ) == 4 );
+
+	CHECK_NEAR( ctrlmath::DefaultDeadzone( "SBTC" ), 0.0, 1e-12 );
+	CHECK_NEAR( ctrlmath::DefaultDeadzone( "RHC_ROLL" ), 0.05, 1e-12 );
+}
+
 int main( int argc, char** argv )
 {
 	srand( 12345 );
@@ -2046,6 +2305,9 @@ int main( int argc, char** argv )
 	test_panel_lighting_table();
 	test_mass_props();
 	test_controller_parsers();
+	test_controller_assign();
+	test_hyd_environment();
+	test_arm_links();
 	test_controller_examples( (argc > 1) ? argv[1] : NULL );
 	printf( "%d checks, %d failed\n", g_checks, g_failed );
 	return (g_failed == 0) ? 0 : 1;

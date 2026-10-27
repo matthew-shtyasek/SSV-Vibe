@@ -223,6 +223,13 @@ class SSVOptions
 		{
 			return values[settings::HYDRAULIC_THERMAL] != 0.0;
 		}
+
+		/** @return rate of the random failures of each boiler [1/hour], 0 if off */
+		double HydraulicFailureRate( void ) const
+		{
+			const int i = static_cast<int>(values[settings::HYDRAULIC_RANDOM_FAILURES] + 0.5);
+			return ((i >= 0) && (i < settings::HYD_FAILURE_RATE_COUNT)) ? settings::HYD_FAILURE_RATES[i] : 0.0;
+		}
 };
 
 #endif// SSV_OPTIONS

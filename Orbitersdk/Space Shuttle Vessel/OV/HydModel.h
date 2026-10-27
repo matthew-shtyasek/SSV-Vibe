@@ -80,8 +80,29 @@ namespace hydmodel
 	inline constexpr double HYD_LEAK_MAX = 1.0 / 600.0;// [1/s] of the reservoir with the seals damaged (the reservoir is empty in 10 minutes)
 	inline constexpr double HYD_QTY_MIN_OK = 0.05;// the pump can not hold the pressure with less of the reservoir
 
+	// environment, boiler heaters and circulation pumps. Crew Operations Manual 2.1 (HYD CIRC PUMP): in GPC the pump starts when a control
+	// temperature drops below 0 F (or -10 F, depending on the location) and stops when all of them are above 20 F, or after 15 minutes for
+	// system 1 and 10 minutes for systems 2 and 3; the pump circulates the fluid through a Freon/hydraulic fluid heat exchanger; it is
+	// disconnected when the APU runs. The temperatures of the environment and the heat exchanger are approximate (no numbers in the documents).
+	inline constexpr double SHADE_ENV = -20.0;// [F] temperature that the lines tend to in the shadow of the Earth
+	inline constexpr double FREEZE = 32.0;// [F]
+	inline constexpr double CIRC_FREON_TEMP = 65.0;// [F] temperature that the fluid tends to with a circulation pump running (Freon loops)
+	inline constexpr double CIRC_HEAT_TAU = 600.0;// [s] time constant of the fluid with a circulation pump running
+	inline constexpr double CIRC_GPC_ON = 0.0;// [F] the GPC starts a circulation pump below this temperature
+	inline constexpr double CIRC_GPC_OFF = 20.0;// [F] and stops it above this one
+	inline constexpr double CIRC_MAX_RUN_SYS1 = 900.0;// [s] longest run in GPC (15 minutes for system 1, 10 for systems 2 and 3)
+	inline constexpr double CIRC_MAX_RUN = 600.0;// [s]
+	inline constexpr double VENT_FREEZE_TIME = 1800.0;// [s] in the cold with no heater before the water lines and the steam vent freeze
+	inline constexpr double VENT_THAW_RATE = 6.0;// thaw with the heater on, relative to the freezing
+	inline constexpr double N2_PER_LB = 0.45 / WATER_TANK;// share of the nitrogen of the tank used by each pound of water pushed out
+
 	struct State
 	{
+		double ventFreeze;// [s] progress of the freezing of the vent and the water lines
+		bool ventIce;// the vent and the water lines froze: no spray
+		bool circ;// a circulation pump is running
+		double circTime;// [s] the pump has been running in GPC
+		bool circHold;// the pump stopped after the longest run: it waits for the temperature to recover before it starts again
 		double hyd;// temperature of the hydraulic fluid [F]
 		double oil;// temperature of the lube oil [F]
 		double water;// water in the tank of the boiler [lb]
@@ -109,11 +130,22 @@ namespace hydmodel
 		bool powered;// BOILER PWR on
 		int controller;// 0 = none, 1 = A, 2 = B
 		bool n2Open;// BOILER N2 SUPPLY open
+		double env = AMBIENT;// [F] temperature of the surroundings of the lines
+		bool heater = false;// the heaters of the lines and of the vent are on
+		bool circOn = false;// HYD CIRC PUMP switch in ON
+		bool circGpc = false;// HYD CIRC PUMP switch in GPC
+		bool circAllowed = true;// no other pump is running in GPC (the software starts only one at a time)
+		double circMaxRun = CIRC_MAX_RUN;// [s] longest run in GPC
 	};
 
 	inline State InitialState( void )
 	{
 		State s;
+		s.ventFreeze = 0.0;
+		s.ventIce = false;
+		s.circ = false;
+		s.circTime = 0.0;
+		s.circHold = false;
 		s.hyd = AMBIENT;
 		s.oil = AMBIENT;
 		s.water = WATER_TANK;
@@ -184,11 +216,86 @@ namespace hydmodel
 		return s.hydQty > HYD_QTY_MIN_OK;
 	}
 
+	/**
+	 * True if the vessel is in the shadow of the planet.
+	 * @param px, py, pz position of the vessel relative to the planet [m]
+	 * @param sx, sy, sz unit vector from the planet to the Sun
+	 * @param radius radius of the planet [m]
+	 */
+	inline bool InPlanetShadow( double px, double py, double pz, double sx, double sy, double sz, double radius )
+	{
+		const double along = (px * sx) + (py * sy) + (pz * sz);
+		if (along >= 0.0) return false;// on the side of the Sun
+		const double perp2 = (px * px) + (py * py) + (pz * pz) - (along * along);
+		return perp2 < (radius * radius);
+	}
+
+	/** Temperature that the lines tend to: in the sunlight the ambient one, in the shadow a cold one. */
+	inline double EnvironmentTemperature( bool shadow )
+	{
+		return shadow ? SHADE_ENV : AMBIENT;
+	}
+
+	/**
+	 * State of a circulation pump: ON runs it; GPC runs it between two temperatures (with hysteresis) for at most the longest run, and only if
+	 * no other pump runs in GPC; it is disconnected when the APU runs; otherwise it is off.
+	 */
+	inline bool CircPumpRuns( const State& s, const Input& in )
+	{
+		if (in.speed > 0.02) return false;
+		if (in.circOn) return true;
+		if (!in.circGpc) return false;
+		if (s.circ) return (s.hyd < CIRC_GPC_OFF) && (s.circTime < in.circMaxRun);
+		if (s.circHold || !in.circAllowed) return false;
+		return s.hyd <= CIRC_GPC_ON;
+	}
+
+	/** Mean time between the throws of the dice of the random failures [s], and the shortest and longest. */
+	inline constexpr double ROLL_MIN = 300.0;
+	inline constexpr double ROLL_MAX = 1500.0;
+
+	/** Time to the next throw of the dice, from a random number [0, 1): random in a random range, so the systems do not go together. */
+	inline double NextRollInterval( double random01 )
+	{
+		const double u = (random01 < 0.0) ? 0.0 : ((random01 > 1.0) ? 1.0 : random01);
+		return ROLL_MIN + (u * (ROLL_MAX - ROLL_MIN));
+	}
+
+	/** Probability that a throw of the dice gives a failure, for a rate of failures [1/hour] (the mean interval of the throws is used). */
+	inline double RollChance( double ratePerHour )
+	{
+		if (ratePerHour <= 0.0) return 0.0;
+		const double p = ratePerHour * (0.5 * (ROLL_MIN + ROLL_MAX)) / 3600.0;
+		return (p > 1.0) ? 1.0 : p;
+	}
+
 	/** Advances the state dt seconds. */
 	inline void Step( State& s, const Input& in, double dt )
 	{
 		if (dt <= 0.0) return;
 		const double speed = Clamp01( in.speed );
+
+		// circulation pump
+		const bool wasCirc = s.circ;
+		s.circ = CircPumpRuns( s, in );
+		if (s.circ) s.circTime += dt;
+		else
+		{
+			if (wasCirc && in.circGpc && !in.circOn && (s.circTime >= in.circMaxRun) && (s.hyd < CIRC_GPC_OFF)) s.circHold = true;// the timer stopped it
+			s.circTime = 0.0;
+		}
+		if (s.hyd >= CIRC_GPC_ON + 5.0) s.circHold = false;
+
+		// the water lines and the vent freeze in the cold with no heater (the spray valves are then blocked)
+		if ((in.env < FREEZE) && !in.heater) s.ventFreeze += dt;
+		else s.ventFreeze -= (in.heater ? VENT_THAW_RATE : 1.0) * dt;
+		if (s.ventFreeze > VENT_FREEZE_TIME) s.ventFreeze = VENT_FREEZE_TIME;
+		if (s.ventFreeze <= 0.0)
+		{
+			s.ventFreeze = 0.0;
+			s.ventIce = false;
+		}
+		else if (s.ventFreeze >= VENT_FREEZE_TIME) s.ventIce = true;
 
 		// heating, or the cooling of the stopped system by the surroundings
 		if (speed > 0.02)
@@ -198,8 +305,10 @@ namespace hydmodel
 		}
 		else
 		{
-			s.hyd += (in.ambient - s.hyd) * (dt / HYD_STOPPED_TAU);
-			s.oil += (in.ambient - s.oil) * (dt / OIL_STOPPED_TAU);
+			// a pump that runs takes the heat of the Freon loops
+			const double target = s.circ ? CIRC_FREON_TEMP : in.env;
+			s.hyd += (target - s.hyd) * (dt / (s.circ ? CIRC_HEAT_TAU : HYD_STOPPED_TAU));
+			s.oil += (in.env - s.oil) * (dt / OIL_STOPPED_TAU);
 		}
 
 		// the boiler
@@ -207,15 +316,17 @@ namespace hydmodel
 		if (ctrl) s.through = BypassLogic( s.through, s.hyd );
 		const double n2eff = N2Effect( s.n2, in.n2Open );
 		const bool water = (s.water > 0.0);
-		s.hydDuty = (ctrl && s.through && !s.iceHyd && water) ? (HydSprayCommand( s.hyd ) * n2eff) : 0.0;
-		s.oilDuty = (ctrl && !s.iceOil && water) ? (OilSprayCommand( s.oil ) * n2eff) : 0.0;
+		s.hydDuty = (ctrl && s.through && !s.iceHyd && !s.ventIce && water) ? (HydSprayCommand( s.hyd ) * n2eff) : 0.0;
+		s.oilDuty = (ctrl && !s.iceOil && !s.ventIce && water) ? (OilSprayCommand( s.oil ) * n2eff) : 0.0;
 		s.hyd -= HYD_COOL_MAX * s.hydDuty * dt;
 		s.oil -= OIL_COOL_MAX * s.oilDuty * dt;
-		if (s.hyd < in.ambient) s.hyd = in.ambient;
-		if (s.oil < in.ambient) s.oil = in.ambient;
-		s.water -= ((HYD_SPRAY * s.hydDuty) + (OIL_SPRAY * s.oilDuty)) * dt / 60.0;
+		const double coolest = (in.env < in.ambient) ? in.env : in.ambient;// the spray does not cool below the surroundings
+		if (s.hyd < coolest) s.hyd = coolest;
+		if (s.oil < coolest) s.oil = coolest;
+		const double used = ((HYD_SPRAY * s.hydDuty) + (OIL_SPRAY * s.oilDuty)) * dt / 60.0;// [lb] of water
+		s.water -= used;
 		if (s.water < 0.0) s.water = 0.0;
-		s.n2 -= s.n2Leak * dt;
+		s.n2 -= (s.n2Leak * dt) + (used * N2_PER_LB);// the nitrogen expands as the water goes out
 		if (s.n2 < 0.0) s.n2 = 0.0;
 
 		// the lube oil: above the limit the bearings seize

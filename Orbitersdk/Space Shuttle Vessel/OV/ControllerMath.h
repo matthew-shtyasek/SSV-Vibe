@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <sstream>
 #include <string>
@@ -219,6 +220,57 @@ namespace ctrlmath
 		else if (a == "press") action = ACT_PRESS;
 		else return false;
 		return !panel.empty() && !component.empty();
+	}
+
+	/** Text of an input of a controller, as read by ParseSubDevice (the inverse). */
+	inline std::string FormatSubDevice( int type, int id )
+	{
+		static const char* const axes[] = {"Axis X", "Axis Y", "Axis Z", "Axis RX", "Axis RY", "Axis RZ", "Slider 0", "Slider 1"};
+		if (type == SUB_BUTTON) return "Button " + std::to_string( id );
+		if (type == SUB_POV) return "POV " + std::to_string( id >> 1 ) + (((id & 1) != 0) ? "V" : "H");
+		return ((id >= 0) && (id < 8)) ? axes[id] : "Axis ?";
+	}
+
+	/** Name of an action of a panel button, as read by ParsePanelInput (the inverse). */
+	inline const char* ActionName( int action )
+	{
+		static const char* const names[] = {"UP", "DOWN", "MID", "TOGGLE", "HOLD_UP", "HOLD_DOWN", "PRESS"};
+		return ((action >= 0) && (action <= ACT_PRESS)) ? names[action] : "PRESS";
+	}
+
+	/** Line of a configuration file: INPUT, SUBDEVID, REVERSE, DEADZONE, EXPO, CENTER (tabs). */
+	inline std::string FormatConfigLine( const std::string& input, int type, int id, bool reverse, double deadzone, double expo, double center )
+	{
+		char buf[96];
+		if (type == SUB_AXIS) sprintf_s( buf, sizeof( buf ), "\t%s\t%.3f\t%.3f\t%.4f", reverse ? "true" : "false", deadzone, expo, center );
+		else sprintf_s( buf, sizeof( buf ), "\t%s", reverse ? "true" : "false" );
+		return input + "\t" + FormatSubDevice( type, id ) + buf;
+	}
+
+	/**
+	 * Finds the axis that was moved the most from the positions taken before (to assign an axis by moving it).
+	 * @return index of the axis, -1 if none moved more than the threshold
+	 */
+	inline int DetectAxisMove( const double* before, const double* now, int count, double threshold )
+	{
+		int best = -1;
+		double bestDelta = threshold;
+		for (int i = 0; i < count; i++)
+		{
+			const double d = fabs( now[i] - before[i] );
+			if (d > bestDelta)
+			{
+				bestDelta = d;
+				best = i;
+			}
+		}
+		return best;
+	}
+
+	/** Default dead zone of an input when it is assigned (the brakes and the SBTC use the whole range of the axis). */
+	inline double DefaultDeadzone( const std::string& input )
+	{
+		return ((input == "BRAKE_LEFT") || (input == "BRAKE_RIGHT") || (input == "SBTC")) ? 0.0 : 0.05;
 	}
 
 }

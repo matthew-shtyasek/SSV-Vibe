@@ -100,6 +100,10 @@ namespace vc
 		Add(pBlrN2Supply[1] = new StdSwitch2(psts, "BOILER N2 SUPPLY 2"));
 		Add(pBlrN2Supply[2] = new StdSwitch2(psts, "BOILER N2 SUPPLY 3"));
 
+		Add(pHydCircPump[0] = new StdSwitch3(psts, "HYD CIRC PUMP 1"));
+		Add(pHydCircPump[1] = new StdSwitch3(psts, "HYD CIRC PUMP 2"));
+		Add(pHydCircPump[2] = new StdSwitch3(psts, "HYD CIRC PUMP 3"));
+
 		Add( pETUmbDoorMode = new LockableLever2( psts, "ET UMBILICAL DOOR MODE" ) );
 		Add( pETUmbDoorCenterlineLatch = new StdSwitch2( psts, "ET UMBILICAL DOOR CENTERLINE LATCH" ) );
 		Add( pETUmbDoorLeft = new StdSwitch3( psts, "ET UMBILICAL DOOR LEFT DOOR" ) );
@@ -475,6 +479,22 @@ namespace vc
 		pLH2UllagePress->DefineGroup( GRP_S53_R2_VC );
 		pLH2UllagePress->SetInitialAnimState( 0.5f );
 
+		/**** HYD CIRC PUMP 1-3 (GPC up, OFF center, ON down) ****/
+		pHydCircPump[0]->SetMouseRegion( AID_R2, 0.248f, 0.607f, 0.325f, 0.649f );
+		pHydCircPump[0]->SetReference( _V( 1.094, 1.815, 14.125 ), switch_rot );
+		pHydCircPump[0]->DefineGroup( GRP_S29_R2_VC );
+		pHydCircPump[0]->SetInitialAnimState( 0.5f );
+
+		pHydCircPump[1]->SetMouseRegion( AID_R2, 0.325f, 0.607f, 0.402f, 0.649f );
+		pHydCircPump[1]->SetReference( _V( 1.132, 1.826, 14.123 ), switch_rot );
+		pHydCircPump[1]->DefineGroup( GRP_S30_R2_VC );
+		pHydCircPump[1]->SetInitialAnimState( 0.5f );
+
+		pHydCircPump[2]->SetMouseRegion( AID_R2, 0.402f, 0.607f, 0.481f, 0.649f );
+		pHydCircPump[2]->SetReference( _V( 1.171, 1.836, 14.123 ), switch_rot );
+		pHydCircPump[2]->DefineGroup( GRP_S31_R2_VC );
+		pHydCircPump[2]->SetInitialAnimState( 0.5f );
+
 		/**** WSB 1 ****/
 		pBlrCntlrHtr[0]->SetMouseRegion( AID_R2, 0.547575f, 0.754219f, 0.625464f, 0.788508f);
 		pBlrCntlrHtr[0]->SetReference(_V(1.237, 1.84, 13.998), switch_rot);
@@ -628,6 +648,11 @@ namespace vc
 			pBlrCntlrHtr[i]->ConnectPort( 0, pBundle, 2);
 			pBlrCntlrHtr[i]->ConnectPort( 2, pBundle, 3);
 			pBlrN2Supply[i]->ConnectPort( 1, pBundle, 4);
+
+			sprintf_s(cbuf, 255, "HYD_CIRC%d", i+1);
+			pBundle=STS()->BundleManager()->CreateBundle(cbuf, 4);
+			pHydCircPump[i]->ConnectPort( 0, pBundle, 1);// GPC
+			pHydCircPump[i]->ConnectPort( 2, pBundle, 0);// ON
 		}
 
 		DiscreteBundle* pBundleR2 = STS()->BundleManager()->CreateBundle( "R2_INTERNAL_1", 16 );

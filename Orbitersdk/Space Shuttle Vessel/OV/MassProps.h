@@ -50,12 +50,53 @@ namespace massprops
 	inline constexpr double SHARE_LOWER_BOOM = 0.26;// in the middle of the lower arm boom
 	inline constexpr double SHARE_WRIST = 0.16;// between the wrist pitch joint and the end effector
 
-	/** Mass [kg] at a place [m]. Negative masses are allowed (they take mass away from a place). */
+	/**
+	 * Mass [kg] at a place [m]. Negative masses are allowed (they take mass away from a place).
+	 * I is the moment of inertia of the mass about its own center, about axes parallel to the frame [kg m^2] (zero for a point mass; a body
+	 * made of several pieces, like the arm, has the inertia of its pieces about its center here, with the sign of the mass).
+	 */
 	struct Point
 	{
 		double m;
 		VECTOR3 r;
+		VECTOR3 I;
 	};
+
+	/** Moment of inertia of a thin uniform rod from a to b about the axes through its center, parallel to the frame [kg m^2] (the products of inertia are dropped). */
+	inline VECTOR3 RodInertia( double m, const VECTOR3& a, const VECTOR3& b )
+	{
+		const VECTOR3 d = b - a;
+		const double l2 = (d.x * d.x) + (d.y * d.y) + (d.z * d.z);
+		if (l2 <= 0.0) return _V( 0.0, 0.0, 0.0 );
+		const double k = m / 12.0;
+		return _V( k * (l2 - (d.x * d.x)), k * (l2 - (d.y * d.y)), k * (l2 - (d.z * d.z)) );
+	}
+
+	inline VECTOR3 ArmCoM( const VECTOR3& shoulderPitch, const VECTOR3& elbowPitch, const VECTOR3& wristPitch, const VECTOR3& endEffector );
+
+	/**
+	 * Inertia of the arm, made of its links, about its center of mass: the shoulder, the elbow as points, the upper boom (shoulder pitch
+	 * to elbow pitch), the lower boom (elbow pitch to wrist pitch) and the wrist with the end effector as uniform rods.
+	 */
+	inline VECTOR3 ArmInertia( const VECTOR3& shoulderPitch, const VECTOR3& elbowPitch, const VECTOR3& wristPitch, const VECTOR3& endEffector )
+	{
+		const VECTOR3 com = ArmCoM( shoulderPitch, elbowPitch, wristPitch, endEffector );
+		const double mUpper = ARM_MASS * SHARE_UPPER_BOOM;
+		const double mLower = ARM_MASS * SHARE_LOWER_BOOM;
+		const double mWrist = ARM_MASS * SHARE_WRIST;
+		VECTOR3 inertia = RodInertia( mUpper, shoulderPitch, elbowPitch ) + RodInertia( mLower, elbowPitch, wristPitch ) + RodInertia( mWrist, wristPitch, endEffector );
+		// the pieces about the center of the arm (parallel axes)
+		const double mShoulder = ARM_MASS * SHARE_SHOULDER;
+		const double mElbow = ARM_MASS * SHARE_ELBOW;
+		const VECTOR3 pieceR[5] = {shoulderPitch, (shoulderPitch + elbowPitch) * 0.5, elbowPitch, (elbowPitch + wristPitch) * 0.5, (wristPitch + endEffector) * 0.5};
+		const double pieceM[5] = {mShoulder, mUpper, mElbow, mLower, mWrist};
+		for (int i = 0; i < 5; i++)
+		{
+			const VECTOR3 d = pieceR[i] - com;
+			inertia += _V( pieceM[i] * ((d.y * d.y) + (d.z * d.z)), pieceM[i] * ((d.x * d.x) + (d.z * d.z)), pieceM[i] * ((d.x * d.x) + (d.y * d.y)) );
+		}
+		return inertia;
+	}
 
 	/** Center of mass of the arm for the positions of its joints and of the end effector (all in the same frame). */
 	inline VECTOR3 ArmCoM( const VECTOR3& shoulderPitch, const VECTOR3& elbowPitch, const VECTOR3& wristPitch, const VECTOR3& endEffector )
@@ -117,7 +158,7 @@ namespace massprops
 		cog = sum / mass;
 
 		VECTOR3 inertia = _V( baseMass * basePMI.x, baseMass * basePMI.y, baseMass * basePMI.z ) + PointInertia( baseMass, baseCoG, cog );
-		for (int i = 0; i < n; i++) inertia += PointInertia( p[i].m, p[i].r, cog );
+		for (int i = 0; i < n; i++) inertia += PointInertia( p[i].m, p[i].r, cog ) + p[i].I;
 		return inertia / mass;
 	}
 
@@ -132,7 +173,7 @@ namespace massprops
 	{
 		VECTOR3 inertia = _V( 0.0, 0.0, 0.0 );
 		if (totalMass <= 0.0) return inertia;
-		for (int i = 0; i < n; i++) inertia += PointInertia( p[i].m, p[i].r, about );
+		for (int i = 0; i < n; i++) inertia += PointInertia( p[i].m, p[i].r, about ) + p[i].I;
 		return inertia / totalMass;
 	}
 }

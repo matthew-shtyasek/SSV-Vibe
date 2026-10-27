@@ -2,6 +2,7 @@
 #include "Atlantis.h"
 #include "SSVOptions.h"
 #include "WSB.h"
+#include "HandControllers.h"
 
 
 namespace
@@ -19,7 +20,7 @@ namespace
 }
 
 
-SettingsMFD::SettingsMFD( DWORD w, DWORD h, VESSEL* vessel ): MFD2( w, h, vessel ), statusTime( -100.0 ), page( settings::PAGE_SETTINGS ), failRow( 0 )
+SettingsMFD::SettingsMFD( DWORD w, DWORD h, VESSEL* vessel ): MFD2( w, h, vessel ), statusTime( -100.0 ), page( settings::PAGE_SETTINGS ), failRow( 0 ), ctrlRow( 0 ), lastLearning( -1 )
 {
 	sts = static_cast<Atlantis*>(vessel);
 	status[0] = 0;
@@ -30,6 +31,18 @@ SettingsMFD::SettingsMFD( DWORD w, DWORD h, VESSEL* vessel ): MFD2( w, h, vessel
 
 SettingsMFD::~SettingsMFD()
 {
+	SetPage( settings::PAGE_SETTINGS );
+}
+
+void SettingsMFD::SetPage( int newPage )
+{
+	HandControllers* hc = sts->GetHandControllers();
+	if (hc != NULL)
+	{
+		if (page == settings::PAGE_CONTROLLERS) hc->StopLearn();
+		hc->SetRawPolling( newPage == settings::PAGE_CONTROLLERS );
+	}
+	page = newPage;
 }
 
 void SettingsMFD::Apply( void )
@@ -54,6 +67,7 @@ bool SettingsMFD::Update( oapi::Sketchpad* skp )
 	{
 		if (page == settings::PAGE_FAILURES) DrawFailures( skp );
 		else if (page == settings::PAGE_STATUS) DrawStatus( skp );
+		else if (page == settings::PAGE_CONTROLLERS) DrawControllers( skp );
 		else DrawSettings( skp );
 		return true;
 	}
@@ -139,10 +153,17 @@ void SettingsMFD::DrawStatus( oapi::Sketchpad* skp )
 		sprintf_s( buf, sizeof( buf ), "  H2O %3.0f LB   RSVR %3.0f%%", wsb->GetWater(), 100.0 * wsb->GetHydraulicQuantity() );
 		skp->Text( static_cast<int>(cw), y, buf, static_cast<int>(strlen( buf )) );
 		y += line;
+		skp->SetTextColor( wsb->CirculationPumpRunning() ? COLOR_VALUE : COLOR_NOTE );
+		skp->Text( static_cast<int>(3 * cw), y, wsb->CirculationPumpRunning() ? "CIRC ON" : "CIRC off", wsb->CirculationPumpRunning() ? 7 : 8 );
+		if (wsb->VentFrozen())
+		{
+			skp->SetTextColor( COLOR_WARNING );
+			skp->Text( static_cast<int>(13 * cw), y, "VENT ICE", 8 );
+		}
 		if (wsb->BearingsSeized())
 		{
 			skp->SetTextColor( COLOR_WARNING );
-			skp->Text( static_cast<int>(3 * cw), y, "APU BEARINGS SEIZED", 19 );
+			skp->Text( static_cast<int>(23 * cw), y, "APU SEIZED", 10 );
 		}
 		y += line;
 	}
@@ -302,15 +323,158 @@ bool SettingsMFD::KeyFailures( DWORD key )
 	return true;
 }
 
+void SettingsMFD::DrawControllers( oapi::Sketchpad* skp )
+{
+	Title( skp, "SSV CONTROLLERS" );
+	HandControllers* hc = sts->GetHandControllers();
+	const int line = static_cast<int>(ch);
+	const int right = static_cast<int>(W) - static_cast<int>(2 * cw);
+	if (hc == NULL)
+	{
+		skp->SetTextColor( COLOR_NOTE );
+		skp->Text( static_cast<int>(cw), 3 * line, "Not available: the vessel is not in focus", 41 );
+		return;
+	}
+	hc->SetRawPolling( true );
+
+	// an assignment just finished
+	const int learning = hc->LearningInput();
+	if ((lastLearning >= 0) && (learning < 0))
+	{
+		sprintf_s( status, sizeof( status ), "%s: %s", HandControllers::InputName( lastLearning ), hc->DescribeInput( lastLearning ).c_str() );
+		statusTime = oapiGetSysTime();
+	}
+	lastLearning = learning;
+
+	const int count = HandControllers::INPUT_COUNT;
+	const int rows = static_cast<int>((H - (7 * ch)) / ch);
+	int first = ctrlRow - (rows / 2);
+	if (first > (count - rows)) first = count - rows;
+	if (first < 0) first = 0;
+
+	int y = 3 * line;
+	char buf[64];
+	for (int r = 0; (r < rows) && ((first + r) < count); r++)
+	{
+		const int in = first + r;
+		const bool selected = (in == ctrlRow);
+		skp->SetTextColor( selected ? COLOR_SELECTED : COLOR_TEXT );
+		skp->Text( static_cast<int>(cw), y, selected ? ">" : " ", 1 );
+		sprintf_s( buf, sizeof( buf ), "%s", HandControllers::InputName( in ) );
+		skp->Text( static_cast<int>(3 * cw), y, buf, static_cast<int>(strlen( buf )) );
+
+		std::string src = (in == learning) ? "move / press..." : hc->DescribeInput( in );
+		if (src.length() > 15) src.resize( 15 );
+		skp->SetTextColor( (in == learning) ? COLOR_WARNING : (hc->HasInput( in ) ? COLOR_VALUE : COLOR_NOTE) );
+		skp->Text( static_cast<int>(22 * cw), y, src.c_str(), static_cast<int>(src.length()) );
+
+		if (hc->HasInput( in ))
+		{
+			if (HandControllers::IsAxisInput( in )) sprintf_s( buf, sizeof( buf ), "%+.2f", hc->GetAxis( in ) );
+			else sprintf_s( buf, sizeof( buf ), "%s", hc->GetButton( in ) ? "ON" : "off" );
+			skp->SetTextColor( selected ? COLOR_SELECTED : COLOR_TEXT );
+			skp->SetTextAlign( oapi::Sketchpad::RIGHT );
+			skp->Text( right, y, buf, static_cast<int>(strlen( buf )) );
+			skp->SetTextAlign( oapi::Sketchpad::LEFT );
+		}
+		y += line;
+	}
+
+	// the controllers found, and the message
+	y = static_cast<int>(H) - static_cast<int>(4 * ch);
+	skp->SetTextColor( COLOR_NOTE );
+	if (hc->DeviceCount() == 0) skp->Text( static_cast<int>(cw), y, "No game controllers found", 25 );
+	for (int d = 0; (d < hc->DeviceCount()) && (d < 2); d++)
+	{
+		std::string n = "J" + std::to_string( d + 1 ) + " " + hc->DeviceName( d );
+		if (n.length() > 40) n.resize( 40 );
+		skp->Text( static_cast<int>(cw), y, n.c_str(), static_cast<int>(n.length()) );
+		y += line;
+	}
+	y = static_cast<int>(H) - static_cast<int>(2 * ch);
+	if ((oapiGetSysTime() - statusTime) < STATUS_TIME)
+	{
+		skp->SetTextColor( COLOR_VALUE );
+		skp->Text( static_cast<int>(cw), y, status, static_cast<int>(strlen( status )) );
+	}
+	else
+	{
+		skp->SetTextColor( COLOR_NOTE );
+		skp->Text( static_cast<int>(cw), y, "TOG: assign  INC: reverse  DEF: clear  SAVE", 44 );
+	}
+}
+
+bool SettingsMFD::KeyControllers( DWORD key )
+{
+	HandControllers* hc = sts->GetHandControllers();
+	if (hc == NULL) return false;
+	const int count = HandControllers::INPUT_COUNT;
+	switch (key)
+	{
+		case OAPI_KEY_UP:
+		case OAPI_KEY_U:
+			hc->StopLearn();
+			ctrlRow = (ctrlRow + count - 1) % count;
+			break;
+		case OAPI_KEY_DOWN:
+		case OAPI_KEY_D:
+			hc->StopLearn();
+			ctrlRow = (ctrlRow + 1) % count;
+			break;
+		case OAPI_KEY_RETURN:
+		case OAPI_KEY_T:
+		case OAPI_KEY_SPACE:
+			if (hc->LearningInput() >= 0) hc->StopLearn();
+			else hc->StartLearn( ctrlRow );
+			break;
+		case OAPI_KEY_LEFT:
+		case OAPI_KEY_MINUS:
+		case OAPI_KEY_RIGHT:
+		case OAPI_KEY_EQUALS:
+			hc->ToggleReverse( ctrlRow );
+			break;
+		case OAPI_KEY_DELETE:
+		case OAPI_KEY_F:
+			hc->StopLearn();
+			hc->ClearInput( ctrlRow );
+			break;
+		case OAPI_KEY_A:// the current position of the axes as their center
+			hc->CalibrateCenters();
+			sprintf_s( status, sizeof( status ), "Axes centered (SAVE to keep)" );
+			statusTime = oapiGetSysTime();
+			break;
+		case OAPI_KEY_S:
+		{
+			std::string msg;
+			hc->SaveConfigs( msg );
+			sprintf_s( status, sizeof( status ), "%.47s", msg.c_str() );
+			statusTime = oapiGetSysTime();
+			break;
+		}
+		default:
+			return false;
+	}
+	return true;
+}
+
 bool SettingsMFD::ConsumeKeyBuffered( DWORD key )
 {
 	if (key == OAPI_KEY_P)
 	{
-		page = settings::NextPage( page, 1 );
+		SetPage( settings::NextPage( page, 1 ) );
 		InvalidateDisplay();
 		return true;
 	}
 	if (page == settings::PAGE_STATUS) return false;
+	if (page == settings::PAGE_CONTROLLERS)
+	{
+		if (KeyControllers( key ))
+		{
+			InvalidateDisplay();
+			return true;
+		}
+		return false;
+	}
 	if (page == settings::PAGE_FAILURES)
 	{
 		if (KeyFailures( key ))

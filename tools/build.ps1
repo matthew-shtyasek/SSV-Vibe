@@ -81,7 +81,7 @@ function Invoke-LowPriorityBuild( [string]$name, [string[]]$arguments )
 	Write-Host "${name}: OK"
 }
 
-$targets = 'SSV_OV;SSV_ET;SSV_SRB;SSV_LCC;SSV_LC39;SSV_MLP;SSV_CT;SSV_DragChute;SSV_XenonLights;SSV_Centaur;SSV_IUS_SRM1;SSV_IUS_SRM2;SSV_OBSS;SSV_SLC6'
+$targets = 'SSV_OV;SSV_ET;SSV_SRB;SSV_LCC;SSV_LC39;SSV_MLP;SSV_CT;SSV_DragChute;SSV_XenonLights;SSV_Centaur;SSV_IUS_SRM1;SSV_IUS_SRM2;SSV_OBSS;SSV_SLC6;SSV_HST'
 Invoke-LowPriorityBuild 'ssv' @(
 	"`"$ssv\SpaceShuttleVessel_2017.sln`"", "/t:$targets", "/p:Configuration=$Configuration", '/p:Platform=x86',
 	"/p:PlatformToolset=$Toolset", "/p:WindowsTargetPlatformVersion=$WinSdk", "/p:ForceImportAfterCppProps=`"$props`"",

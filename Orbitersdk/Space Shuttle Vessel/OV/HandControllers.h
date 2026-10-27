@@ -117,6 +117,51 @@ public:
 	 */
 	std::string GetStatusText( void ) const;
 
+	// ---- used by the controllers page of the settings MFD ----
+
+	/** @return true if the input is an axis (-1 to +1), false if it is a button */
+	static bool IsAxisInput( int input ) { return input < RMS_CAPTURE; }
+
+	/** @return name of the input as written in the configuration files */
+	static const char* InputName( int input );
+
+	int DeviceCount( void ) const;
+	std::string DeviceName( int index ) const;
+
+	/** While on, the controllers are read even if none is configured (to assign them). */
+	void SetRawPolling( bool on );
+
+	/** @return the connections of the input, for example "J1 Axis X, J2 Button 3 (rev)", "-" if there are none */
+	std::string DescribeInput( int input ) const;
+
+	/** Takes the current position of all controllers as the position at rest, for LearnStep. */
+	void BeginLearn( void );
+
+	/**
+	 * Looks for an axis that moved (axis inputs) or a button/hat direction that was pressed (button inputs) since BeginLearn and, if found,
+	 * connects it to the input in place of the connections it had.
+	 * @return true if the input was assigned
+	 */
+	bool LearnStep( int input );
+
+	/** Waits (checked in each Poll) for the next movement of an axis or press of a button, and assigns it to the input. */
+	void StartLearn( int input );
+	void StopLearn( void );
+	/** @return the input that waits for an assignment, -1 if none */
+	int LearningInput( void ) const;
+
+	/** Removes the connections of an input. */
+	void ClearInput( int input );
+
+	/** Reverses the direction of the connections of an input. @return false if there are none */
+	bool ToggleReverse( int input );
+
+	/**
+	 * Writes a configuration file for each controller that has connections (or already had a file); the previous file is kept as .bak.
+	 * @param message result, for the display
+	 */
+	bool SaveConfigs( std::string& message );
+
 	struct Impl;// implementation (public so the DirectInput callbacks can use it)
 
 private:

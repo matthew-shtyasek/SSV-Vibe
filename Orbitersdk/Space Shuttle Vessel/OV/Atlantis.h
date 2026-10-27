@@ -864,6 +864,7 @@ class Atlantis: public VESSEL4
 		virtual DiscreteBundleManager* BundleManager() const;
 		mission::Mission* GetMissionData() const;
 		SSVOptions* GetOptions( void ) const;
+		HandControllers* GetHandControllers( void ) const { return pHC; }
 
 
 		virtual short GetETPropellant() const;

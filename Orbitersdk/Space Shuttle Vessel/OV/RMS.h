@@ -405,6 +405,7 @@ private:
 	rmsreact::AccelEstimator reactArmEst;// acceleration of the center of mass of the arm relative to the orbiter (option RMSReaction)
 	VESSEL* reactPayload;
 	VECTOR3 posArmCoM;// center of mass of the arm (frame of the mesh)
+	VECTOR3 armInertia;// inertia of the links of the arm about its center of mass [kg m^2]
 	DiscInPort AutoSeqProceed;// AUTO SEQ switch in PROCEED
 	DiscInPort EnterPB;// ENTER pushbutton
 	DiscOutPort ReadyLight, InProgLight;

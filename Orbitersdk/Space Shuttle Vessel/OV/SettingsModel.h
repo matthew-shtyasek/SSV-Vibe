@@ -58,6 +58,11 @@ namespace settings
 	inline constexpr const char* const FREE_MOVE_KEYS[] = {"Ctrl+Home", "Ctrl+End", "Ctrl+Insert", "Ctrl+Delete", "Ctrl+Scroll Lock", "Ctrl+Grave (`)"};
 	inline constexpr int FREE_MOVE_KEY_COUNT = sizeof( FREE_MOVE_KEYS ) / sizeof( FREE_MOVE_KEYS[0] );
 
+	/** Random failures of the water spray boilers: names of the choices and the rate of each [1/hour per boiler]. */
+	inline constexpr const char* const HYD_FAILURE_RATE_NAMES[] = {"Off", "1 in 20 h", "1 in 5 h", "1 in 1 h"};
+	inline constexpr double HYD_FAILURE_RATES[] = {0.0, 0.05, 0.2, 1.0};
+	inline constexpr int HYD_FAILURE_RATE_COUNT = sizeof( HYD_FAILURE_RATES ) / sizeof( HYD_FAILURE_RATES[0] );
+
 	/** Index of each option in the table (the order of the table). */
 	enum Index
 	{
@@ -90,6 +95,7 @@ namespace settings
 		VC_FREE_MOVE,
 		VC_FREE_MOVE_KEY,
 		HYDRAULIC_THERMAL,
+		HYDRAULIC_RANDOM_FAILURES,
 		COUNT
 	};
 
@@ -123,6 +129,7 @@ namespace settings
 		{"VCFreeMove", "Free head movement", "A key switches it on: then the arrows and Ins/Del move the head around the station", KIND_BOOL, 1.0, 0.0, 1.0, 1.0, false, GROUP_CABIN},
 		{"VCFreeMoveKey", "Free movement key", "Key that switches the free movement of the head on and off (the arrows are used by the THC)", KIND_CHOICE, 0.0, 0.0, FREE_MOVE_KEY_COUNT - 1, 1.0, false, GROUP_CABIN, FREE_MOVE_KEYS},
 		{"HydraulicThermal", "Hydraulic heating", "Heat of the hydraulic fluid and lube oil, boiler cooling and overheating failures", KIND_BOOL, 1.0, 0.0, 1.0, 1.0, false, GROUP_SYSTEMS},
+		{"HydraulicRandomFailures", "Random boiler failures", "Random boiler failures (to train): dice thrown at random 5-25 min intervals; rate per boiler", KIND_CHOICE, 0.0, 0.0, HYD_FAILURE_RATE_COUNT - 1, 1.0, false, GROUP_SYSTEMS, HYD_FAILURE_RATE_NAMES},
 	};
 	static_assert( (sizeof( ITEMS ) / sizeof( ITEMS[0] )) == COUNT, "the table of the options and its indices" );
 
@@ -202,7 +209,7 @@ namespace settings
 	inline int FailKind( int row ) { return row % FAIL_KINDS; }
 
 	/** Pages of the MFD */
-	enum Page {PAGE_SETTINGS = 0, PAGE_FAILURES, PAGE_STATUS, PAGE_COUNT};
+	enum Page {PAGE_SETTINGS = 0, PAGE_FAILURES, PAGE_STATUS, PAGE_CONTROLLERS, PAGE_COUNT};
 	inline int NextPage( int page, int dir ) { return (page + ((dir >= 0) ? 1 : (PAGE_COUNT - 1))) % PAGE_COUNT; }
 
 	/** Position of the option in the list of its group (the MFD shows the groups one after the other). */

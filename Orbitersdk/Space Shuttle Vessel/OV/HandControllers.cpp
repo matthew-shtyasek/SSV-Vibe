@@ -80,6 +80,9 @@ namespace
 		std::string name;
 		std::vector<std::string> axes;// names of the axes found, for the log of detected devices
 		double axisnorm[8];// normalized raw axes (X, Y, Z, RX, RY, RZ, slider 0, slider 1)
+		std::string cfgpath;// file that the configuration was read from (or will be written to), empty if none
+		DIJOYSTATE2 learnState;// state at the moment of BeginLearn
+		double learnAxes[8];
 	};
 
 	BOOL CALLBACK EnumDevicesCallback( const DIDEVICEINSTANCE* inst, VOID* ctx );
@@ -116,6 +119,8 @@ struct HandControllers::Impl
 {
 	LPDIRECTINPUT8 di = NULL;
 	bool initialized = false;
+	bool raw = false;// read the controllers even if none is configured
+	int learning = -1;// input that waits for an assignment
 	std::vector<Device> devices;
 	std::vector<Connection> conns[INPUT_COUNT];
 
@@ -217,6 +222,7 @@ void HandControllers::Impl::LoadConfig( int deviceindex )
 		}
 	}
 	if (!file.is_open()) return;
+	devices[deviceindex].cfgpath = used;
 
 	int count = 0;
 	std::string line;
@@ -418,7 +424,7 @@ void HandControllers::Poll( void )
 
 	bool any = !impl->panelbindings.empty();
 	for (int i = 0; i < INPUT_COUNT; i++) if (!impl->conns[i].empty()) any = true;
-	if (!any) return;// no controller is configured
+	if (!any && !impl->raw) return;// no controller is configured
 
 	for (auto& d : impl->devices)
 	{
@@ -482,6 +488,8 @@ void HandControllers::Poll( void )
 		impl->axisvalue[i] = best;
 		impl->buttonvalue[i] = pressed;
 	}
+
+	if ((impl->learning >= 0) && LearnStep( impl->learning )) impl->learning = -1;
 	return;
 }
 
@@ -560,4 +568,196 @@ std::string HandControllers::GetStatusText( void ) const
 		t += buf;
 	}
 	return t;
+}
+
+
+const char* HandControllers::InputName( int input )
+{
+	return ((input >= 0) && (input < INPUT_COUNT)) ? INPUT_NAMES[input] : "?";
+}
+
+int HandControllers::DeviceCount( void ) const
+{
+	return (int)impl->devices.size();
+}
+
+std::string HandControllers::DeviceName( int index ) const
+{
+	if ((index < 0) || (index >= (int)impl->devices.size())) return "";
+	return impl->devices[index].name;
+}
+
+void HandControllers::SetRawPolling( bool on )
+{
+	impl->raw = on;
+}
+
+std::string HandControllers::DescribeInput( int input ) const
+{
+	if ((input < 0) || (input >= INPUT_COUNT) || impl->conns[input].empty()) return "-";
+	std::string t;
+	for (const auto& c : impl->conns[input])
+	{
+		if (!t.empty()) t += ", ";
+		t += "J" + std::to_string( c.device + 1 ) + " " + ctrlmath::FormatSubDevice( c.type, c.id );
+		if (c.reverse) t += " (rev)";
+	}
+	return t;
+}
+
+void HandControllers::BeginLearn( void )
+{
+	for (auto& d : impl->devices)
+	{
+		d.learnState = d.state;
+		for (int k = 0; k < 8; k++) d.learnAxes[k] = d.axisnorm[k];
+	}
+}
+
+bool HandControllers::LearnStep( int input )
+{
+	if ((input < 0) || (input >= INPUT_COUNT) || !impl->di) return false;
+
+	int dev = -1;
+	int type = SUB_AXIS;
+	int id = 0;
+	bool reverse = false;
+
+	for (size_t i = 0; (i < impl->devices.size()) && (dev < 0); i++)
+	{
+		const Device& d = impl->devices[i];
+		if (IsAxisInput( input ))
+		{
+			const int a = ctrlmath::DetectAxisMove( d.learnAxes, d.axisnorm, 8, 0.5 );
+			if (a >= 0)
+			{
+				dev = (int)i;
+				type = SUB_AXIS;
+				id = a;
+			}
+		}
+		else
+		{
+			for (int k = 0; k < 128; k++)
+			{
+				if (((d.state.rgbButtons[k] & 0x80) != 0) && ((d.learnState.rgbButtons[k] & 0x80) == 0))
+				{
+					dev = (int)i;
+					type = SUB_BUTTON;
+					id = k;
+					break;
+				}
+			}
+			for (int p = 0; (p < 4) && (dev < 0); p++)
+			{
+				double h, v;
+				double h0, v0;
+				if (!ctrlmath::PovToDirection( d.state.rgdwPOV[p], h, v )) continue;
+				if (ctrlmath::PovToDirection( d.learnState.rgdwPOV[p], h0, v0 )) continue;// was not at rest
+				dev = (int)i;
+				type = SUB_POV;
+				if (fabs( h ) > 0.5)
+				{
+					id = p * 2;
+					reverse = (h < 0.0);
+				}
+				else
+				{
+					id = (p * 2) + 1;
+					reverse = (v < 0.0);
+				}
+			}
+		}
+	}
+	if (dev < 0) return false;
+
+	Connection c;
+	c.device = dev;
+	c.type = type;
+	c.id = id;
+	c.reverse = reverse;
+	c.deadzone = (type == SUB_AXIS) ? ctrlmath::DefaultDeadzone( INPUT_NAMES[input] ) : 0.0;
+	c.expo = 0.0;
+	c.center = 0.0;
+	impl->conns[input].clear();
+	impl->conns[input].push_back( c );
+	oapiWriteLogV( "(SSV_OV) [INFO] Hand controllers: %s assigned to Joystick%d %s", INPUT_NAMES[input], dev + 1, ctrlmath::FormatSubDevice( type, id ).c_str() );
+	return true;
+}
+
+void HandControllers::StartLearn( int input )
+{
+	if ((input < 0) || (input >= INPUT_COUNT)) return;
+	BeginLearn();
+	impl->learning = input;
+}
+
+void HandControllers::StopLearn( void )
+{
+	impl->learning = -1;
+}
+
+int HandControllers::LearningInput( void ) const
+{
+	return impl->learning;
+}
+
+void HandControllers::ClearInput( int input )
+{
+	if ((input < 0) || (input >= INPUT_COUNT)) return;
+	impl->conns[input].clear();
+	impl->axisvalue[input] = 0.0;
+	impl->buttonvalue[input] = false;
+}
+
+bool HandControllers::ToggleReverse( int input )
+{
+	if ((input < 0) || (input >= INPUT_COUNT) || impl->conns[input].empty()) return false;
+	for (auto& c : impl->conns[input]) c.reverse = !c.reverse;
+	return true;
+}
+
+bool HandControllers::SaveConfigs( std::string& message )
+{
+	int written = 0;
+	bool ok = true;
+	for (size_t i = 0; i < impl->devices.size(); i++)
+	{
+		Device& d = impl->devices[i];
+		std::vector<std::string> lines;
+		for (int input = 0; input < INPUT_COUNT; input++)
+		{
+			for (const auto& c : impl->conns[input])
+			{
+				if (c.device != (int)i) continue;
+				lines.push_back( ctrlmath::FormatConfigLine( INPUT_NAMES[input], c.type, c.id, c.reverse, c.deadzone, c.expo, c.center ) );
+			}
+		}
+		for (const auto& b : impl->panelbindings)
+		{
+			for (const auto& c : b.conns)
+			{
+				if (c.device != (int)i) continue;
+				lines.push_back( ctrlmath::FormatConfigLine( "PANEL " + b.panel + "/" + b.component + ":" + ctrlmath::ActionName( b.action ), c.type, c.id, c.reverse, 0.0, 0.0, 0.0 ) );
+			}
+		}
+		if (lines.empty() && d.cfgpath.empty()) continue;
+
+		const std::string path = d.cfgpath.empty() ? (std::string( CONFIG_PATH ) + "Joystick" + std::to_string( i + 1 ) + ".cfg") : d.cfgpath;
+		if (!d.cfgpath.empty()) CopyFileA( path.c_str(), (path + ".bak").c_str(), TRUE );// the first version stays as .bak
+
+		std::ofstream file( path );
+		if (!file.is_open())
+		{
+			ok = false;
+			continue;
+		}
+		file << "# Written by the controllers page of the SSV settings MFD for: " << d.name << "\n";
+		file << "# INPUT\tSUBDEVID\tREVERSE\tDEADZONE\tEXPO\tCENTER\n";
+		for (const auto& l : lines) file << l << "\n";
+		d.cfgpath = path;
+		written++;
+	}
+	message = ok ? ("Saved " + std::to_string( written ) + " file(s) in Config\\SSV\\Controllers") : "A file could not be written";
+	return ok;
 }

@@ -53,11 +53,16 @@ private:
 	void DrawFailures( oapi::Sketchpad* skp );
 	void DrawStatus( oapi::Sketchpad* skp );
 	bool KeyFailures( DWORD key );
+	void DrawControllers( oapi::Sketchpad* skp );
+	bool KeyControllers( DWORD key );
+	void SetPage( int newPage );// the controllers are read while their page is shown
 
 	Atlantis* sts;
 	settings::Editor editor;
 	int page;
 	int failRow;// selected line of the page of the failures
+	int ctrlRow;// selected input of the page of the controllers
+	int lastLearning;// input that was waiting for an assignment at the last update
 	char status[48];
 	double statusTime;
 };

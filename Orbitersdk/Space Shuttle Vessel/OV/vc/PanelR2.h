@@ -86,6 +86,7 @@ namespace vc
 		StdSwitch3* pBlrCntlrHtr[3];
 		StdSwitch2* pBlrPower[3];
 		StdSwitch2* pBlrN2Supply[3];
+		StdSwitch3* pHydCircPump[3];
 
 		LockableLever3* pAPUOperate[3];
 		StdSwitch2* pAPUSpeedSelect[3];// NORM, HIGH

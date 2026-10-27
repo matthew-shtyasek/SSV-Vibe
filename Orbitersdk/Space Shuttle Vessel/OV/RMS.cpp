@@ -97,6 +97,7 @@ const VECTOR3 RMS_WY_JOINT = _V( -2.7432, 0.709931, -6.9141 );// Xo+1226.5, Yo-1
 const VECTOR3 RMS_EE_POS = _V( -2.7432, 0.709931, -8.3365 );// Xo+1282.5, Yo-108.0, Zo+444.765
 
 const VECTOR3 RMS_ARM_COM_STOWED = massprops::ArmCoM( RMS_SP_JOINT, RMS_EP_JOINT, RMS_WP_JOINT, RMS_EE_POS );// center of mass of the arm in its place in the default center of mass of the orbiter
+const VECTOR3 RMS_ARM_INERTIA_STOWED = massprops::ArmInertia( RMS_SP_JOINT, RMS_EP_JOINT, RMS_WP_JOINT, RMS_EE_POS );// inertia of the arm about it, stowed
 
 const VECTOR3 RMS_SY_AXIS =_V( -0.333478, 0.942758, 0.0 );
 const VECTOR3 RMS_SP_AXIS = _V( 0.942758, 0.333478, 0.0 );
@@ -189,6 +190,7 @@ RMS::RMS( AtlantisSubsystemDirector *_director, const std::string& _ident, bool 
 
 	posEE = RMS_EE_POS;
 	posArmCoM = RMS_ARM_COM_STOWED;
+	armInertia = RMS_ARM_INERTIA_STOWED;
 	dirEE = -RMS_WR_AXIS;
 	rotEE = RMS_EE_ROT;
 	rotEEik = RMS_SY_AXIS;
@@ -2438,15 +2440,20 @@ void RMS::CalcVectors( void )
 	dirEE = -axisWR;
 
 	posArmCoM = massprops::ArmCoM( posSP, posEP, posWP, posEE );
+	armInertia = massprops::ArmInertia( posSP, posEP, posWP, posEE );
 	return;
 }
 
 void RMS::GetMassPoints( massprops::Point& arm, massprops::Point& armStowed, massprops::Point& payload ) const
 {
+	// the arm, with the inertia of its links (booms as rods) about its center; the stowed arm takes away the same
 	arm.m = massprops::ARM_MASS;
 	arm.r = posArmCoM + RMS_MESH_OFFSET;
+	arm.I = armInertia;
 	armStowed.m = -massprops::ARM_MASS;
 	armStowed.r = RMS_ARM_COM_STOWED + RMS_MESH_OFFSET;
+	armStowed.I = RMS_ARM_INERTIA_STOWED * -1.0;
+	payload.I = _V( 0.0, 0.0, 0.0 );
 	payload.m = 0.0;
 	payload.r = _V( 0.0, 0.0, 0.0 );
 	if ((attachedPayload != NULL) && hAttach)

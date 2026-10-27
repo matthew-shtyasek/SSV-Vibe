@@ -5739,7 +5739,7 @@ void Atlantis::UpdateMassAndCoG( bool bUpdateAttachedVessels )
 	const bool rmsCoG = (pRMS != NULL) && options->RMSCenterOfMass();
 	const bool rmsInertia = (pRMS != NULL) && options->RMSInertia();
 	ATTACHMENTHANDLE ahRMS = rmsCoG ? pRMS->GetEEAttachment() : NULL;// the payload of the arm is handled with the arm
-	massprops::Point rmsArm = {0.0, _V( 0.0, 0.0, 0.0 )};
+	massprops::Point rmsArm = {0.0, _V( 0.0, 0.0, 0.0 ), _V( 0.0, 0.0, 0.0 )};
 	massprops::Point rmsArmStowed = rmsArm;
 	massprops::Point rmsPayload = rmsArm;
 	if (rmsCoG || rmsInertia) pRMS->GetMassPoints( rmsArm, rmsArmStowed, rmsPayload );

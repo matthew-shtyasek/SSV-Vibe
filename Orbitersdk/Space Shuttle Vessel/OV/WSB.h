@@ -79,7 +79,10 @@ using namespace discsignals;
  *   9 water quantity, 10 hydraulic reservoir quantity (out, 5 V = 100%)
  *   11 the hydraulic system holds the pressure, 12 the bearings of the APU seized (out)
  *   13 hydraulic fluid hot (HYD RSVR T), 14 lube oil hot (APU TEMP), 15 the fluid goes through the boiler (out)
- * Failures (the settings MFD and the scenario): controller A or B, ice in the spray valves, nitrogen leak, hydraulic leak.
+ * Bundle HYD_CIRCn (n = 1 to 3), switch HYD CIRC PUMP of the panel R2: 0 ON (in), 1 GPC (in), 2 the pump runs (out).
+ * The heaters of the lines and of the steam vent are on with BOILER PWR on and a controller selected (switch BOILER CNTLR/HTR); without them
+ * the vent and the water lines freeze in the shadow of the Earth. The circulation pump warms the fluid of a stopped system (approximate model).
+ * Failures (the settings MFD, the scenario, or at random with the option): controller A or B, ice in the spray valves, nitrogen leak, hydraulic leak.
  */
 class WSB : public AtlantisSubsystem
 {
@@ -103,6 +106,8 @@ public:
 	double GetWater( void ) const {return th.water;}// [lb]
 	double GetHydraulicQuantity( void ) const {return th.hydQty;}// [0, 1]
 	bool BearingsSeized( void ) const {return th.seized;}
+	bool CirculationPumpRunning( void ) const {return th.circ;}
+	bool VentFrozen( void ) const {return th.ventIce;}
 
 	/** @return true if the failure is active */
 	bool GetFailure( int failure ) const;
@@ -117,6 +122,12 @@ private:
 	hydmodel::State th;
 	bool thermalLoaded;// the temperatures came from the scenario
 	bool hydCautionPrev, oilCautionPrev, seizedPrev;
+	unsigned int rng;// random numbers for the random failures
+	double nextRoll;// [s] simulation time of the next throw of the dice of the random failures (< 0: not set)
+
+	bool InShadow( void ) const;// in orbit, in the shadow of the planet
+	double Random01( void );
+	void RandomFailure( void );// a failure of a random kind, among those not active
 
 	// indicates controller selected and if controller is powered
 	DiscInPort Power, ControllerA, ControllerB;
@@ -125,6 +136,10 @@ private:
 	DiscInPort ApuSpeed, PumpNorm;
 	DiscOutPort CwHydTemp;// hydraulic fluid temperature for the C&W (4.2 V = 230 F)
 	DiscOutPort OilTemp, HydTemp, WaterQty, HydQty, HydOk, LubeSeize, HydCaution, OilCaution, Through;
+
+	// bundle HYD_CIRCn: 0 HYD CIRC PUMP in ON (in), 1 in GPC (in), 2 the pump runs (out)
+	DiscInPort CircOn, CircGpc;
+	DiscOutPort CircRunning;
 };
 
 #endif// _WSB_H_
