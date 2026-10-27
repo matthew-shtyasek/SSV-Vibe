@@ -189,13 +189,13 @@ namespace vc
 		pOSFlood->SetMouseRegion( AID_A6U, 0.679435f, 0.083371f, 0.726827f, 0.155784f );
 
 		pOSFloodDim->DefineGroup( GRP_R1_A6U_VC );
-		pOSFloodDim->SetReference( _V( 0.1058, 0.3375, -0.1066 ), _V( 0.0, -0.2994, -0.9541 ) );
+		pOSFloodDim->SetReference( _V( 0.1058, 0.3375, -0.1066 ), _V( 0.0, 0.2994, 0.9541 ) );
 		pOSFloodDim->SetAngleRange( 270.0 );
 		pOSFloodDim->SetPointerOffset( -90.0 );
 		pOSFloodDim->SetMouseRegion( AID_A6U, 0.761582f, 0.066247f, 0.837409f, 0.166127f );
 
 		pPanelOS->DefineGroup( GRP_R3_A6U_VC );
-		pPanelOS->SetReference( _V( 0.0490, 0.3375, -0.1066 ), _V( 0.0, -0.2994, -0.9541 ) );
+		pPanelOS->SetReference( _V( 0.0490, 0.3375, -0.1066 ), _V( 0.0, 0.2994, 0.9541 ) );
 		pPanelOS->SetAngleRange( 270.0 );
 		pPanelOS->SetPointerOffset( -90.0 );
 		pPanelOS->SetMouseRegion( AID_A6U, 0.869198f, 0.066247f, 0.945025f, 0.166127f );

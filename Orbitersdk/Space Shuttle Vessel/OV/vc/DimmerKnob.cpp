@@ -67,8 +67,8 @@ namespace vc
 		assert( bHasDirection && "DimmerKnob.bHasDirection" );
 		assert( (ang > 0.0) && "DimmerKnob.ang" );
 
-		// the direction of the axis points away from the user (into the panel): a positive angle turns the knob clockwise (as seen from the user), checked on O6 and A6U
-		// the pointer of the mesh at rest is 'offset' degrees counterclockwise from the middle of the travel
+		// the direction of the axis points to the user (the normal of the panel): a positive angle turns the knob clockwise as seen by the user (checked on the screenshots of O6 and A6U)
+		// the pointer of the mesh at rest is 'offset' degrees counterclockwise from the middle of the travel (negative: clockwise)
 		// the group is in the middle of its travel: the first component takes it to the first stop (counterclockwise), the second to the other stop
 		oapiWriteLogV( "(SSV_OV) [INFO] Knob %s: axis (%.3f %.3f %.3f), pointer offset %.0f deg, travel %.0f deg", GetQualifiedIdentifier().c_str(), GetDirection().x, GetDirection().y, GetDirection().z, offset, ang );
 		rotStart = new MGROUP_ROTATE( vc_idx, &grpIndex, 1, GetReference(), GetDirection(), static_cast<float>((offset - (0.5 * ang)) * RAD) );
