@@ -38,6 +38,8 @@ namespace dps
 		MNVR_TRACK_OPTION = false;
 
 		PLOS = _V(0, 0, 0);
+		TLOS = _V(1, 0, 0);
+		RREL = _V(0, 0, 0);
 		TGPOS = _V(0, 0, 0);
 
 		PLOS_C = _V(0, 0, 0);
@@ -1196,6 +1198,19 @@ namespace dps
 		else if (OPT_PROC == 2)
 		{
 			TRACK();
+				if (!std::isfinite( Q_RBOD_M50_S ) || !std::isfinite( Q_RBOD_M50_V.x ) || !std::isfinite( Q_RBOD_M50_V.y ) || !std::isfinite( Q_RBOD_M50_V.z ) || !std::isfinite( REQD_BRATE.x ) || !std::isfinite( REQD_BRATE.y ) || !std::isfinite( REQD_BRATE.z ))
+				{
+					// no valid attitude (for example a target with no state vector): the current attitude is held instead of spinning the orbiter
+					static bool logged = false;
+					if (!logged)
+					{
+						logged = true;
+						oapiWriteLogV( "(SSV_OV) [WARNING] UNIV PTG: the required attitude of the tracking is not valid (TGT ID %d): holding the current attitude", TGT_ID_C );
+					}
+					Q_RBOD_M50_S = Q_BOD_M50_S;
+					Q_RBOD_M50_V = Q_BOD_M50_V;
+					REQD_BRATE = _V( 0, 0, 0 );
+				}
 		}
 		else
 		{
@@ -1274,7 +1289,7 @@ namespace dps
 
 		if (TGT_ID_C == 1) // Rendezvous
 		{
-			TLOS = unit(RREL);
+			{ const double rng = length( RREL ); if (rng > 1.0) TLOS = RREL / rng; }// with no state vector of the target (REL NAV off, no target) the previous line of sight is kept: unit(0) is NaN
 		}
 		else if (TGT_ID_C == 2) // Center of earth
 		{
@@ -1539,6 +1554,22 @@ namespace dps
 				CMPLT_TIME();
 			}
 		}
+	}
+
+	void UniversalPointing::GetInertialAttitude(double& roll, double& pitch, double& yaw)
+	{
+		// the attitude processor writes the quaternion in each step; the inertial coordinates of the ADI are the ones of the angles of the display
+		const double QS = ReadCOMPOOL_VS(SCP_Q_B_I, 1, 4);
+		const VECTOR3 QV = ReadCOMPOOL_VS(SCP_Q_B_I + 2);
+		double QS2;
+		VECTOR3 QV2;
+		QUAT_MULT(QS, QV, Q_M50_INRTL_ORB_S, Q_M50_INRTL_ORB_V, QS2, QV2);
+
+		float r, p, y;
+		ATT_ANG(QS2, QV2, r, p, y);
+		roll = r / RAD_PER_DEG;
+		pitch = p / RAD_PER_DEG;
+		yaw = y / RAD_PER_DEG;
 	}
 
 	void UniversalPointing::ATT_ANG(double QS, VECTOR3 QV, float& ROLL, float& PITCH, float& YAW) const

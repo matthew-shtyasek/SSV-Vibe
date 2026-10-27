@@ -104,6 +104,7 @@ namespace dps
 	class AerojetDAP;
 	class Landing_SOP;
 	class OMSBurnSoftware;
+	class UniversalPointing;
 	class Elevon_PFB_SOP;
 	class Rudder_PFB_SOP;
 	class Speedbrake_PFB_SOP;
@@ -153,6 +154,7 @@ namespace dps
 		AerojetDAP* pAerojetDAP;
 		Landing_SOP* pLanding_SOP;
 		OMSBurnSoftware* pOMSBurnSoftware;
+		UniversalPointing* pUniversalPointing;
 		DedicatedDisplay_SOP* pDedicatedDisplay_SOP;
 
 		ADC* pADC1;
@@ -215,6 +217,8 @@ namespace dps
 		virtual bool OnPaint(vc::MDU* pMDU);
 
 		int GetADIAttitude( void );
+		/** Attitude angles of the ADI in the inertial reference (the same as the UNIV PTG display), degrees; false if they are not available */
+		bool GetADIInertialAttitude( double& roll, double& pitch, double& yaw );
 		int GetADIError( void );
 		int GetADIRate( void );
 		bool GetMECOConfirmedFlag( void ) const;

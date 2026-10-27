@@ -169,6 +169,12 @@ namespace dps
 		VECTOR3 Get_REQD_BRATE() const;
 		double Get_GMTR() const;
 
+		/**
+		 * Attitude angles of the body in the inertial ADI coordinates (the ones of the UNIV PTG display, for the ADI), computed from the current attitude.
+		 * @param[out] roll, pitch, yaw [deg], 0 to 360
+		 */
+		void GetInertialAttitude( double& roll, double& pitch, double& yaw );
+
 	private:
 		void KLoad();
 

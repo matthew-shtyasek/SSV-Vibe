@@ -44,6 +44,7 @@ Date         Developer
 #include "Software/GNC/AerojetDAP.h"
 #include "Software/GNC/Landing_SOP.h"
 #include "Software/GNC/OMSBurnSoftware.h"
+#include "Software/GNC/UniversalPointing.h"
 #include "Software/GNC/DedicatedDisplay_SOP.h"
 
 
@@ -82,6 +83,8 @@ namespace dps {
 		assert( (pLanding_SOP != NULL) && "IDP::Realize.pLanding_SOP" );
 		pOMSBurnSoftware = dynamic_cast<OMSBurnSoftware*> (pGPC1->FindSoftware( "OMSBurnSoftware" ));
 		assert( (pOMSBurnSoftware != NULL) && "IDP::Realize.pOMSBurnSoftware" );
+		pUniversalPointing = dynamic_cast<UniversalPointing*> (pGPC1->FindSoftware( "UniversalPointing" ));
+		assert( (pUniversalPointing != NULL) && "IDP::Realize.pUniversalPointing" );
 		pDedicatedDisplay_SOP = dynamic_cast<DedicatedDisplay_SOP*> (pGPC1->FindSoftware( "DedicatedDisplay_SOP" ));
 		assert( (pDedicatedDisplay_SOP != NULL) && "IDP::Realize.pDedicatedDisplay_SOP" );
 		pADC1 = dynamic_cast<ADC*>(director->GetSubsystemByName( (usIDPID <= 2) ? "ADC1A" : "ADC1B" ));
@@ -837,6 +840,13 @@ namespace dps {
 			default:
 				return 1;// switch in LVLH
 		}
+	}
+
+	bool IDP::GetADIInertialAttitude( double& roll, double& pitch, double& yaw )
+	{
+		if (pUniversalPointing == NULL) return false;
+		pUniversalPointing->GetInertialAttitude( roll, pitch, yaw );
+		return true;
 	}
 
 	int IDP::GetADIError( void )

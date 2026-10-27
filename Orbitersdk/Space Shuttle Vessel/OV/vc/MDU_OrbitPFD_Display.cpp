@@ -46,6 +46,17 @@ namespace vc
 		ADI_STATIC_ORBIT( hDC );
 		if ((MM == 201) || (MM == 202) || (MM == 801))
 		{
+				// the ADI follows the ATTITUDE switch: LVLH is the horizon of Orbiter, INRTL (and REF) the inertial attitude of the DAP, as in the UNIV PTG display
+				if (GetIDP()->GetADIAttitude() != 1)
+				{
+					double ir, ip, iy;
+					if (GetIDP()->GetADIInertialAttitude( ir, ip, iy ))
+					{
+						attRoll = ir;
+						attPitch = ip;
+						attYaw = iy;
+					}
+				}
 			ADI_ORBIT( hDC, attPitch, attRoll, attYaw );
 			ADI_RATE_ORBIT( hDC, av.x, av.z, av.y, adirate );
 			ADI_ERROR_ORBIT( hDC, atterr.x, atterr.z, atterr.y, adierr );
@@ -78,6 +89,17 @@ namespace vc
 		ADI_STATIC_ORBIT( skp );
 		if ((MM == 201) || (MM == 202) || (MM == 801))
 		{
+				// the ADI follows the ATTITUDE switch: LVLH is the horizon of Orbiter, INRTL (and REF) the inertial attitude of the DAP, as in the UNIV PTG display
+				if (GetIDP()->GetADIAttitude() != 1)
+				{
+					double ir, ip, iy;
+					if (GetIDP()->GetADIInertialAttitude( ir, ip, iy ))
+					{
+						attRoll = ir;
+						attPitch = ip;
+						attYaw = iy;
+					}
+				}
 			ADI_ORBIT( skp, attPitch, attRoll, attYaw );
 			ADI_RATE_ORBIT( skp, av.x, av.z, av.y, adirate );
 			ADI_ERROR_ORBIT( skp, atterr.x, atterr.z, atterr.y, adierr );
