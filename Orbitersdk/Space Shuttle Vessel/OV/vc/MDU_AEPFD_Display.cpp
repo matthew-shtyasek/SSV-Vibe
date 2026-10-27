@@ -70,6 +70,19 @@ namespace vc
 		if (attPitch <= 0) attPitch += 360;
 		double attYaw = 0;//STS()->GetSlipAngle() * DEG;
 		//if (attYaw <= 0) attYaw += 360;
+		// in the phases with the orbital DAP the ADI follows the switch ADI ATTITUDE, as in the Orbit PFD (both show the same ADI)
+		if (((MM >= 104) && (MM <= 106)) || ((MM >= 301) && (MM <= 303)))
+		{
+			adiatt = GetIDP()->GetADIAttitude();
+			double ir, ip, iy;
+			if (GetIDP()->GetADIAttitudeAngles( adiatt, ir, ip, iy ))
+			{
+				attRoll = ir;
+				attPitch = ip;
+				attYaw = iy;
+			}
+			atterr = GetIDP()->GetAttitudeCommandErrors();
+		}
 		double hsiheading;
 
 		SelectObject( hDC, gdiSSVAFont_h11w9 );
@@ -135,7 +148,7 @@ namespace vc
 				ADI_STATIC( hDC );
 				ADI( hDC, attPitch, attRoll, attYaw );
 				ADI_RATE_A( hDC, av.x, av.z, av.y, adirate );
-				ADI_ERROR_A( hDC, 0, 0, 0, adierr );// TODO
+				ADI_ERROR_A( hDC, atterr.x, atterr.z, atterr.y, adierr );
 				HSI_E( hDC, STS()->GetYaw(), true, 0.0, false, true, GetIDP()->GetCourseDeviationScale(), GetIDP()->GetCourseDeviation(), GetIDP()->GetPrimaryBearingType(), GetIDP()->GetPrimaryBearing(), GetIDP()->GetSecondaryBearingType(), GetIDP()->GetSecondaryBearing() );
 				AEPFD_XTRK( hDC );// TODO only NOM, TAL and ATO
 				AEPFD_dINC( hDC );
@@ -145,14 +158,14 @@ namespace vc
 				ADI_STATIC( hDC );
 				ADI( hDC, attPitch, attRoll, attYaw );
 				ADI_RATE_A( hDC, av.x, av.z, av.y, adirate );
-				ADI_ERROR_A( hDC, 0, 0, 0, adierr );// TODO
+				ADI_ERROR_A( hDC, atterr.x, atterr.z, atterr.y, adierr );
 				break;
 			case 106:
 				AEPFD_Header_TransDAP( hDC, 106, adiatt );
 				ADI_STATIC( hDC );
 				ADI( hDC, attPitch, attRoll, attYaw );
 				ADI_RATE_A( hDC, av.x, av.z, av.y, adirate );
-				ADI_ERROR_A( hDC, 0, 0, 0, adierr );// TODO
+				ADI_ERROR_A( hDC, atterr.x, atterr.z, atterr.y, adierr );
 				break;
 			case 201:
 				ADI_STATIC( hDC );
@@ -333,6 +346,19 @@ namespace vc
 		if (attPitch <= 0) attPitch += 360;
 		double attYaw = 0;//STS()->GetSlipAngle() * DEG;
 		//if (attYaw <= 0) attYaw += 360;
+		// in the phases with the orbital DAP the ADI follows the switch ADI ATTITUDE, as in the Orbit PFD (both show the same ADI)
+		if (((MM >= 104) && (MM <= 106)) || ((MM >= 301) && (MM <= 303)))
+		{
+			adiatt = GetIDP()->GetADIAttitude();
+			double ir, ip, iy;
+			if (GetIDP()->GetADIAttitudeAngles( adiatt, ir, ip, iy ))
+			{
+				attRoll = ir;
+				attPitch = ip;
+				attYaw = iy;
+			}
+			atterr = GetIDP()->GetAttitudeCommandErrors();
+		}
 		double hsiheading;
 
 		skp->SetFont( skpSSVAFont_h11w9 );
@@ -398,7 +424,7 @@ namespace vc
 				ADI_STATIC( skp );
 				ADI( skp, attPitch, attRoll, attYaw );
 				ADI_RATE_A( skp, av.x, av.z, av.y, adirate );
-				ADI_ERROR_A( skp, 0, 0, 0, adierr );// TODO
+				ADI_ERROR_A( skp, atterr.x, atterr.z, atterr.y, adierr );
 				HSI_E( skp, STS()->GetYaw(), true, 0.0, false, true, GetIDP()->GetCourseDeviationScale(), GetIDP()->GetCourseDeviation(), GetIDP()->GetPrimaryBearingType(), GetIDP()->GetPrimaryBearing(), GetIDP()->GetSecondaryBearingType(), GetIDP()->GetSecondaryBearing() );
 				AEPFD_XTRK( skp );// TODO only NOM, TAL and ATO
 				AEPFD_dINC( skp );
@@ -408,14 +434,14 @@ namespace vc
 				ADI_STATIC( skp );
 				ADI( skp, attPitch, attRoll, attYaw );
 				ADI_RATE_A( skp, av.x, av.z, av.y, adirate );
-				ADI_ERROR_A( skp, 0, 0, 0, adierr );// TODO
+				ADI_ERROR_A( skp, atterr.x, atterr.z, atterr.y, adierr );
 				break;
 			case 106:
 				AEPFD_Header_TransDAP( skp, 106, adiatt );
 				ADI_STATIC( skp );
 				ADI( skp, attPitch, attRoll, attYaw );
 				ADI_RATE_A( skp, av.x, av.z, av.y, adirate );
-				ADI_ERROR_A( skp, 0, 0, 0, adierr );// TODO
+				ADI_ERROR_A( skp, atterr.x, atterr.z, atterr.y, adierr );
 				break;
 			case 201:
 				ADI_STATIC( skp );

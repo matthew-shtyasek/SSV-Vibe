@@ -44,7 +44,8 @@ namespace vc
 		SelectObject( hDC, gdiSSVBFont_h12w7 );
 
 		ADI_STATIC_ORBIT( hDC );
-		if ((MM == 201) || (MM == 202) || (MM == 801))
+		// the ADI works in all the major modes (as the manual says: the ADIs of the commander and the pilot are supported throughout the mission)
+		if (true)
 		{
 				// the position of the switch ADI ATTITUDE (REF, LVLH, INRTL) is the frame of the angles
 				{
@@ -58,9 +59,8 @@ namespace vc
 				}
 			ADI_ORBIT( hDC, attPitch, attRoll, attYaw );
 			ADI_RATE_ORBIT( hDC, av.x, av.z, av.y, adirate );
-			ADI_ERROR_ORBIT( hDC, atterr.x, atterr.z, atterr.y, adierr );
+			if (((MM >= 104) && (MM <= 303)) || (MM == 801)) ADI_ERROR_ORBIT( hDC, atterr.x, atterr.z, atterr.y, adierr );// the errors of the orbital DAP
 		}
-		else ADI_ORBIT( hDC, 129, 77, 14 );
 		return;
 	}
 
@@ -86,7 +86,8 @@ namespace vc
 		skp->SetFont( skpSSVBFont_h12w7 );
 
 		ADI_STATIC_ORBIT( skp );
-		if ((MM == 201) || (MM == 202) || (MM == 801))
+		// the ADI works in all the major modes (as the manual says: the ADIs of the commander and the pilot are supported throughout the mission)
+		if (true)
 		{
 				// the position of the switch ADI ATTITUDE (REF, LVLH, INRTL) is the frame of the angles
 				{
@@ -100,9 +101,8 @@ namespace vc
 				}
 			ADI_ORBIT( skp, attPitch, attRoll, attYaw );
 			ADI_RATE_ORBIT( skp, av.x, av.z, av.y, adirate );
-			ADI_ERROR_ORBIT( skp, atterr.x, atterr.z, atterr.y, adierr );
+			if (((MM >= 104) && (MM <= 303)) || (MM == 801)) ADI_ERROR_ORBIT( skp, atterr.x, atterr.z, atterr.y, adierr );// the errors of the orbital DAP
 		}
-		else ADI_ORBIT( skp, 129, 77, 14 );
 		return;
 	}
 

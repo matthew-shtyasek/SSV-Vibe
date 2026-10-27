@@ -3,6 +3,7 @@
 #include "GNCUtilities.h"
 #include "../../../vc/MDU.h"
 #include "OrbitDAP.h"
+#include "../../../Atlantis.h"
 #include "StarCatalog.h"
 #include "../../../ADIMath.h"
 
@@ -1574,11 +1575,17 @@ namespace dps
 	}
 
 
+
 	adimath::Mat3 UniversalPointing::CurrentBodyMatrix()
 	{
-		// the attitude processor writes the quaternion in each step
-		const double QS = ReadCOMPOOL_VS(SCP_Q_B_I, 1, 4);
-		const VECTOR3 QV = ReadCOMPOOL_VS(SCP_Q_B_I + 2);
+		// the attitude of the vessel (in all the major modes: the attitude processor of the orbital DAP does not run in all of them),
+		// in the same way as the orbital DAP gives it to the quaternion of the attitude processor
+		MATRIX3 R;
+		STS()->GetRotationMatrix(R);
+		R = ConvertOrbitersimRotationMatrixToM50(R);
+		double QS;
+		VECTOR3 QV;
+		MAT_TO_QUAT(Transpose(R), QS, QV);
 		return adimath::FromQuaternion(QS, QV.x, QV.y, QV.z);
 	}
 
