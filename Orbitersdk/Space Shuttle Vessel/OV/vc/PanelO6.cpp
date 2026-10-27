@@ -308,8 +308,8 @@ namespace vc {
 
 		pLGlareshieldDim->DefineGroup( GRP_R1_O6_VC );
 		pLGlareshieldDim->SetReference( _V( -0.5943, 3.1201, 13.8795 ), _V( 0.0, 0.9719, 0.2354 ) );
-		pLGlareshieldDim->SetAngleRange( 270.0 );
-		pLGlareshieldDim->SetPointerOffset( -135.0 );
+		pLGlareshieldDim->SetAngleRange( 300.0 );
+		pLGlareshieldDim->SetPointerOffset( -90.0 );
 		pLGlareshieldDim->SetMouseRegion( AID_O6, 0.220071f, 0.357178f, 0.298743f, 0.412312f );
 
 		pLSeatConsoleFlood->SetInitialAnimState( 0.5f );
@@ -319,20 +319,20 @@ namespace vc {
 
 		pLSeatConsoleDim->DefineGroup( GRP_R7_O6_VC );
 		pLSeatConsoleDim->SetReference( _V( -0.4591, 3.1201, 13.8795 ), _V( 0.0, 0.9719, 0.2354 ) );
-		pLSeatConsoleDim->SetAngleRange( 270.0 );
-		pLSeatConsoleDim->SetPointerOffset( -135.0 );
+		pLSeatConsoleDim->SetAngleRange( 300.0 );
+		pLSeatConsoleDim->SetPointerOffset( -90.0 );
 		pLSeatConsoleDim->SetMouseRegion( AID_O6, 0.485962f, 0.357178f, 0.564634f, 0.412312f );
 
 		pPanelLeftCenter->DefineGroup( GRP_R3_O6_VC );
 		pPanelLeftCenter->SetReference( _V( -0.6636, 3.1630, 13.7005 ), _V( 0.0, 0.9719, 0.2354 ) );
-		pPanelLeftCenter->SetAngleRange( 270.0 );
-		pPanelLeftCenter->SetPointerOffset( -135.0 );
+		pPanelLeftCenter->SetAngleRange( 300.0 );
+		pPanelLeftCenter->SetPointerOffset( -90.0 );
 		pPanelLeftCenter->SetMouseRegion( AID_O6, 0.083871f, 0.103467f, 0.162542f, 0.158601f );
 
 		pPanelLeftOverhead->DefineGroup( GRP_R4_O6_VC );
 		pPanelLeftOverhead->SetReference( _V( -0.5947, 3.1630, 13.7005 ), _V( 0.0, 0.9719, 0.2354 ) );
-		pPanelLeftOverhead->SetAngleRange( 270.0 );
-		pPanelLeftOverhead->SetPointerOffset( -135.0 );
+		pPanelLeftOverhead->SetAngleRange( 300.0 );
+		pPanelLeftOverhead->SetPointerOffset( -90.0 );
 		pPanelLeftOverhead->SetMouseRegion( AID_O6, 0.219422f, 0.103467f, 0.298094f, 0.158601f );
 
 

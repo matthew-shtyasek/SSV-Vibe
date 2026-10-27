@@ -74,8 +74,9 @@ namespace vc
 		rotStart = new MGROUP_ROTATE( vc_idx, &grpIndex, 1, GetReference(), GetDirection(), static_cast<float>((offset - (0.5 * ang)) * RAD) );
 		rotTravel = new MGROUP_ROTATE( vc_idx, &grpIndex, 1, GetReference(), GetDirection(), static_cast<float>(ang * RAD) );
 		anim_rot = STS()->CreateAnimation( START_STATE );
-		STS()->AddAnimationComponent( anim_rot, 0.0, START_STATE, rotStart );
-		STS()->AddAnimationComponent( anim_rot, START_STATE, 1.0, rotTravel );
+		// the second component has the first as its parent: without it Orbiter applies only one of the two rotations of the group
+		ANIMATIONCOMPONENT_HANDLE hStart = STS()->AddAnimationComponent( anim_rot, 0.0, START_STATE, rotStart );
+		STS()->AddAnimationComponent( anim_rot, START_STATE, 1.0, rotTravel, hStart );
 
 		VerifyAnimations();
 		OnPositionChange();
