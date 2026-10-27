@@ -20,6 +20,15 @@ added the MFD mode "SSV Settings": options of the vessel (saved in Config/SSV/Se
 added heating of the hydraulic fluid and of the APU lube oil, cooling by the water spray boilers and the failures from overheating (option HydraulicThermal); the OIL IN temperature, the H2O quantity and the reservoir quantity go to the displays
 the hand controllers operate the RMS in the aft RMS station and the RCS elsewhere
 Earth cloud resolution level set to 11
+RMS: the PDRS software of the SM GPC is active in MM 201 and 202; SPEC 94 items 5 and 6 (I/O ON, I/O OFF), I/O kept in the scenario (PDRS_IO); switch between the GPC software and the direct control with Ctrl+Shift+A
+RMS: the inverse kinematics no longer gives a wrong wrist roll (NaN) at the edge of the workspace, the software slows the end effector down instead of bending the arm, steps into a stop are not made
+RMS: the payload keeps its pose (position, direction and roll about the grapple fixture) when it is attached to the arm after the latches are released, and the pose is kept in the scenario (PAYLOAD_POSE)
+the hand controllers operate the RMS in an external view if the arm is selected and powered, the RCS otherwise; Ctrl+A switches; the label tells which one
+added the lights APU TEMP, APU UNDERSPEED and APU OVERSPEED of the C&W to the model of the hydraulic fluid and of the lube oil
+cabin lighting: the brightness of the cabin and of the middeck follows the lamps that are on; the lighting of the panels is removed; the knobs of O6, O8, A6U, L9 and R10 are calibrated live in the settings MFD (offset, travel and direction of the pointer)
+virtual cockpit: the head turns 360 degrees to the sides, the range of rotation of the stations is wider, free movement has no limits on the middeck and at the starboard aft station, Ctrl+arrows no longer take old views at the stations without them
+the RCS plumes are visible at any thruster level (pulses, roll control during OMS burns)
+scenarios: the circuit breakers of the DDU are closed, ANNUNCIATOR BUS SELECT is on and FLT CNTLR POWER is on in the orbit scenarios (the hand controllers of the commander and the pilot had no power)
 build, package and test scripts (tools), unit tests and a GitHub Actions pipeline
 
 
