@@ -558,6 +558,7 @@ class Atlantis: public VESSEL4
 		std::deque<double> rcsFlameLevel;// stable addresses: Orbiter reads them every frame
 		std::vector<RCSFlame> rcsFlames;
 		void UpdateRCSFlames( void );
+		double RCSThrustReduction( void ) const;// factor by which the DAPs reduce the thrust of the RCS with the time acceleration (see RCSMath.h)
 		PARTICLESTREAMSPEC RCS_PSSpec;
 		SURFHANDLE RCS_Exhaust_tex;
 		AIRFOILHANDLE hStackAirfoil;

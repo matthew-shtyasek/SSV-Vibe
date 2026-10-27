@@ -63,6 +63,11 @@ namespace settings
 	inline constexpr double HYD_FAILURE_RATES[] = {0.0, 0.05, 0.2, 1.0};
 	inline constexpr int HYD_FAILURE_RATE_COUNT = sizeof( HYD_FAILURE_RATES ) / sizeof( HYD_FAILURE_RATES[0] );
 
+	/** Time acceleration up to which the DAPs do not reduce the thrust of the RCS (see RCSMath.h): names of the choices and the values. */
+	inline constexpr const char* const RCS_FULL_THRUST_NAMES[] = {"None", "5x", "10x", "20x", "50x"};
+	inline constexpr double RCS_FULL_THRUST_ACC[] = {1.0, 5.0, 10.0, 20.0, 50.0};
+	inline constexpr int RCS_FULL_THRUST_COUNT = sizeof( RCS_FULL_THRUST_ACC ) / sizeof( RCS_FULL_THRUST_ACC[0] );
+
 	/** Middeck floodlights (the panel MO13Q with their switches is not in the virtual cockpit). */
 	inline constexpr const char* const MIDDECK_LIGHT_NAMES[] = {"Off", "Half", "All"};
 
@@ -77,6 +82,7 @@ namespace settings
 		ITEM_RPTA_RATE,
 		ITEM_BRAKE_RATE,
 		EIU_DATA_RECORDER,
+		RCS_FULL_THRUST,
 		RMS_PAYLOAD_MASS_EFFECT,
 		RMS_REACTION,
 		RMS_CENTER_OF_MASS,
@@ -112,6 +118,7 @@ namespace settings
 		{"RPTARate", "Pedals key rate", "Rate of the keyboard rudder pedals (1/x s from the detent to full deflection)", KIND_FLOAT, 0.75, 0.05, 5.0, 0.05, false, GROUP_FLIGHT},
 		{"BrakeRate", "Brakes key rate", "Rate of the keyboard toe brakes (1/x s from the detent to full deflection)", KIND_FLOAT, 0.75, 0.05, 5.0, 0.05, false, GROUP_FLIGHT},
 		{"EIUDataRecorder", "EIU data recorder", "Writes the data of the engine interface units to files (for debugging)", KIND_BOOL, 0.0, 0.0, 1.0, 1.0, true, GROUP_FLIGHT},
+		{"RCSFullThrustAcc", "RCS full thrust to", "Time acceleration up to which the DAPs do not reduce the RCS thrust (above: reduced)", KIND_CHOICE, 2.0, 0.0, RCS_FULL_THRUST_COUNT - 1, 1.0, false, GROUP_FLIGHT, RCS_FULL_THRUST_NAMES},
 		{"RMSPayloadMassEffect", "Payload slows the arm", "The rates of the arm decrease with the mass of the payload that it holds", KIND_BOOL, 0.0, 0.0, 1.0, 1.0, false, GROUP_RMS},
 		{"RMSReaction", "Arm pushes the orbiter", "Reaction forces of the arm and of its payload on the orbiter (it turns with the DAP in FREE)", KIND_BOOL, 0.0, 0.0, 1.0, 1.0, false, GROUP_RMS},
 		{"RMSCenterOfMass", "C.g. follows the arm", "The center of mass of the orbiter follows the arm and the payload that it holds", KIND_BOOL, 0.0, 0.0, 1.0, 1.0, false, GROUP_RMS},

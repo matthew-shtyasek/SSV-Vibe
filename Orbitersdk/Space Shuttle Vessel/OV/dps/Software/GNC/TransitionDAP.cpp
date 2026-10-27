@@ -19,6 +19,8 @@ Date         Developer
 #include "TransitionDAP.h"
 #include "../../../Atlantis.h"
 #include "SSME_Operations.h"
+#include "../../../RCSMath.h"
+#include "../../../SSVOptions.h"
 #include <MathSSV.h>
 #include "../../../ParameterValues.h"
 #include <cassert>
@@ -165,7 +167,7 @@ namespace dps
 		Error = -Error * DEG;
 
 		VECTOR3 Limits;
-		double timeAcc = max(1.0, oapiGetTimeAcceleration());
+		double timeAcc = rcsmath::ThrustReduction( oapiGetTimeAcceleration(), STS()->GetOptions()->RCSFullThrustAcceleration() );// 1 up to the time acceleration of the option
 		double MaxThrusterLevel = 1.0/timeAcc;
 
 		VECTOR3 Torque;// HACK probably should use other values because of the ET

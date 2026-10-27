@@ -224,6 +224,13 @@ class SSVOptions
 			return values[settings::HYDRAULIC_THERMAL] != 0.0;
 		}
 
+		/** @return time acceleration up to which the DAPs do not reduce the thrust of the RCS (1: reduced from the first acceleration) */
+		double RCSFullThrustAcceleration( void ) const
+		{
+			const int i = static_cast<int>(values[settings::RCS_FULL_THRUST] + 0.5);
+			return ((i >= 0) && (i < settings::RCS_FULL_THRUST_COUNT)) ? settings::RCS_FULL_THRUST_ACC[i] : 1.0;
+		}
+
 		/** @return option of the middeck floodlights: 0 = off, 1 = half, 2 = all */
 		int MiddeckLights( void ) const
 		{

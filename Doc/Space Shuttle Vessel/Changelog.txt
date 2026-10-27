@@ -1,4 +1,5 @@
 *** Changes from SSV v1.16 (development version 1.17-dev) ***
+added option RCSFullThrustAcc: the DAPs do not reduce the thrust of the RCS up to a time acceleration (10x by default), then they reduce it by the acceleration divided by it (before: from the first acceleration, so the maneuvers took longer and the flames were not seen)
 hand controllers: a configuration file chosen by the number (Joystick1.cfg) was applied to whatever controller was the first one (pedals took the configuration of the stick and rotated the orbiter); the file can name its device (line DEVICE), and the stick axes that are not at their center at the start are ignored until they are
 RCS: the flames are drawn with time acceleration (level times the acceleration), the primary jets have a flame then
 added the switch EMERGENCY LIGHTING of the panel C3 (the emergency fixtures go to full bright) and the floodlights of the middeck (option MiddeckLights)

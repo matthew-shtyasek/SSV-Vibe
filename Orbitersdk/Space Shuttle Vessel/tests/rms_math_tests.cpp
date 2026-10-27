@@ -12,6 +12,7 @@ static char g_debugstring[1024];
 #include "../OV/RMSMath.h"
 #include "../OV/PTGMath.h"
 #include "../OV/ControllerMath.h"
+#include "../OV/RCSMath.h"
 #include "../OV/APUModel.h"
 #include "../OV/RMSReaction.h"
 #include "../OV/RMSKin.h"
@@ -2163,6 +2164,33 @@ static void test_hyd_environment( void )
 	CHECK( RollChance( 1000.0 ) <= 1.0 );
 }
 
+static void test_rcs_reduction( void )
+{
+	using namespace rcsmath;
+
+	// no reduction up to the time acceleration of the option, then the acceleration divided by it
+	CHECK_NEAR( ThrustReduction( 1.0, 10.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( ThrustReduction( 5.0, 10.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( ThrustReduction( 10.0, 10.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( ThrustReduction( 20.0, 10.0 ), 2.0, 1e-12 );
+	CHECK_NEAR( ThrustReduction( 1000.0, 10.0 ), 100.0, 1e-12 );
+	// the old behavior (option none): reduced by the acceleration
+	CHECK_NEAR( ThrustReduction( 10.0, 1.0 ), 10.0, 1e-12 );
+	CHECK_NEAR( ThrustReduction( 100.0, 1.0 ), 100.0, 1e-12 );
+	// below no acceleration, or nonsense
+	CHECK_NEAR( ThrustReduction( 0.5, 10.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( ThrustReduction( 0.0, 0.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( ThrustReduction( 4.0, -3.0 ), 4.0, 1e-12 );
+
+	// the impulse of a step (level times step) is the one of the real time while the acceleration is above the limit: step grows as acceleration
+	for (double acc = 10.0; acc <= 1000.0; acc *= 10.0)
+	{
+		const double level = 1.0 / ThrustReduction( acc, 10.0 );
+		const double step = acc * 0.0167;
+		CHECK_NEAR( level * step, 10.0 * 0.0167, 1e-9 );// the impulse per frame stays that of the full thrust at the limit
+	}
+}
+
 static void test_emergency_lighting( void )
 {
 	using namespace lightmath;
@@ -2327,6 +2355,7 @@ int main( int argc, char** argv )
 	test_hyd_environment();
 	test_arm_links();
 	test_emergency_lighting();
+	test_rcs_reduction();
 	test_controller_examples( (argc > 1) ? argv[1] : NULL );
 	printf( "%d checks, %d failed\n", g_checks, g_failed );
 	return (g_failed == 0) ? 0 : 1;

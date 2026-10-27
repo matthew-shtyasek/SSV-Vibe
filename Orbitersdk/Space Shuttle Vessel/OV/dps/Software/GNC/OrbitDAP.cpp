@@ -40,6 +40,8 @@ Date         Developer
 #include "StateVectorSoftware.h"
 #include "UniversalPointing.h"
 #include "GNCUtilities.h"
+#include "../../../RCSMath.h"
+#include "../../../SSVOptions.h"
 #include "../../../Atlantis.h"
 
 namespace dps
@@ -874,7 +876,7 @@ void OrbitDAP::HandleTHCInput(double simdt)
 
 void OrbitDAP::CalcEulerAxisRates()
 {
-	double timeAcc = max(1.0, oapiGetTimeAcceleration());
+	double timeAcc = rcsmath::ThrustReduction( oapiGetTimeAcceleration(), STS()->GetOptions()->RCSFullThrustAcceleration() );// 1 up to the time acceleration of the option
 
 	VECTOR3 RotationAxis;
 	double RotationAngle=CalcEulerAngle(attErrorMatrix, RotationAxis);
@@ -898,7 +900,7 @@ void OrbitDAP::CalcEulerAxisRates()
 
 void OrbitDAP::CalcMultiAxisRates(const VECTOR3& degNullRatesLocal)
 {
-	double timeAcc = max(1.0, oapiGetTimeAcceleration());
+	double timeAcc = rcsmath::ThrustReduction( oapiGetTimeAcceleration(), STS()->GetOptions()->RCSFullThrustAcceleration() );// 1 up to the time acceleration of the option
 
 	for(unsigned int i=0;i<3;i++) {
 		if(DAPControlMode==AUTO || RotMode[i]==DISC_RATE) {
@@ -946,7 +948,7 @@ void OrbitDAP::SetRates(const VECTOR3 &degRates, double simdt)
 
 	VECTOR3 Limits;
 	double MaxThrusterLevel;
-	double timeAcc = max(1.0, oapiGetTimeAcceleration());
+	double timeAcc = rcsmath::ThrustReduction( oapiGetTimeAcceleration(), STS()->GetOptions()->RCSFullThrustAcceleration() );// 1 up to the time acceleration of the option
 	if(DAPMode != VERN) { // PRI/ALT
 		for(unsigned int i=0;i<3;i++) {
 			//if(RotatingAxis[i] || NullingRates[i]) Limits.data[i] = max(PRI_LIMITS.data[i], 0.5*RotationRateChange(OrbiterMass, PMI.data[i], Torque.data[i]/timeAcc, simdt));

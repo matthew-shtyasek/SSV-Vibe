@@ -208,6 +208,7 @@ Date         Developer
 #include "AerodynamicData.h"
 #include "../CommonDefs.h"
 #include "SSVOptions.h"
+#include "RCSMath.h"
 #include "Atlantis_vc_defs.h"
 #include "../SSVSound.h"
 #include "meshres.h"
@@ -1370,7 +1371,7 @@ void Atlantis::clbkPreStep( double simt, double simdt, double mjd )
 
 			if (lastRotCommand[PITCH] != 1) {
 				lastRotCommand[PITCH] = 1;
-				if ((pitchcmd * oapiGetTimeAcceleration()) > 0.101) SoundPlay( pXRSound, PRCS_SOUND );
+				if ((pitchcmd * RCSThrustReduction()) > 0.101) SoundPlay( pXRSound, PRCS_SOUND );
 				else SoundPlay( pXRSound, VRCS_SOUND );
 			}
 		}
@@ -1381,7 +1382,7 @@ void Atlantis::clbkPreStep( double simt, double simdt, double mjd )
 
 			if (lastRotCommand[PITCH] != -1) {
 				lastRotCommand[PITCH] = -1;
-				if ((pitchcmd * oapiGetTimeAcceleration()) < -0.101) SoundPlay( pXRSound, PRCS_SOUND );
+				if ((pitchcmd * RCSThrustReduction()) < -0.101) SoundPlay( pXRSound, PRCS_SOUND );
 				else SoundPlay( pXRSound, VRCS_SOUND );
 			}
 		}
@@ -1401,7 +1402,7 @@ void Atlantis::clbkPreStep( double simt, double simdt, double mjd )
 
 			if (lastRotCommand[YAW] != 1) {
 				lastRotCommand[YAW] = 1;
-				if ((RotThrusterCommands[YAW].GetVoltage() * oapiGetTimeAcceleration()) > 0.101) SoundPlay( pXRSound, PRCS_SOUND );
+				if ((RotThrusterCommands[YAW].GetVoltage() * RCSThrustReduction()) > 0.101) SoundPlay( pXRSound, PRCS_SOUND );
 				else SoundPlay( pXRSound, VRCS_SOUND );
 			}
 		}
@@ -1411,7 +1412,7 @@ void Atlantis::clbkPreStep( double simt, double simdt, double mjd )
 
 			if (lastRotCommand[YAW] != -1) {
 				lastRotCommand[YAW] = -1;
-				if ((RotThrusterCommands[YAW].GetVoltage() * oapiGetTimeAcceleration()) < -0.101) SoundPlay( pXRSound, PRCS_SOUND );
+				if ((RotThrusterCommands[YAW].GetVoltage() * RCSThrustReduction()) < -0.101) SoundPlay( pXRSound, PRCS_SOUND );
 				else SoundPlay( pXRSound, VRCS_SOUND );
 			}
 		}
@@ -1428,7 +1429,7 @@ void Atlantis::clbkPreStep( double simt, double simdt, double mjd )
 
 			if (lastRotCommand[ROLL] != 1) {
 				lastRotCommand[ROLL] = 1;
-				if ((RotThrusterCommands[ROLL].GetVoltage() * oapiGetTimeAcceleration()) > 0.101) SoundPlay( pXRSound, PRCS_SOUND );
+				if ((RotThrusterCommands[ROLL].GetVoltage() * RCSThrustReduction()) > 0.101) SoundPlay( pXRSound, PRCS_SOUND );
 				else SoundPlay( pXRSound, VRCS_SOUND );
 			}
 		}
@@ -1438,7 +1439,7 @@ void Atlantis::clbkPreStep( double simt, double simdt, double mjd )
 
 			if (lastRotCommand[ROLL] != -1) {
 				lastRotCommand[ROLL] = -1;
-				if ((RotThrusterCommands[ROLL].GetVoltage() * oapiGetTimeAcceleration()) < -0.101) SoundPlay( pXRSound, PRCS_SOUND );
+				if ((RotThrusterCommands[ROLL].GetVoltage() * RCSThrustReduction()) < -0.101) SoundPlay( pXRSound, PRCS_SOUND );
 				else SoundPlay( pXRSound, VRCS_SOUND );
 			}
 		}
@@ -3329,6 +3330,11 @@ void Atlantis::AddRCSFlame( THRUSTER_HANDLE thX, const VECTOR3& pos, const VECTO
 	vExRCS.push_back( AddExhaust( &es ) );
 }
 
+double Atlantis::RCSThrustReduction( void ) const
+{
+	return rcsmath::ThrustReduction( oapiGetTimeAcceleration(), GetOptions()->RCSFullThrustAcceleration() );
+}
+
 void Atlantis::UpdateRCSFlames( void )
 {
 	const double acc = oapiGetTimeAcceleration();
@@ -3336,7 +3342,7 @@ void Atlantis::UpdateRCSFlames( void )
 	{
 		const double level = GetThrusterLevel( rcsFlames[i].th );
 		double v;
-		if (acc > 1.0) v = level * acc;
+		if (acc > 1.0) v = level * RCSThrustReduction();
 		else v = rcsFlames[i].followsLevel ? level : 0.0;
 		rcsFlameLevel[i] = (v > 1.0) ? 1.0 : v;
 	}
