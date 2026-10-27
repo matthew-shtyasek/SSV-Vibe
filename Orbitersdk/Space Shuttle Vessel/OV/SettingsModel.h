@@ -63,6 +63,9 @@ namespace settings
 	inline constexpr double HYD_FAILURE_RATES[] = {0.0, 0.05, 0.2, 1.0};
 	inline constexpr int HYD_FAILURE_RATE_COUNT = sizeof( HYD_FAILURE_RATES ) / sizeof( HYD_FAILURE_RATES[0] );
 
+	/** Middeck floodlights (the panel MO13Q with their switches is not in the virtual cockpit). */
+	inline constexpr const char* const MIDDECK_LIGHT_NAMES[] = {"Off", "Half", "All"};
+
 	/** Index of each option in the table (the order of the table). */
 	enum Index
 	{
@@ -94,6 +97,7 @@ namespace settings
 		KNOB_R10_REVERSE,
 		VC_FREE_MOVE,
 		VC_FREE_MOVE_KEY,
+		MIDDECK_LIGHTS,
 		HYDRAULIC_THERMAL,
 		HYDRAULIC_RANDOM_FAILURES,
 		COUNT
@@ -128,6 +132,7 @@ namespace settings
 		{"KnobR10Reverse", "Knobs R10: reversed", "Reverses the direction of the pointer; live", KIND_BOOL, 1.0, 0.0, 1.0, 1.0, false, GROUP_CABIN},
 		{"VCFreeMove", "Free head movement", "A key switches it on: then the arrows and Ins/Del move the head around the station", KIND_BOOL, 1.0, 0.0, 1.0, 1.0, false, GROUP_CABIN},
 		{"VCFreeMoveKey", "Free movement key", "Key that switches the free movement of the head on and off (the arrows are used by the THC)", KIND_CHOICE, 0.0, 0.0, FREE_MOVE_KEY_COUNT - 1, 1.0, false, GROUP_CABIN, FREE_MOVE_KEYS},
+		{"MiddeckLights", "Middeck floodlights", "Floodlights of the middeck (panel MO13Q is not in the cockpit)", KIND_CHOICE, 2.0, 0.0, 2.0, 1.0, false, GROUP_CABIN, MIDDECK_LIGHT_NAMES},
 		{"HydraulicThermal", "Hydraulic heating", "Heat of the hydraulic fluid and lube oil, boiler cooling and overheating failures", KIND_BOOL, 1.0, 0.0, 1.0, 1.0, false, GROUP_SYSTEMS},
 		{"HydraulicRandomFailures", "Random boiler failures", "Random boiler failures (to train): dice thrown at random 5-25 min intervals; rate per boiler", KIND_CHOICE, 0.0, 0.0, HYD_FAILURE_RATE_COUNT - 1, 1.0, false, GROUP_SYSTEMS, HYD_FAILURE_RATE_NAMES},
 	};

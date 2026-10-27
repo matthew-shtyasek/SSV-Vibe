@@ -2163,6 +2163,24 @@ static void test_hyd_environment( void )
 	CHECK( RollChance( 1000.0 ) <= 1.0 );
 }
 
+static void test_emergency_lighting( void )
+{
+	using namespace lightmath;
+
+	// the emergency system puts its fixtures at full bright, whatever their controls say; without it nothing changes
+	CHECK_NEAR( EmergencyLevel( 0.0, true ), 1.0, 1e-12 );
+	CHECK_NEAR( EmergencyLevel( 0.3, true ), 1.0, 1e-12 );
+	CHECK_NEAR( EmergencyLevel( 0.3, false ), 0.3, 1e-12 );
+	CHECK_NEAR( EmergencyLevel( 0.0, false ), 0.0, 1e-12 );
+
+	// the middeck floodlights
+	CHECK_NEAR( MiddeckLevel( 0 ), 0.0, 1e-12 );
+	CHECK_NEAR( MiddeckLevel( 1 ), 0.5, 1e-12 );
+	CHECK_NEAR( MiddeckLevel( 2 ), 1.0, 1e-12 );
+	CHECK_NEAR( MiddeckLevel( 7 ), 1.0, 1e-12 );
+	CHECK_NEAR( MiddeckLevel( -1 ), 0.0, 1e-12 );
+}
+
 static void test_arm_links( void )
 {
 	using namespace massprops;
@@ -2308,6 +2326,7 @@ int main( int argc, char** argv )
 	test_controller_assign();
 	test_hyd_environment();
 	test_arm_links();
+	test_emergency_lighting();
 	test_controller_examples( (argc > 1) ? argv[1] : NULL );
 	printf( "%d checks, %d failed\n", g_checks, g_failed );
 	return (g_failed == 0) ? 0 : 1;

@@ -76,6 +76,18 @@ namespace lightmath
 		return SC_OFF;
 	}
 
+	/** Emergency lighting (Crew Operations Manual 2.15): the relay of the emergency system puts the emergency fixtures at full bright, whatever their controls say. */
+	inline double EmergencyLevel( double level, bool emergency )
+	{
+		return emergency ? 1.0 : level;
+	}
+
+	/** Level of the middeck floodlights from the option: 0 = all off, 1 = half of the fixtures (half of the light), 2 = all on. */
+	inline double MiddeckLevel( int choice )
+	{
+		return (choice <= 0) ? 0.0 : ((choice == 1) ? 0.5 : 1.0);
+	}
+
 	/** Multiplier of the self illumination of a panel from its OFF/BRT knob (1 at BRT: the panel looks as without the lighting system). */
 	inline double PanelScale( double knob )
 	{

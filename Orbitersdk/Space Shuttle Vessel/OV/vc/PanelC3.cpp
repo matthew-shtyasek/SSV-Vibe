@@ -50,6 +50,7 @@ Date         Developer
 #include "../Atlantis.h"
 #include "../ParameterValues.h"
 #include "../meshres_vc_c3.h"
+#include "../CabinLighting.h"
 
 
 namespace vc
@@ -73,6 +74,10 @@ namespace vc
 
 		Add(pOMSArm[LEFT] = new LockableLever3(_sts, "OMS ENG LEFT"));
 		Add(pOMSArm[RIGHT] = new LockableLever3(_sts, "OMS ENG RIGHT"));
+
+		Add( pEmergencyLighting = new StdSwitch2( _sts, "EMERGENCY LIGHTING" ) );
+		pEmergencyLighting->SetLabel( 0, "OFF" );
+		pEmergencyLighting->SetLabel( 1, "ON" );
 
 		Add( pBFCCRTDisplay = new StdSwitch2( _sts, "BFC CRT DISPLAY" ) );
 		pBFCCRTDisplay->SetLabel( 0, "OFF" );
@@ -476,6 +481,12 @@ namespace vc
 		pCautionWarningMode->SetInitialAnimState( 0.5f );
 		pCautionWarningMode->SetReference( _V( 0.21487, 1.69559, 13.89510 ), switch_rot );
 		pCautionWarningMode->SetMouseRegion( AID_C3_LO_8, 0.935959f, 0.009853f, 0.994856f, 0.379939f );
+
+		// EMERGENCY LIGHTING: group A5_S15 (found with the position of the switch in the texture), area A5 (u 0.9655, v 0.823)
+		pEmergencyLighting->DefineGroup( GRP_A5_S15_C3_VC );
+		pEmergencyLighting->SetInitialAnimState( 0.5f );
+		pEmergencyLighting->SetReference( _V( 0.2145, 1.6846, 13.8125 ), switch_rot );
+		pEmergencyLighting->SetMouseRegion( AID_C3_LO_8, 0.936f, 0.650f, 0.995f, 0.990f );
 		return;
 	}
 
@@ -605,6 +616,9 @@ namespace vc
 		pBFCCRTDisplay->ConnectPort( 1, pBundle, 0 );// ON
 		pBFCCRTSelect->ConnectPort( 0, pBundle, 1 ); // 3+1
 		pBFCCRTSelect->ConnectPort( 2, pBundle, 2 ); // 1+2
+
+		DiscreteBundle* pLtgSw = STS()->BundleManager()->CreateBundle( "CABIN_LTG_SW", CABIN_LTG_SW_BUNDLE_LINES );
+		pEmergencyLighting->ConnectPort( 1, pLtgSw, CabinLighting::SW_EMERGENCY );// ON
 
 		DiscreteBundle* pBundleC3 = STS()->BundleManager()->CreateBundle( "C3_INTERNAL", 16 );
 		pAirDataProbeStow[LEFT]->ConnectPort( 1, pBundleC3, 0 );

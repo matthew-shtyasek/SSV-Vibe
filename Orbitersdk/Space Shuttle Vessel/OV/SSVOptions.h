@@ -224,6 +224,12 @@ class SSVOptions
 			return values[settings::HYDRAULIC_THERMAL] != 0.0;
 		}
 
+		/** @return option of the middeck floodlights: 0 = off, 1 = half, 2 = all */
+		int MiddeckLights( void ) const
+		{
+			return static_cast<int>(values[settings::MIDDECK_LIGHTS] + 0.5);
+		}
+
 		/** @return rate of the random failures of each boiler [1/hour], 0 if off */
 		double HydraulicFailureRate( void ) const
 		{

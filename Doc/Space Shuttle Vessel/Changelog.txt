@@ -1,4 +1,6 @@
 *** Changes from SSV v1.16 (development version 1.17-dev) ***
+added the switch EMERGENCY LIGHTING of the panel C3 (the emergency fixtures go to full bright) and the floodlights of the middeck (option MiddeckLights)
+added the controllers page of the Settings MFD, HYD CIRC PUMP 1-3 with the GPC logic of the manual, freezing of the boiler lines without heaters, random failures of the boilers (option HydraulicRandomFailures) and the inertia of the links of the arm
 Universal Pointing: the full software of indy91 (https://github.com/indy91/SSV, branch experimental) in place of the simplified UNIV PTG of the OrbitDAP: all target types (orbital object, Earth center, Earth point, Sun, celestial, navigation stars 11-110), star catalog, maneuver, track and rotation options; the altitude of the Earth point (item 13) is in nautical miles; DAP A01-A15 and B01-B15 configurations (google0101-ryan)
 RMS: modes, panel A8U and displays according to the PDRS documents (MODE with ENTER, PL and ORB LD with POR, TEST, RATE HOLD, BRAKES, SAFING, AUTO SEQ, soft stops, backup control, RMS POWER)
 added SPEC 94 items, DISP 95 PDRS OVERRIDE, DISP 96 PDRS FAULTS and DISP 169 PDRS STATUS

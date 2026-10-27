@@ -18,6 +18,9 @@ namespace
 	const VECTOR3 POS_MS = _V( 1.00, 3.30, 12.90 );
 	const VECTOR3 POS_PS = _V( -1.00, 3.30, 12.90 );
 	const VECTOR3 POS_OS = _V( 0.00, 3.35, 12.70 );
+	// the middeck: two lamps under the ceiling (y of the ceiling about 1.0, the middeck mesh spans z 12.2 to 16.1) for the eight fixtures
+	const VECTOR3 POS_MID_FWD = _V( -0.10, 0.90, 14.90 );
+	const VECTOR3 POS_MID_AFT = _V( -0.10, 0.90, 13.10 );
 
 	// the light of the console is moved toward the center console when CTR CNSL is selected
 	const VECTOR3 CONSOLE_SHIFT_CDR = _V( 0.45, -0.25, 0.20 );
@@ -70,11 +73,11 @@ void CabinLighting::CreateLights( void )
 	lightsCreated = true;
 
 	const VECTOR3 ofs = STS()->GetOrbiterCoGOffset() + VC_OFFSET;
-	const VECTOR3* pos[FLOOD_COUNT] = {&POS_CDR_GLARE, &POS_PLT_GLARE, &POS_CDR_SEAT, &POS_PLT_SEAT, &POS_MS, &POS_PS, &POS_OS};
+	const VECTOR3* pos[FLOOD_COUNT] = {&POS_CDR_GLARE, &POS_PLT_GLARE, &POS_CDR_SEAT, &POS_PLT_SEAT, &POS_MS, &POS_PS, &POS_OS, &POS_MID_FWD, &POS_MID_AFT};
 	for (int i = 0; i < FLOOD_COUNT; i++)
 	{
 		const bool incandescent = (i == FLOOD_CDR_SEAT) || (i == FLOOD_PLT_SEAT);
-		const double range = incandescent ? 3.0 : 4.5;
+		const double range = incandescent ? 3.0 : ((i >= FLOOD_MID_FWD) ? 5.0 : 4.5);
 		lamp[i] = STS()->AddPointLight( *pos[i] + ofs, range, 1.0, 0.0, incandescent ? 1.2 : 0.5, incandescent ? COL_INCANDESCENT : COL_FLUORESCENT, COL_SPECULAR, COL_AMBIENT );
 		lamp[i]->SetVisibility( LightEmitter::VIS_COCKPIT );
 		lamp[i]->SetIntensity( 0.0 );
@@ -86,7 +89,7 @@ void CabinLighting::CreateLights( void )
 void CabinLighting::PlaceLights( void )
 {
 	const VECTOR3 ofs = STS()->GetOrbiterCoGOffset() + VC_OFFSET;
-	const VECTOR3* pos[FLOOD_COUNT] = {&POS_CDR_GLARE, &POS_PLT_GLARE, &POS_CDR_SEAT, &POS_PLT_SEAT, &POS_MS, &POS_PS, &POS_OS};
+	const VECTOR3* pos[FLOOD_COUNT] = {&POS_CDR_GLARE, &POS_PLT_GLARE, &POS_CDR_SEAT, &POS_PLT_SEAT, &POS_MS, &POS_PS, &POS_OS, &POS_MID_FWD, &POS_MID_AFT};
 	for (int i = 0; i < FLOOD_COUNT; i++)
 	{
 		if (lamp[i] == NULL) continue;
@@ -115,7 +118,7 @@ void CabinLighting::OnPostStep( double simt, double simdt, double mjd )
 {
 	const bool enabled = STS()->GetOptions()->CabinLighting();
 
-	double target[FLOOD_COUNT] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+	double target[FLOOD_COUNT] = {0.0};
 	int mode[2] = {lightmath::SC_OFF, lightmath::SC_OFF};
 	double panelScale[cabinlight::PNL_COUNT] = {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
 
@@ -134,6 +137,17 @@ void CabinLighting::OnPostStep( double simt, double simdt, double mjd )
 		target[FLOOD_OS] = lightmath::SwitchedLevel( sw[SW_OS_ON].IsSet(), lightmath::KnobFromVolts( knob[KNOB_OS].GetVoltage() ) );
 
 		for (int i = 0; i < (cabinlight::PNL_COUNT - 1); i++) panelScale[i + 1] = lightmath::PanelScale( lightmath::KnobFromVolts( panelKnob[i].GetVoltage() ) );
+
+		// the middeck floodlights (option: the panel MO13Q is not in the virtual cockpit)
+		const double middeck = lightmath::MiddeckLevel( STS()->GetOptions()->MiddeckLights() );
+		target[FLOOD_MID_FWD] = middeck;
+		target[FLOOD_MID_AFT] = middeck;
+
+		// the emergency lighting puts its fixtures at full bright: left glareshield, orbit station and one floodlight of the middeck
+		const bool emergency = sw[SW_EMERGENCY].IsSet();
+		target[FLOOD_CDR_GLARE] = lightmath::EmergencyLevel( target[FLOOD_CDR_GLARE], emergency );
+		target[FLOOD_OS] = lightmath::EmergencyLevel( target[FLOOD_OS], emergency );
+		target[FLOOD_MID_FWD] = lightmath::EmergencyLevel( target[FLOOD_MID_FWD], emergency );
 	}
 
 	// the lamps

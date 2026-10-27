@@ -114,6 +114,7 @@ namespace vc
 		LockableLever3* pOMSArm[2];
 
 		StdSwitch2* pBFCCRTDisplay;
+		StdSwitch2* pEmergencyLighting;
 		StdSwitch3* pBFCCRTSelect;
 
 		StdSwitch2* pAirDataProbeStow[2];
