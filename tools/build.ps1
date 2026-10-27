@@ -82,11 +82,39 @@ function Invoke-LowPriorityBuild( [string]$name, [string[]]$arguments )
 }
 
 $targets = 'SSV_OV;SSV_ET;SSV_SRB;SSV_LCC;SSV_LC39;SSV_MLP;SSV_CT;SSV_DragChute;SSV_XenonLights;SSV_Centaur;SSV_IUS_SRM1;SSV_IUS_SRM2;SSV_OBSS;SSV_SLC6;SSV_HST'
-Invoke-LowPriorityBuild 'ssv' @(
-	"`"$ssv\SpaceShuttleVessel_2017.sln`"", "/t:$targets", "/p:Configuration=$Configuration", '/p:Platform=x86',
-	"/p:PlatformToolset=$Toolset", "/p:WindowsTargetPlatformVersion=$WinSdk", "/p:ForceImportAfterCppProps=`"$props`"",
-	"/m:$Threads", '/nr:false', '/nologo', '/v:minimal', "/flp:logfile=`"$(Join-Path $build 'ssv.log')`";verbosity=normal"
-)
+$slnPath = Join-Path $ssv 'SpaceShuttleVessel_2017.sln'
+$tempSln = ''
+if (-not (Test-Path (Join-Path $ssv 'HST\SSV_HST_2017.vcxproj')))
+{
+	# the Hubble (SSV_HST) is not in every checkout (it is not in the repository): the solution without it, next to the original (the paths are relative)
+	$guid = '{1A7E0FB6-D725-47C6-94B6-A83CDA869D66}'
+	$kept = New-Object System.Collections.Generic.List[string]
+	$skip = $false
+	foreach ($line in [System.IO.File]::ReadAllLines($slnPath))
+	{
+		if ($line -match '^Project\(.*"SSV_HST"') { $skip = $true; continue }
+		if ($skip) { if ($line -match '^EndProject') { $skip = $false }; continue }
+		if ($line.Contains($guid)) { continue }
+		$kept.Add($line)
+	}
+	$tempSln = Join-Path $ssv 'SpaceShuttleVessel_2017_nohst.sln'
+	[System.IO.File]::WriteAllLines($tempSln, $kept, (New-Object System.Text.UTF8Encoding($true)))
+	$slnPath = $tempSln
+	$targets = $targets -replace ';SSV_HST', ''
+	Write-Host 'SSV_HST is not in this checkout: built without it'
+}
+try
+{
+	Invoke-LowPriorityBuild 'ssv' @(
+		"`"$slnPath`"", "/t:$targets", "/p:Configuration=$Configuration", '/p:Platform=x86',
+		"/p:PlatformToolset=$Toolset", "/p:WindowsTargetPlatformVersion=$WinSdk", "/p:ForceImportAfterCppProps=`"$props`"",
+		"/m:$Threads", '/nr:false', '/nologo', '/v:minimal', "/flp:logfile=`"$(Join-Path $build 'ssv.log')`";verbosity=normal"
+	)
+}
+finally
+{
+	if ($tempSln -ne '') { Remove-Item $tempSln -Force -ErrorAction SilentlyContinue }
+}
 
 if ($Fdo -ne '')
 {
