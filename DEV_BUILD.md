@@ -2,6 +2,23 @@
 
 This is a **development** version (branch `dev/1.17`), based on SSV v1.16 (Orbiter 2024). It is made for testing, not a release. Nothing here was tested in a long run of the simulator: please report what you find (see the end of this file).
 
+## Build 1.17-dev.3 with the Hubble Space Telescope and STS-31
+
+This zip is the full SSV (as dev.2) **plus** the Hubble Space Telescope (vessel `SSV_HST`, based on the add-on "HST(EX) for Orbiter2016" by Donamy, Felix24 and BrianJ; its files and its readme are included) and the historic mission **STS-31** (Discovery): `Missions\SSV\STS-31.json` and the scenarios of `Scenarios\Space Shuttle Vessel\Historic missions\STS-31` (launch T-9 minutes, in orbit, HST on the RMS, landing). A checklist in Russian is in `Doc\SSV-Vibe\STS-31_checklist_RU.pdf`. Install: extract in the Orbiter 2024 folder, overwriting existing files (keep the Mission Editor of the v1.16 release; it is not in the zip).
+
+**Most of it is not validated in the simulator: please send `Orbiter.log` with the problems.**
+
+New since dev.2:
+- **UNIV PTG** is the full software of indy91 (https://github.com/indy91/SSV, branch experimental): all targets (orbital object, Earth center, Earth point, Sun, celestial, 100 navigation stars), star catalog, DAP A01-A15/B01-B15. Tracking an orbital object (TGT ID 1) needs a target with REL NAV on; without it the attitude is held. The ADI of the ORBIT PFD follows the ADI ATTITUDE switch (INRTL and REF: the inertial attitude of UNIV PTG; LVLH: the horizon).
+- **Settings MFD** (mode SSV Settings, key V; P turns the pages): page CONTROLLERS (assign the axes and buttons by moving or pressing them, reverse, clear, center, save to `Config\SSV\Controllers`).
+- **Game controllers:** a configuration file can name its device with the line `DEVICE<tab>part of the name`; files are given to the controllers by name first and by order among controllers of the same name, so the order that Windows gives does not matter. A stick axis that is not at its center at the first reading is ignored (a pedal that took the configuration of a stick no longer rotates the orbiter). See `Config\SSV\Controllers\README.txt`.
+- **Hydraulics:** HYD CIRC PUMP 1-3 (panel R2, GPC logic of the Crew Operations Manual), heaters and freezing of the boiler lines in the Earth's shadow, nitrogen use, random failures of the boilers (option `HydraulicRandomFailures`).
+- **Lighting:** EMERGENCY LIGHTING switch on C3; floodlights of the middeck (option `MiddeckLights`); the panels follow the brightness of the cabin (option `PanelGlow`).
+- **RCS and time acceleration:** the DAPs reduce the thrust only above a time acceleration (option `RCSFullThrustAcc`, 10x by default), the flames are drawn with time acceleration.
+- **RMS:** the inertia of the links of the arm in the moments of inertia of the orbiter (options `RMSInertia` and `RMSCenterOfMass`, off by default).
+
+Credits: Niklas Beug (indy91) for the Universal Pointing and the work on the ascent guidance in the base; see `Doc\Space Shuttle Vessel\CREDITS.tex`.
+
 Russian version: [DEV_BUILD_RU.md](DEV_BUILD_RU.md).
 
 ## Install
