@@ -3059,6 +3059,7 @@ flightlog::Writer* Atlantis::HydLog( void )
 		hydLogFile.Line( "# APU: state of an APU (when the switches or the state change, and every 10 s of simulated time while it works or is hot); temperatures in F, pressures in psi, speed in %%" );
 		hydLogFile.Line( "# SURF: aerosurfaces once a second in the air: q [Pa], pressures of the 3 systems, system and number of elevons that feed each elevon (LOB,LIB,RIB,ROB), commands and positions [deg]," );
 		hydLogFile.Line( "#       limited = share of the steps in which the rate limit of the actuator held the elevons back, motor = output of the rudder/speedbrake and body flap drive (1 = 3 motors)" );
+		hydLogFile.Line( "# RESP: response of the elevons, 10 times a second while one of them is not at its command: commands and positions [deg], elv_rate = speed that it really has [deg/s], elv_limit = limit of its actuator now [deg/s] (pressure, systems and elevons per system as in SURF)" );
 		hydLogFile.Line( "# BRAKE: once a second while a pedal is pressed: seat of the view (0 = CDR, 1 = PLT), the pedals, MNA/MNB/MNC, anti-skid, protection of the touchdown, pressures, power of the hydraulics, brake level applied, WOW (NLG,LMG,RMG), roll/yaw AUTO" );
 	}
 	return &hydLogFile;

@@ -458,6 +458,7 @@ void AeroSurfaces::OnPostStep( double simt, double simdt, double mjd )
 			range( ELEVON_CMD_MIN, ((dipElevon_RIB.GetVoltage() * ELEVON_CMD_RANGE) / 5.0) + ELEVON_CMD_MIN, ELEVON_CMD_MAX ),
 			range( ELEVON_CMD_MIN, ((dipElevon_ROB.GetVoltage() * ELEVON_CMD_RANGE) / 5.0) + ELEVON_CMD_MIN, ELEVON_CMD_MAX )};
 		int sharing[hydact::ELEVONS];
+		double elevonRate[hydact::ELEVONS] = {0.0, 0.0, 0.0, 0.0};// [deg/s] limit of each actuator in this step (for the log of the response)
 		hydact::ElevonSharing( pressure, switchOffset, sharing );
 		for (int e = 0; e < hydact::ELEVONS; e++)
 		{
@@ -470,6 +471,7 @@ void AeroSurfaces::OnPostStep( double simt, double simdt, double mjd )
 			}
 			const double power = hydact::Power( pressure[sys] );
 			const double rate = hydact::ElevonRate( sharing[e] ) * power * rateGain[e];
+			elevonRate[e] = rate;
 			const double before = *elevon[e];
 			*elevon[e] = hydact::Slew( before, elevonCmd[e], rate * simdt );
 			logSteps++;
@@ -497,6 +499,30 @@ void AeroSurfaces::OnPostStep( double simt, double simdt, double mjd )
 		RSB_RH = max(RSB_RH, -61.5);
 		Rudder = (RSB_LH + RSB_RH) * 0.5;
 		SpeedBrake = RSB_LH - RSB_RH;
+
+		// log of the response of the elevons: 10 times a second while one of them is not at its command, with the speed that it really has and the limit of the actuator
+		// (to see if the surfaces are slow: pressure, the systems that feed each elevon, how many elevons share a system)
+		{
+			bool following = false;
+			for (int e = 0; e < hydact::ELEVONS; e++) if (fabs( elevonCmd[e] - *elevon[e] ) > 0.05) following = true;
+			if (following && ((simt - respLogTime) >= 0.1))
+			{
+				if (flightlog::Writer* log = STS()->HydLog())
+				{
+					const double dt = simt - respLogTime;
+					double v[hydact::ELEVONS];
+					for (int e = 0; e < hydact::ELEVONS; e++) v[e] = (dt <= 0.25) ? ((*elevon[e] - respPrev[e]) / dt) : 0.0;
+					log->Line( "RESP simt=%.2f acc=%.1f q=%.0f psi=%.0f,%.0f,%.0f elv_sys=%d,%d,%d,%d share=%d,%d,%d,%d elv_cmd=%.2f,%.2f,%.2f,%.2f elv=%.2f,%.2f,%.2f,%.2f elv_rate=%.2f,%.2f,%.2f,%.2f elv_limit=%.2f,%.2f,%.2f,%.2f",
+						simt, oapiGetTimeAcceleration(), q, pressure[0], pressure[1], pressure[2],
+						hydact::ElevonSystem( pressure, 0, switchOffset[0] ) + 1, hydact::ElevonSystem( pressure, 1, switchOffset[1] ) + 1, hydact::ElevonSystem( pressure, 2, switchOffset[2] ) + 1, hydact::ElevonSystem( pressure, 3, switchOffset[3] ) + 1,
+						sharing[0], sharing[1], sharing[2], sharing[3], elevonCmd[0], elevonCmd[1], elevonCmd[2], elevonCmd[3], Elevon_LOB, Elevon_LIB, Elevon_RIB, Elevon_ROB,
+						v[0], v[1], v[2], v[3], elevonRate[0], elevonRate[1], elevonRate[2], elevonRate[3] );
+				}
+				for (int e = 0; e < hydact::ELEVONS; e++) respPrev[e] = *elevon[e];
+				respLogTime = simt;
+			}
+			else if (!following) respLogTime = simt - 1.0;// the next movement starts a new series
+		}
 
 		// log of the surfaces (once a second, in the air or when something moved)
 		if (((simt - hydLogTime) >= 1.0) && ((q > 20.0) || logMoved))

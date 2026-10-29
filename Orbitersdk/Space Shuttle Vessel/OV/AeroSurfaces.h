@@ -104,6 +104,8 @@ class AeroSurfaces:public AtlantisSubsystem
 		double hydLogTime = -100.0;// flight data log of the surfaces
 		unsigned logSteps = 0, logLimited = 0;// steps of the elevons since the last line, and the ones with the rate limit active
 		bool logMoved = false;
+		double respLogTime = -100.0;// log of the response of the elevons (10 Hz while they are not at the command)
+		double respPrev[hydact::ELEVONS] = {0.0, 0.0, 0.0, 0.0};// positions of the last line
 		double noiseRate[hydact::ELEVONS + 2];// elevons, rudder/speedbrake, body flap
 
 		// physical status [deg]
