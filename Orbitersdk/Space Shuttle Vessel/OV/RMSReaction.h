@@ -39,6 +39,7 @@ namespace rmsreact
 {
 	inline constexpr double FILTER_TAU = 0.5;// [s] time constant of the filter of the velocity
 	inline constexpr double MAX_ACCELERATION = 0.2;// [m/s^2] limit of the estimated acceleration (the arm does not do more, a jump of the position does)
+	inline constexpr double JUMP_SPEED = 1.0;// [m/s] speed from the positions above which the position jumped (the arm does not move a payload that fast: 0.6 m/s with no load): the estimator starts again
 
 	/**
 	 * Estimator of the acceleration of a point from its positions at every step: the velocity is made with the difference of the positions and
@@ -58,7 +59,16 @@ namespace rmsreact
 			lastPos = _V( 0.0, 0.0, 0.0 );
 			vf = _V( 0.0, 0.0, 0.0 );
 			lastVf = _V( 0.0, 0.0, 0.0 );
+			rawAcc = 0.0;
+			capped = false;
 		}
+
+		/** @return filtered velocity of the point [m/s] */
+		const VECTOR3& Velocity( void ) const { return vf; }
+		/** @return magnitude of the acceleration before the limit of the last update [m/s^2] */
+		double RawAcceleration( void ) const { return rawAcc; }
+		/** @return true if the limit held back the acceleration of the last update */
+		bool Capped( void ) const { return capped; }
 
 		/**
 		 * @param pos position [m]
@@ -79,6 +89,17 @@ namespace rmsreact
 			}
 			const VECTOR3 v = (pos - lastPos) / dt;
 			lastPos = pos;
+			if (length( v ) > JUMP_SPEED)
+			{
+				// the position jumped (the first step of the simulation, a grapple, a release, a shift of the frame): that is no velocity, so no force
+				// (a velocity of 1000 m/s in the filter would give the limit of the acceleration for seconds, and a push of the orbiter)
+				vf = _V( 0.0, 0.0, 0.0 );
+				lastVf = vf;
+				count = 1;
+				rawAcc = 0.0;
+				capped = false;
+				return false;
+			}
 			if (count == 1)
 			{
 				vf = v;
@@ -93,7 +114,9 @@ namespace rmsreact
 			lastVf = vf;
 
 			const double a = length( acc );
-			if (a > MAX_ACCELERATION) acc = acc * (MAX_ACCELERATION / a);
+			rawAcc = a;
+			capped = (a > MAX_ACCELERATION);
+			if (capped) acc = acc * (MAX_ACCELERATION / a);
 			return true;
 		}
 
@@ -102,6 +125,8 @@ namespace rmsreact
 		VECTOR3 lastPos;
 		VECTOR3 vf;
 		VECTOR3 lastVf;
+		double rawAcc;
+		bool capped;
 	};
 
 	/**

@@ -886,7 +886,7 @@ namespace dps
 							OnPaint_SPEC55_BFS( pMDU );// GPS STATUS
 							return true;
 						default:
-							return false;
+							return true;// the CRT of the BFS shows no other display (blank), not the PASS/SM ones
 					}
 				case 3:
 					switch (spec)
@@ -904,7 +904,7 @@ namespace dps
 							OnPaint_SPEC55_BFS( pMDU );// GPS STATUS
 							return true;
 						default:
-							return false;
+							return true;// the CRT of the BFS shows no other display (blank), not the PASS/SM ones
 					}
 				case 6:
 					switch (spec)
@@ -922,10 +922,10 @@ namespace dps
 							OnPaint_SPEC55_BFS( pMDU );// GPS STATUS
 							return true;
 						default:
-							return false;
+							return true;// the CRT of the BFS shows no other display (blank), not the PASS/SM ones
 					}
 				default:
-					return false;
+					return true;// the CRT of the BFS shows no other display (blank), not the PASS/SM ones
 			}
 		}
 	}

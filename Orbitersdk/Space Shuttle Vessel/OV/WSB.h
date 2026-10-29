@@ -121,6 +121,10 @@ private:
 
 	hydmodel::State th;
 	bool thermalLoaded;// the temperatures came from the scenario
+	disp::Noise noiseGen;// noise of the flow of the spray
+	double noiseTime = -100.0;
+	bool stateLoaded = false;// the state came from the scenario
+	bool loadingApplied = false;
 	bool hydCautionPrev, oilCautionPrev, seizedPrev;
 	unsigned int rng;// random numbers for the random failures
 	double nextRoll;// [s] simulation time of the next throw of the dice of the random failures (< 0: not set)

@@ -45,6 +45,7 @@ Date         Developer
 
 
 #include "../SimpleGPCSoftware.h"
+#include "../../../FlightLog.h"
 #include <PIDControl.h>
 #include <discsignals.h>
 
@@ -161,6 +162,14 @@ private:
 	VECTOR3 degNullRates; // rates (in body axis frame) required to null rotation
 	MATRIX3 attErrorMatrix;
 	enum {MNVR_OFF, MNVR_IN_PROGRESS, MNVR_COMPLETE} ManeuverStatus;
+	bool onRails = false;// the attitude is held by the program, without the jets (high time acceleration)
+
+	// flight data log (see LogFlight): state of the last line written
+	flightlog::Writer flightLog;
+	int flightLogKey[12] = {};
+	char flightLogProfile[400] = "";
+	double flightLogTime = 0.0, flightLogFuel = 0.0, flightLogOnP = 0.0, flightLogOnV = 0.0;
+	unsigned flightLogPulsesP = 0, flightLogPulsesV = 0;
 	// ActiveManeuver is whatever attitude is currently being held (in AUTO, INRTL or LVLH)
 	// Cur/FutManeuver are maneuvers loaded using UNIV PTG; in AUTO mode, Active and Cur maneuvers are always (check this) the same
 	AttManeuver ActiveManeuver, CurManeuver;
@@ -276,6 +285,8 @@ private:
 	void CalcMultiAxisRates(const VECTOR3& degNullRatesLocal);
 
 	void SetRates(const VECTOR3 &degRates, double simdt);
+	void LogFlight( void );// flight data log: DAP configuration and state when they change, data of the hold every 30 s
+	bool HoldOnRails( double simdt );// attitude hold by the program without the jets at a high time acceleration; false if the jets hold
 
 	void OMSTVC(const VECTOR3 &AttErr, double SimDT);
 

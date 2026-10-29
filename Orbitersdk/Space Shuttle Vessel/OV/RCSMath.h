@@ -33,16 +33,34 @@
 
 namespace rcsmath
 {
+	/** Shortest firing of a jet [s] (the minimum on-time of the valve): in real time the rates of the DAP cannot be finer than the impulse of such a firing. */
+	inline constexpr double MIN_PULSE = 0.08;
+
 	/**
-	 * Factor (1 or more) by which the DAPs divide the thrust of the RCS and the torque that they use for their limits.
-	 * @param acceleration time acceleration of the simulation
-	 * @param fullThrustUpTo time acceleration up to which the thrust is not reduced (1 or less: it is reduced from the first one)
+	 * Factor (1 or more) by which the DAPs divide the thrust of the RCS and the torque that they use for their limits: the time acceleration. The
+	 * steps of the simulation are as many times longer, and the impulse of a step is that of a step in real time, so the hold, the rates and the
+	 * propellant per correction do not depend on the acceleration; the torque left (the torque divided by this factor) limits the acceleration with
+	 * which the DAP can hold the attitude (the orbit DAP holds on rails above it, see OnRails).
+	 * Tried and dropped: the thrust sized by the step to the shortest firing (0.08 s) made the primary jets worse than the original law at x10 and x100.
 	 */
-	inline double ThrustReduction( double acceleration, double fullThrustUpTo )
+	inline double ThrustReduction( double acceleration )
 	{
-		const double a = (acceleration > 1.0) ? acceleration : 1.0;
-		const double f = (fullThrustUpTo > 1.0) ? fullThrustUpTo : 1.0;
-		return (a > f) ? (a / f) : 1.0;
+		return (acceleration > 1.0) ? acceleration : 1.0;
+	}
+
+	/** The DAP holds the attitude on rails (without firing the jets) from this time acceleration (0 or 1: never). */
+	inline bool OnRails( double acceleration, double railsAbove )
+	{
+		return (railsAbove > 1.0) && (acceleration >= railsAbove);
+	}
+
+	/**
+	 * Mean propellant use of the attitude hold with the vernier jets [kg/hour] (JSC planning 1977, Table II, 100 nmi: 0.7 lb/hr in LVLH, 3.6 lb/hr
+	 * inertial in the Y-POP attitude); the DAP on rails subtracts it from the tanks.
+	 */
+	inline double RailsPropellantRate( bool lvlh )
+	{
+		return lvlh ? 0.32 : 1.6;
 	}
 }
 

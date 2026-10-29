@@ -3,6 +3,8 @@
 #include "../../../vc/MDU.h"
 #include "../../../Atlantis.h"
 #include "../../../RMS.h"
+#include "../../../APU.h"
+#include <cstdio>
 
 
 namespace dps
@@ -15,6 +17,14 @@ namespace dps
 
 	SMDisplays::~SMDisplays()
 	{
+	}
+
+	void SMDisplays::Realize( void )
+	{
+		DiscreteBundle* pBundle = BundleManager()->CreateBundle( "BFCCRT", 3 );
+		dipBFCCRTDisplay.Connect( pBundle, 0 );// ON
+		dipBFCCRTSelect[0].Connect( pBundle, 1 );// 3+1
+		dipBFCCRTSelect[1].Connect( pBundle, 2 );// 1+2
 	}
 
 	bool SMDisplays::OnMajorModeChange( unsigned int newMajorMode )
@@ -185,6 +195,22 @@ namespace dps
 
 	bool SMDisplays::OnPaint( int spec, vc::MDU* pMDU ) const
 	{
+		// the CRT driven by the BFS shows no SM display (blank)
+		if (dipBFCCRTDisplay.IsSet())
+		{
+			const std::string& id = pMDU->GetIdentifier();
+			if ((id == "CRT1") && dipBFCCRTSelect[1].IsSet()) return true;
+			if ((id == "CRT2") && !dipBFCCRTSelect[0].IsSet() && !dipBFCCRTSelect[1].IsSet()) return true;
+			if ((id == "CRT3") && dipBFCCRTSelect[0].IsSet()) return true;
+		}
+
+		// APU/HYD: the temperatures that decide a restart of an APU, also after the landing
+		if (spec == 86)
+		{
+			OnPaint_SM_SPEC86( pMDU );
+			return true;
+		}
+
 		switch (GetMajorMode() / 100)
 		{
 			case 2:
@@ -224,6 +250,59 @@ namespace dps
 				return false;
 		}
 		return false;
+	}
+
+	void SMDisplays::OnPaint_SM_SPEC86( vc::MDU* pMDU ) const
+	{
+		PrintCommonHeader( "   APU/HYD", pMDU );
+
+		// static parts (labels)
+		pMDU->mvprint( 1, 3, "APU" );
+		pMDU->mvprint( 21, 3, "1" );
+		pMDU->mvprint( 29, 3, "2" );
+		pMDU->mvprint( 37, 3, "3" );
+		pMDU->mvprint( 1, 5, "SPEED          %" );
+		pMDU->mvprint( 1, 6, "FUEL QTY       %" );
+		pMDU->mvprint( 1, 7, "HYD PRESS    PSI" );
+		pMDU->mvprint( 1, 9, "GG INJ T       F" );
+		pMDU->mvprint( 1, 10, "FU PMP T       F" );
+		pMDU->mvprint( 1, 11, "GGVM T         F" );
+		pMDU->mvprint( 44, 9, "LIM 400" );
+		pMDU->mvprint( 44, 10, "LIM 210" );
+		pMDU->mvprint( 44, 11, "LIM 200" );
+		pMDU->mvprint( 1, 13, "STATUS" );
+		pMDU->mvprint( 1, 16, "RESTART: THE TEMPERATURES MUST BE UNDER THE" );
+		pMDU->mvprint( 1, 17, "LIMITS; GG INJ T ABOVE 400 F: INJ COOL" );
+		pMDU->mvprint( 1, 18, "3.5 MIN, THEN START" );
+
+		// dynamic parts
+		char cbuf[64];
+		for (int i = 0; i < 3; i++)
+		{
+			const APU* apu = STS()->GetAPU( i + 1 );
+			if (apu == NULL) continue;
+			const unsigned short x = static_cast<unsigned short>(19 + (i * 8));
+			sprintf_s( cbuf, sizeof( cbuf ), "%4.0f", apu->GetAPUSpeed() );
+			pMDU->mvprint( x, 5, cbuf );
+			sprintf_s( cbuf, sizeof( cbuf ), "%4.0f", 100.0 * apu->GetFuelLevel() / APU_FUEL_TANK_MASS );
+			pMDU->mvprint( x, 6, cbuf );
+			sprintf_s( cbuf, sizeof( cbuf ), "%4.0f", apu->GetHydraulicPressure() );
+			pMDU->mvprint( x, 7, cbuf );
+			sprintf_s( cbuf, sizeof( cbuf ), "%4.0f", apu->GetInjectorTemperature() );
+			pMDU->mvprint( x, 9, cbuf, (apu->GetInjectorTemperature() > apumodel::LIMIT_INJECTOR_F) ? dps::DEUATT_OVERBRIGHT : 0 );
+			sprintf_s( cbuf, sizeof( cbuf ), "%4.0f", apu->GetPumpTemperature() );
+			pMDU->mvprint( x, 10, cbuf, (apu->GetPumpTemperature() > apumodel::LIMIT_PUMP_F) ? dps::DEUATT_OVERBRIGHT : 0 );
+			sprintf_s( cbuf, sizeof( cbuf ), "%4.0f", apu->GetValveTemperature() );
+			pMDU->mvprint( x, 11, cbuf, (apu->GetValveTemperature() > apumodel::LIMIT_VALVE_F) ? dps::DEUATT_OVERBRIGHT : 0 );
+
+			const char* status = "OFF";
+			if (apu->IsFailed()) status = apu->IsLeaking() ? "LEAK" : "FAIL";
+			else if (apu->IsCooling()) status = "COOL";
+			else if (apu->GetAPUSpeed() > 5.0) status = "RUN";
+			else if (!apumodel::SafeToStart( apumodel::Thermal{apu->GetInjectorTemperature(), apu->GetPumpTemperature(), apu->GetValveTemperature(), 0.0, false} )) status = "HOT";
+			pMDU->mvprint( x, 13, status, (apu->IsFailed()) ? dps::DEUATT_OVERBRIGHT : 0 );
+		}
+		return;
 	}
 
 	void SMDisplays::OnPaint_SM_SPEC94_PASS( vc::MDU* pMDU ) const

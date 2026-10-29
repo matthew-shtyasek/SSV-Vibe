@@ -21,6 +21,7 @@ Date         Developer
 2022/11/09   GLS
 ********************************************/
 #include "AeroSurfaces.h"
+#include "APU.h"
 #include "Atlantis.h"
 #include "meshres.h"
 #include <MathSSV.h>
@@ -104,6 +105,8 @@ AeroSurfaces::AeroSurfaces( AtlantisSubsystemDirector* _director ):AtlantisSubsy
 	Rudder = 0.0;
 	SpeedBrake = 0.0;
 	BodyFlap = 0.0;
+	noiseTime = -100.0;
+	for (int i = 0; i < (hydact::ELEVONS + 2); i++) noiseRate[i] = 1.0;
 	return;
 }
 
@@ -423,18 +426,69 @@ void AeroSurfaces::AddAnimation( void )
 
 void AeroSurfaces::OnPostStep( double simt, double simdt, double mjd )
 {
-	// move aerosurfaces
-	if (STS()->HydraulicsOK())
+	// pressure of the three hydraulic systems, and the dispersions of the actuators of this vehicle
+	double pressure[3];
+	for (int s = 0; s < 3; s++) pressure[s] = STS()->GetAPU( s + 1 )->GetHydraulicPressure();
+	const disp::Mode dm = STS()->GetHydraulicDispersion();
+	const uint64_t seed = STS()->GetToleranceSeed();
+	if (dm.noise && ((simt - noiseTime) >= 1.0))
 	{
-		Elevon_LOB = range( ELEVON_CMD_MIN, ((dipElevon_LOB.GetVoltage() * ELEVON_CMD_RANGE) / 5.0) + ELEVON_CMD_MIN, ELEVON_CMD_MAX );
-		Elevon_LIB = range( ELEVON_CMD_MIN, ((dipElevon_LIB.GetVoltage() * ELEVON_CMD_RANGE) / 5.0) + ELEVON_CMD_MIN, ELEVON_CMD_MAX );
-		Elevon_RIB = range( ELEVON_CMD_MIN, ((dipElevon_RIB.GetVoltage() * ELEVON_CMD_RANGE) / 5.0) + ELEVON_CMD_MIN, ELEVON_CMD_MAX );
-		Elevon_ROB = range( ELEVON_CMD_MIN, ((dipElevon_ROB.GetVoltage() * ELEVON_CMD_RANGE) / 5.0) + ELEVON_CMD_MIN, ELEVON_CMD_MAX );
-		Rudder = range( -27.6, ((dipRudder.GetVoltage() * (27.6 + 27.6)) / 5.0) - 27.6, 27.6 );
-		SpeedBrake = range( -9.9, ((dipSpeedBrake.GetVoltage() * (98.6 + 9.9)) / 5.0) - 9.9, 98.6 );
-		BodyFlap = range( -11.7, BodyFlap + (dipBodyFlap.GetVoltage() * 2.25 * simdt), 22.55 );// 1-3º/s, 2.25º/s without hinge moment
+		noiseTime = simt;
+		for (int i = 0; i < (hydact::ELEVONS + 2); i++) noiseRate[i] = disp::Rel( 1.0, hydact::RATE_NOISE_SIGMA, noise.Normal(), dm.scale );
+	}
+	else if (!dm.noise) for (int i = 0; i < (hydact::ELEVONS + 2); i++) noiseRate[i] = 1.0;
+	double switchOffset[hydact::ELEVONS];
+	double rateGain[hydact::ELEVONS + 2];
+	for (int e = 0; e < hydact::ELEVONS; e++)
+	{
+		switchOffset[e] = dm.tolerances ? disp::Abs( 0.0, hydact::SWITCH_SIGMA, disp::Fixed( seed, disp::id::HYD_ELEVON_SWITCH + e ), dm.scale ) : 0.0;
+		rateGain[e] = (dm.tolerances ? disp::Rel( 1.0, hydact::RATE_SIGMA, disp::Fixed( seed, disp::id::HYD_ELEVON_RATE + e ), dm.scale ) : 1.0) * noiseRate[e];
+	}
+	rateGain[hydact::ELEVONS] = (dm.tolerances ? disp::Rel( 1.0, hydact::RATE_SIGMA, disp::Fixed( seed, disp::id::HYD_RSB_RATE ), dm.scale ) : 1.0) * noiseRate[hydact::ELEVONS];
+	rateGain[hydact::ELEVONS + 1] = (dm.tolerances ? disp::Rel( 1.0, hydact::RATE_SIGMA, disp::Fixed( seed, disp::id::HYD_BODYFLAP_RATE ), dm.scale ) : 1.0) * noiseRate[hydact::ELEVONS + 1];
 
-		SpeedBrake = max(0.0,SpeedBrake);// physically limit SB to 0.0º
+	// move aerosurfaces: every actuator has the power of the systems that feed it
+	{
+		const double q = STS()->GetDynPressure();
+		const double floatAngle = hydact::ElevonFloatAngle( STS()->GetAOA() * DEG );
+		double* elevon[hydact::ELEVONS] = {&Elevon_LOB, &Elevon_LIB, &Elevon_RIB, &Elevon_ROB};
+		const double elevonCmd[hydact::ELEVONS] = {
+			range( ELEVON_CMD_MIN, ((dipElevon_LOB.GetVoltage() * ELEVON_CMD_RANGE) / 5.0) + ELEVON_CMD_MIN, ELEVON_CMD_MAX ),
+			range( ELEVON_CMD_MIN, ((dipElevon_LIB.GetVoltage() * ELEVON_CMD_RANGE) / 5.0) + ELEVON_CMD_MIN, ELEVON_CMD_MAX ),
+			range( ELEVON_CMD_MIN, ((dipElevon_RIB.GetVoltage() * ELEVON_CMD_RANGE) / 5.0) + ELEVON_CMD_MIN, ELEVON_CMD_MAX ),
+			range( ELEVON_CMD_MIN, ((dipElevon_ROB.GetVoltage() * ELEVON_CMD_RANGE) / 5.0) + ELEVON_CMD_MIN, ELEVON_CMD_MAX )};
+		int sharing[hydact::ELEVONS];
+		hydact::ElevonSharing( pressure, switchOffset, sharing );
+		for (int e = 0; e < hydact::ELEVONS; e++)
+		{
+			const int sys = hydact::ElevonSystem( pressure, e, switchOffset[e] );
+			if (sys < 0)
+			{
+				// no pressure: the elevon floats with the flow
+				*elevon[e] = hydact::FloatStep( *elevon[e], floatAngle, q, simdt );
+				continue;
+			}
+			const double power = hydact::Power( pressure[sys] );
+			const double rate = hydact::ElevonRate( sharing[e] ) * power * rateGain[e];
+			const double before = *elevon[e];
+			*elevon[e] = hydact::Slew( before, elevonCmd[e], rate * simdt );
+			logSteps++;
+			if (fabs( elevonCmd[e] - before ) > (rate * simdt)) logLimited++;
+			if (fabs( *elevon[e] - before ) > 1e-6) logMoved = true;
+			// the loads that a weak actuator can not hold push the elevon toward its free angle
+			const double blow = hydact::BlowbackShare( power, q, *elevon[e], floatAngle );
+			if (blow > 0.0) *elevon[e] = hydact::FloatStep( *elevon[e], floatAngle, q, simdt * blow );
+		}
+
+		// rudder/speedbrake and body flap: three motors, one per system; with no power the brakes of the motors hold the position
+		const double motorPower[3] = {hydact::Power( pressure[0] ), hydact::Power( pressure[1] ), hydact::Power( pressure[2] )};
+		const double drive = hydact::MotorDriveOutput( motorPower );
+		const double rsbRate = (hydact::RSB_RATE_ONE_MOTOR / 0.5) * drive * rateGain[hydact::ELEVONS];
+		Rudder = hydact::Slew( Rudder, range( -27.6, ((dipRudder.GetVoltage() * (27.6 + 27.6)) / 5.0) - 27.6, 27.6 ), rsbRate * simdt );
+		SpeedBrake = hydact::Slew( SpeedBrake, range( -9.9, ((dipSpeedBrake.GetVoltage() * (98.6 + 9.9)) / 5.0) - 9.9, 98.6 ), rsbRate * simdt );
+		BodyFlap = range( -11.7, BodyFlap + (dipBodyFlap.GetVoltage() * hydact::BODYFLAP_RATE * drive * rateGain[hydact::ELEVONS + 1] * simdt), 22.55 );// 1-3 deg/s, 2.25 deg/s without hinge moment
+
+		SpeedBrake = max(0.0,SpeedBrake);// physically limit SB to 0 deg
 
 		// limit RBS panel motion
 		double RSB_LH = Rudder + (SpeedBrake * 0.5);// CW position from centerline [deg]
@@ -443,6 +497,25 @@ void AeroSurfaces::OnPostStep( double simt, double simdt, double mjd )
 		RSB_RH = max(RSB_RH, -61.5);
 		Rudder = (RSB_LH + RSB_RH) * 0.5;
 		SpeedBrake = RSB_LH - RSB_RH;
+
+		// log of the surfaces (once a second, in the air or when something moved)
+		if (((simt - hydLogTime) >= 1.0) && ((q > 20.0) || logMoved))
+		{
+			flightlog::Writer* log = STS()->HydLog();
+			hydLogTime = simt;
+			if (log != NULL)
+			{
+				log->Line( "SURF simt=%.1f acc=%.1f q=%.0f aoa=%.1f speed=%.1f psi=%.0f,%.0f,%.0f elv_sys=%d,%d,%d,%d share=%d,%d,%d,%d elv_cmd=%.2f,%.2f,%.2f,%.2f elv=%.2f,%.2f,%.2f,%.2f rud_cmd=%.2f rud=%.2f sb_cmd=%.2f sb=%.2f bf_rate_cmd=%.2f bf=%.2f motor=%.2f limited=%.2f",
+					simt, oapiGetTimeAcceleration(), q, STS()->GetAOA() * DEG, STS()->GetAirspeed(), pressure[0], pressure[1], pressure[2],
+					hydact::ElevonSystem( pressure, 0, switchOffset[0] ) + 1, hydact::ElevonSystem( pressure, 1, switchOffset[1] ) + 1, hydact::ElevonSystem( pressure, 2, switchOffset[2] ) + 1, hydact::ElevonSystem( pressure, 3, switchOffset[3] ) + 1,
+					sharing[0], sharing[1], sharing[2], sharing[3], elevonCmd[0], elevonCmd[1], elevonCmd[2], elevonCmd[3], Elevon_LOB, Elevon_LIB, Elevon_RIB, Elevon_ROB,
+					((dipRudder.GetVoltage() * (27.6 + 27.6)) / 5.0) - 27.6, Rudder, ((dipSpeedBrake.GetVoltage() * (98.6 + 9.9)) / 5.0) - 9.9, SpeedBrake, static_cast<double>(dipBodyFlap.GetVoltage()), BodyFlap, drive,
+					(logSteps > 0) ? (static_cast<double>(logLimited) / logSteps) : 0.0 );
+			}
+			logSteps = 0;
+			logLimited = 0;
+			logMoved = false;
+		}
 	}
 
 	// set physical and visual outputs

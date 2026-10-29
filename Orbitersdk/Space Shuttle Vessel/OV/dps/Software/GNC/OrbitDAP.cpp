@@ -35,6 +35,7 @@ Date         Developer
 #include "../../../vc/MDU.h"
 #include <MathSSV.h>
 #include "../../../ParameterValues.h"
+#include "../../../RCSJets.h"
 #include "RHC_SOP.h"
 #include "THC_SOP.h"
 #include "StateVectorSoftware.h"
@@ -54,14 +55,6 @@ namespace dps
 	constexpr double PCT_STAGE3 = 2.40;
 	//period (s) for second jet firing
 
-	constexpr int NoseRotThrusters[6] = {0, 3, 6, 8, 10, 13};
-	constexpr int NosePitchThrusters[2] = {0, 3};
-	constexpr int NoseYawThrusters[2] = {6, 8};
-	//constexpr int NoseRollThrusters[2] = {10, 13};
-	constexpr int AftRotThrusters[10] = {1, 2, 4, 5, 7, 9, 11, 12, 14, 15};
-	constexpr int AftPitchThrusters[4] = {1, 2, 4, 5};
-	constexpr int AftYawThrusters[2] = {7, 9};
-	//constexpr int AftRollThrusters[4] = {11, 12, 14, 15};
 	//RCS Thruster Groups
 
 static void SaveAttManeuver(FILEHANDLE scn, char* item, const AttManeuver& maneuver)
@@ -876,7 +869,7 @@ void OrbitDAP::HandleTHCInput(double simdt)
 
 void OrbitDAP::CalcEulerAxisRates()
 {
-	double timeAcc = rcsmath::ThrustReduction( oapiGetTimeAcceleration(), STS()->GetOptions()->RCSFullThrustAcceleration() );// 1 up to the time acceleration of the option
+	double timeAcc = rcsmath::ThrustReduction( oapiGetTimeAcceleration() );// the time acceleration (1 in real time)
 
 	VECTOR3 RotationAxis;
 	double RotationAngle=CalcEulerAngle(attErrorMatrix, RotationAxis);
@@ -884,9 +877,9 @@ void OrbitDAP::CalcEulerAxisRates()
 	RotationAxis = _V(RotationAxis.y, RotationAxis.z, RotationAxis.x); // change rotation axis so PYR axes are mapped correctly
 	for(unsigned int i=0;i<3;i++) {
 		if(DAPControlMode==AUTO || RotMode[i]==DISC_RATE) {
-			degReqdRates.data[i]=RotationAxis.data[i]*degRotRate;
-			if(abs(ATT_ERR.data[i]) <= NullStartAngle(abs(radAngularVelocity.data[i]), OrbiterMass, PMI.data[i], Torque.data[i]/timeAcc)) {
-				degReqdRates.data[i] = 0.0;
+			degReqdRates.data[i]=(RotationAxis.data[i]*degRotRate) + degNullRates.data[i];// rate of the maneuver + rate of the moving frame (LVLH, universal pointing)
+			if(abs(ATT_ERR.data[i]) <= NullStartAngle(abs(radAngularVelocity.data[i] - (RAD*degNullRates.data[i])), OrbiterMass, PMI.data[i], Torque.data[i]/timeAcc)) {
+				degReqdRates.data[i] = degNullRates.data[i];
 				RotatingAxis[i] = false;
 				NullingRates[i] = true;
 			}
@@ -900,7 +893,7 @@ void OrbitDAP::CalcEulerAxisRates()
 
 void OrbitDAP::CalcMultiAxisRates(const VECTOR3& degNullRatesLocal)
 {
-	double timeAcc = rcsmath::ThrustReduction( oapiGetTimeAcceleration(), STS()->GetOptions()->RCSFullThrustAcceleration() );// 1 up to the time acceleration of the option
+	double timeAcc = rcsmath::ThrustReduction( oapiGetTimeAcceleration() );// the time acceleration (1 in real time)
 
 	for(unsigned int i=0;i<3;i++) {
 		if(DAPControlMode==AUTO || RotMode[i]==DISC_RATE) {
@@ -912,7 +905,7 @@ void OrbitDAP::CalcMultiAxisRates(const VECTOR3& degNullRatesLocal)
 				}
 				else {
 					RotatingAxis[i]=true;
-					if(abs(ATT_ERR.data[i]) <= NullStartAngle(abs(radAngularVelocity.data[i]), OrbiterMass, PMI.data[i], Torque.data[i]/timeAcc)) {
+					if(abs(ATT_ERR.data[i]) <= NullStartAngle(abs(radAngularVelocity.data[i] - (RAD*degNullRatesLocal.data[i])), OrbiterMass, PMI.data[i], Torque.data[i]/timeAcc)) {
 						degReqdRates.data[i] = 0.0;
 					}
 					else {
@@ -948,7 +941,7 @@ void OrbitDAP::SetRates(const VECTOR3 &degRates, double simdt)
 
 	VECTOR3 Limits;
 	double MaxThrusterLevel;
-	double timeAcc = rcsmath::ThrustReduction( oapiGetTimeAcceleration(), STS()->GetOptions()->RCSFullThrustAcceleration() );// 1 up to the time acceleration of the option
+	double timeAcc = rcsmath::ThrustReduction( oapiGetTimeAcceleration() );// the time acceleration (1 in real time)
 	if(DAPMode != VERN) { // PRI/ALT
 		for(unsigned int i=0;i<3;i++) {
 			//if(RotatingAxis[i] || NullingRates[i]) Limits.data[i] = max(PRI_LIMITS.data[i], 0.5*RotationRateChange(OrbiterMass, PMI.data[i], Torque.data[i]/timeAcc, simdt));
@@ -960,10 +953,19 @@ void OrbitDAP::SetRates(const VECTOR3 &degRates, double simdt)
 	}
 	else { // VERN
 		for(unsigned int i=0;i<3;i++) {
-			if(RotatingAxis[i] || NullingRates[i]) Limits.data[i] = max(VERN_LIMITS.data[i], 0.5*RotationRateChange(OrbiterMass, PMI.data[i], 0.1*Torque.data[i]/timeAcc, simdt));
+			if(RotatingAxis[i] || NullingRates[i]) Limits.data[i] = max(VERN_LIMITS.data[i], 0.5*RotationRateChange(OrbiterMass, PMI.data[i], Torque.data[i]/timeAcc, simdt));
 			else Limits.data[i] = degRateDeadband;
 		}
 		MaxThrusterLevel = 0.1/timeAcc;
+	}
+	// in real time the shortest firing of a jet (the minimum on-time of the valve, 0.08 s) is longer than a step: the rate limits are not finer than half
+	// the rate change of that firing at the lowest level (1/3 of the primary jets), or the jets fire in both directions in every step
+	if (oapiGetTimeAcceleration() <= 1.0)
+	{
+		for(unsigned int i=0;i<3;i++) {
+			const double minPulse = 0.5*RotationRateChange(OrbiterMass, PMI.data[i], Torque.data[i]/((DAPMode != VERN) ? 3.0 : 1.0), rcsmath::MIN_PULSE);
+			if (Limits.data[i] < minPulse && (RotatingAxis[i] || NullingRates[i] || RotPulseInProg[i])) Limits.data[i] = minPulse;
+		}
 	}
 	//if(ManeuverStatus==MNVR_IN_PROGRESS) Limits=Limits*5.0;
 
@@ -994,6 +996,36 @@ void OrbitDAP::SetRates(const VECTOR3 &degRates, double simdt)
 
 
 
+}
+
+/**
+ * Attitude hold without the jets at a high time acceleration: the steps of the simulation are too long for the jets (the torque left after the
+ * reduction of the thrust is the one of the disturbances). The attitude follows the program (the null rates plus a part of the error), and the mean
+ * propellant use of the vernier hold is subtracted from the tanks. Only the holds (maneuver complete, hand controller in the detent).
+ */
+bool OrbitDAP::HoldOnRails( double simdt )
+{
+	bool want = rcsmath::OnRails( oapiGetTimeAcceleration(), STS()->GetOptions()->RCSRailsAbove() ) && (DAPControlMode != FREE) && (ManeuverStatus == MNVR_COMPLETE)
+		&& pRHC_SOP->GetPitchDetent() && pRHC_SOP->GetYawDetent() && pRHC_SOP->GetRollDetent();
+	if (want) want = STS()->RCSRailsConsume( simdt, rcsmath::RailsPropellantRate( ActiveManeuver.Type == AttManeuver::LVLH_TRK ) );
+	if (want != onRails)
+	{
+		onRails = want;
+		oapiWriteLogV( "(SSV_OV) [INFO] OrbitDAP: attitude hold %s rails (time acceleration x%.0f)", want ? "on" : "off", oapiGetTimeAcceleration() );
+	}
+	if (!want) return false;
+
+	const double gain = (0.5 / simdt < 0.1) ? (0.5 / simdt) : 0.1;// 1/s: the error halves in one step at most
+	VECTOR3 rates;
+	for (int i = 0; i < 3; i++)
+	{
+		rates.data[i] = degNullRates.data[i] + (gain * ATT_ERR.data[i]);
+		RotThrusterCommands[i].ResetLine();
+		RotatingAxis[i] = false;
+		NullingRates[i] = false;
+	}
+	STS()->SetAngularVel( _V( rates.data[PITCH], -rates.data[YAW], rates.data[ROLL] ) * RAD );// the body axes of the DAP to the ones of Orbiter
+	return true;
 }
 
 void OrbitDAP::OMSTVC(const VECTOR3 &AttErr, double SimDT)
@@ -1096,6 +1128,117 @@ void OrbitDAP::Realize()
 
 	UpdateDAPParameters();
 	GetAttitudeData();
+}
+
+/** Name of the target of the universal pointing (ID of the target vector) for the flight data log. */
+static const char* LogTargetName( int id )
+{
+	if (id == 1) return "orbital_object";
+	if (id == 2) return "earth_center";
+	if (id == 3) return "earth_point";
+	if (id == 4) return "sun";
+	if (id == 5) return "celestial";
+	if ((id >= 11) && (id <= 110)) return "star";
+	return "none";
+}
+
+void OrbitDAP::LogFlight( void )
+{
+	if (!STS()->GetOptions()->FlightDataLog())
+	{
+		flightLog.Close();
+		return;
+	}
+	const double simt = oapiGetSimTime();
+	const double acc = oapiGetTimeAcceleration();
+	const Atlantis::RCSUse& use = STS()->rcsUse;
+	if (!flightLog.IsOpen())
+	{
+		if (!flightLog.Open( STS()->GetName() )) return;
+		const SSVOptions* o = STS()->GetOptions();
+		flightLog.Line( "# SSV flight data log of the orbit DAP, built %s %s", __DATE__, __TIME__ );
+		flightLog.Line( "# vessel=%s rails_from=%.0f rcs_tolerances=%d rcs_noise=%d tolerance_scale=%.2f thrust_law=1/acc", STS()->GetName(), o->RCSRailsAbove(), o->RCSTolerances() ? 1 : 0, o->RCSNoise() ? 1 : 0, o->ToleranceScale() );
+		flightLog.Line( "# STATE: written when something changes (mode, target, time acceleration, payload); PROFILE: configuration of the DAP in use; DATA: every 30 s of simulated time" );
+		flightLog.Line( "# angles in deg, rates in deg/s, err/rate/null/pmi/cog are pitch,yaw,roll (pmi in m^2, cog in m); rcs/dfuel in kg (dfuel since the last DATA);" );
+		flightLog.Line( "# on_p/on_v: time [s] that the valves of the primary/vernier jets were open (all jets together); n_p/n_v: firings; rails=1: held by the program, without jets" );
+		memset( flightLogKey, 0xff, sizeof( flightLogKey ) );
+		flightLogProfile[0] = '\0';
+		flightLogTime = simt - 1000.0;
+		flightLogFuel = STS()->RCSPropellantTotal();
+		flightLogOnP = use.onTimePrimary;
+		flightLogOnV = use.onTimeVernier;
+		flightLogPulsesP = use.pulsesPrimary;
+		flightLogPulsesV = use.pulsesVernier;
+	}
+
+	const char* const modes[] = {"PRI", "ALT", "VERN"};
+	const char* const ctrls[] = {"AUTO", "INRTL", "LVLH", "FREE"};
+	const char* const ctls[] = {"RCS", "LEFT_OMS", "RIGHT_OMS", "BOTH_OMS"};
+	const char* const types[] = {"MNVR", "LVLH_TRK", "UP"};
+	const int select = (DAPSelect == 0) ? activeAProfile : ((DAPSelect == 1) ? activeBProfile : 0);
+	const UniversalPointing::LogInfo uni = pUniversalPointing->GetLogInfo();
+
+	// DAP configuration in use
+	{
+		const DAPConfig& c = DAPConfiguration[DAPSelect][select];
+		char profile[sizeof( flightLogProfile )];
+		sprintf_s( profile, sizeof( profile ), "sel=%c prof=%d PRI[rot=%.3f attdb=%.3f ratedb=%.3f rotpls=%.4f comp=%.3f tranpls=%.2f popt=%d yopt=%d] ALT[ratedb=%.3f ontime=%.3f delay=%.3f jetopt=%d jets=%d] VERN[rot=%.4f attdb=%.3f ratedb=%.4f rotpls=%.4f comp=%.3f cntlacc=%d]",
+			(DAPSelect == 0) ? 'A' : ((DAPSelect == 1) ? 'B' : 'E'), select, c.PRI_ROT_RATE, c.PRI_ATT_DB, c.PRI_RATE_DB, c.PRI_ROT_PLS, c.PRI_COMP, c.PRI_TRAN_PLS, c.PRI_P_OPTION, c.PRI_Y_OPTION,
+			c.ALT_RATE_DB, c.ALT_ON_TIME, c.ALT_DELAY, c.ALT_JET_OPT, c.ALT_JETS, c.VERN_ROT_RATE, c.VERN_ATT_DB, c.VERN_RATE_DB, c.VERN_ROT_PLS, c.VERN_COMP, c.VERN_CNTL_ACC );
+		if (strcmp( profile, flightLogProfile ) != 0)
+		{
+			strcpy_s( flightLogProfile, sizeof( flightLogProfile ), profile );
+			flightLog.Line( "PROFILE simt=%.1f %s", simt, profile );
+		}
+	}
+
+	// payload attached to the orbiter
+	char payload[160] = "";
+	double payloadMass = 0.0;
+	int payloadCount = 0;
+	for (DWORD i = 0; i < STS()->AttachmentCount( false ); i++)
+	{
+		const OBJHANDLE h = STS()->GetAttachmentStatus( STS()->GetAttachmentHandle( false, i ) );
+		if (h == NULL) continue;
+		payloadCount++;
+		payloadMass += oapiGetMass( h );
+		char name[48];
+		oapiGetObjectName( h, name, sizeof( name ) );
+		if ((strlen( payload ) + strlen( name ) + 2) < sizeof( payload ))
+		{
+			if (payload[0] != '\0') strcat_s( payload, sizeof( payload ), ";" );
+			strcat_s( payload, sizeof( payload ), name );
+		}
+	}
+
+	// state
+	const int key[12] = {static_cast<int>(DAPMode), static_cast<int>(DAPControlMode), static_cast<int>(ControlMode), static_cast<int>(DAPSelect), select, static_cast<int>(ActiveManeuver.Type),
+		static_cast<int>(ManeuverStatus), onRails ? 1 : 0, uni.option, uni.targetId, payloadCount, static_cast<int>((acc * 10.0) + 0.5)};
+	if (memcmp( key, flightLogKey, sizeof( key ) ) != 0)
+	{
+		memcpy( flightLogKey, key, sizeof( key ) );
+		const VECTOR3& cog = STS()->GetOrbiterCoGOffset();
+		flightLog.Line( "STATE simt=%.1f met=%.1f acc=%.1f dap=%s ctrl=%s control=%s mnvr=%s status=%d rails=%d uni_opt=%d tgt=%d(%s) ra=%.3f dec=%.3f lat=%.3f lon=%.3f alt_nmi=%.1f bodv=%d bodv_p=%.3f bodv_y=%.3f omicron=%.3f axes3=%d mass=%.0f pmi=%.1f,%.1f,%.1f cog=%.3f,%.3f,%.3f payload_mass=%.0f payload=%s height_km=%.1f",
+			simt, STS()->GetMET(), acc, modes[static_cast<int>(DAPMode)], ctrls[static_cast<int>(DAPControlMode)], ctls[static_cast<int>(ControlMode)], types[static_cast<int>(ActiveManeuver.Type)], static_cast<int>(ManeuverStatus), onRails ? 1 : 0,
+			uni.option, uni.targetId, LogTargetName( uni.targetId ), uni.ra, uni.dec, uni.lat, uni.lon, uni.alt, uni.bodyVectorId, uni.bodyPitch, uni.bodyYaw, uni.omicron, uni.threeAxis ? 1 : 0,
+			OrbiterMass, PMI.data[0], PMI.data[1], PMI.data[2], cog.x, cog.y, cog.z, payloadMass, (payload[0] != '\0') ? payload : "-", STS()->GetAltitude() / 1000.0 );
+	}
+
+	// data of the hold
+	if ((simt - flightLogTime) >= 30.0)
+	{
+		const double fuel = STS()->RCSPropellantTotal();
+		flightLog.Line( "DATA simt=%.1f dt=%.1f acc=%.1f err=%.3f,%.3f,%.3f rate=%.4f,%.4f,%.4f null=%.4f,%.4f,%.4f mass=%.0f rcs=%.2f dfuel=%.4f on_p=%.3f on_v=%.3f n_p=%u n_v=%u rails=%d",
+			simt, simt - flightLogTime, acc, ATT_ERR.data[PITCH], ATT_ERR.data[YAW], ATT_ERR.data[ROLL], degAngularVelocity.data[PITCH], degAngularVelocity.data[YAW], degAngularVelocity.data[ROLL],
+			degNullRates.data[PITCH], degNullRates.data[YAW], degNullRates.data[ROLL], OrbiterMass, fuel, flightLogFuel - fuel, use.onTimePrimary - flightLogOnP, use.onTimeVernier - flightLogOnV,
+			use.pulsesPrimary - flightLogPulsesP, use.pulsesVernier - flightLogPulsesV, onRails ? 1 : 0 );
+		flightLogTime = simt;
+		flightLogFuel = fuel;
+		flightLogOnP = use.onTimePrimary;
+		flightLogOnV = use.onTimeVernier;
+		flightLogPulsesP = use.pulsesPrimary;
+		flightLogPulsesV = use.pulsesVernier;
+	}
 }
 
 void OrbitDAP::OnPreStep(double simt, double simdt, double mjd)
@@ -1234,13 +1377,8 @@ void OrbitDAP::OnPreStep(double simt, double simdt, double mjd)
 				if(ManeuverStatus < MNVR_COMPLETE) mnvrCompletionMET = STS()->GetMET() + CalcManeuverCompletionTime(curM50Matrix, ActiveManeuver.tgtMatrix, curLVLHMatrix, length(degNullRates));
 				lastUpdateTime = STS()->GetMET();
 			}
-			if(ManeuverStatus == MNVR_IN_PROGRESS) {
-				// calculate M50 matrix corresponding to target attitude at end of maneuver
-				double rotationAngle = RAD*length(degNullRates)*(mnvrCompletionMET-STS()->GetMET());
-				MATRIX3 LVLHRotation;
-				GetRotMatrixY(-rotationAngle, LVLHRotation);
-				tgtM50Matrix = mul(mul(curLVLHMatrix, LVLHRotation), ActiveManeuver.tgtMatrix);
-			}
+			// the target is the current attitude of the moving frame: the maneuver (rate of the DAP) is relative to the frame and the vehicle also turns at the
+			// rate of the frame (a look-ahead of the target never ends when the rate of the DAP is lower than the orbital rate)
 		}
 		else {
 			tgtM50Matrix = ActiveManeuver.tgtMatrix;
@@ -1274,8 +1412,13 @@ void OrbitDAP::OnPreStep(double simt, double simdt, double mjd)
 	else { // FREE
 		degReqdRates = degAngularVelocity;
 	}
-	if(ControlMode == RCS) SetRates(degReqdRates, simdt);
+	if(ControlMode == RCS)
+	{
+		if (!HoldOnRails( simdt )) SetRates(degReqdRates, simdt);
+	}
 	else OMSTVC(ATT_ERR, simdt);
+
+	LogFlight();
 
 	lastStepdt = simdt;
 }
@@ -1446,13 +1589,12 @@ bool OrbitDAP::ItemInput( int item, const char* Data )
 					{
 						if (DAPConfiguration[DAPSelect][profile].PRI_P_OPTION == 1)
 						{
-							STS()->DisableThrusters(AftPitchThrusters, 2);
+							STS()->SetRotationJets( 0, true, false );
 							UpdateDAPParameters();
 						}
 						else if (DAPConfiguration[DAPSelect][profile].PRI_P_OPTION == 2)
 						{
-							STS()->EnableThrusters(AftPitchThrusters, 2);
-							STS()->DisableThrusters(NosePitchThrusters, 2);
+							STS()->SetRotationJets( 0, false, true );
 							UpdateDAPParameters();
 						}
 					}
@@ -1462,7 +1604,7 @@ bool OrbitDAP::ItemInput( int item, const char* Data )
 					DAPConfiguration[convert[item]][profile].PRI_P_OPTION = 0;
 					if (DAPConfiguration[DAPSelect][profile].PRI_P_OPTION == 0)
 					{
-						STS()->EnableThrusters(NosePitchThrusters, 2);
+						STS()->SetRotationJets( 0, true, true );
 						UpdateDAPParameters();
 					}
 				}
@@ -1482,13 +1624,12 @@ bool OrbitDAP::ItemInput( int item, const char* Data )
 					{
 						if (DAPConfiguration[DAPSelect][profile].PRI_Y_OPTION==1)
 						{
-							STS()->DisableThrusters(AftYawThrusters, 2);
+							STS()->SetRotationJets( 1, true, false );
 							UpdateDAPParameters();
 						}
 						else if (DAPConfiguration[DAPSelect][profile].PRI_Y_OPTION==2)
 						{
-							STS()->EnableThrusters(AftYawThrusters, 2);
-							STS()->DisableThrusters(NoseYawThrusters, 2);
+							STS()->SetRotationJets( 1, false, true );
 							UpdateDAPParameters();
 						}
 					}
@@ -1498,7 +1639,7 @@ bool OrbitDAP::ItemInput( int item, const char* Data )
 					DAPConfiguration[convert[item]][profile].PRI_Y_OPTION=0;
 					if (DAPConfiguration[DAPSelect][profile].PRI_Y_OPTION==0)
 					{
-						STS()->EnableThrusters(NoseYawThrusters, 2);
+						STS()->SetRotationJets( 1, true, true );
 						UpdateDAPParameters();
 					}
 				}
@@ -1551,8 +1692,7 @@ bool OrbitDAP::ItemInput( int item, const char* Data )
 					{
 						if (DAPConfiguration[DAPSelect][profile].ALT_JET_OPT==2)
 						{
-							STS()->DisableThrusters(NoseRotThrusters, 6);
-							STS()->EnableThrusters(AftRotThrusters, 6);
+							for (int ax = 0; ax < 3; ax++) STS()->SetRotationJets( ax, false, true );
 							UpdateDAPParameters();
 						}
 					}
@@ -1564,7 +1704,7 @@ bool OrbitDAP::ItemInput( int item, const char* Data )
 					{
 						if (DAPConfiguration[DAPSelect][profile].ALT_JET_OPT==0)
 						{
-							STS()->EnableThrusters(NoseRotThrusters, 6);
+							for (int ax = 0; ax < 3; ax++) STS()->SetRotationJets( ax, true, true );
 							UpdateDAPParameters();
 						}
 					}
@@ -2552,9 +2692,10 @@ void OrbitDAP::UpdateDAPParameters()
 		degAttDeadband=DAPConfiguration[DAPSelect][profile].VERN_ATT_DB;
 		degRateDeadband=DAPConfiguration[DAPSelect][profile].VERN_RATE_DB;
 		degRotPulse=DAPConfiguration[DAPSelect][profile].VERN_ROT_PLS;
-		Torque.data[PITCH]=0.1*ORBITER_PITCH_TORQUE;
-		Torque.data[YAW]=0.1*ORBITER_YAW_TORQUE;
-		Torque.data[ROLL]=0.1*ORBITER_ROLL_TORQUE;
+		// the torque of the vernier jets that the selection uses (not a tenth of the primary: they are 2 small jets)
+		Torque.data[PITCH]=rcsjets::VernierTorque( PITCH, _V( 0.0, 0.0, 0.0 ) );
+		Torque.data[YAW]=rcsjets::VernierTorque( YAW, _V( 0.0, 0.0, 0.0 ) );
+		Torque.data[ROLL]=rcsjets::VernierTorque( ROLL, _V( 0.0, 0.0, 0.0 ) );
 	}
 }
 

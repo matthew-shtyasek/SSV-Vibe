@@ -165,6 +165,23 @@ void WSB::OnPreStep(double simt, double simdt, double mjd)
 	in.heater = in.powered && (ControllerA.IsSet() || ControllerB.IsSet());
 	in.env = hydmodel::EnvironmentTemperature( InShadow() );
 
+	// tolerances of the parts of this system and noise of the spray (options of the realism page)
+	{
+		const disp::Mode dm = STS()->GetHydraulicDispersion();
+		hydmodel::ApplyTolerances( th, STS()->GetToleranceSeed(), static_cast<int>(usID) - 1, dm );
+		if (!loadingApplied)
+		{
+			loadingApplied = true;
+			if (!stateLoaded) hydmodel::ApplyLoading( th, STS()->GetToleranceSeed(), static_cast<int>(usID) - 1, dm );
+		}
+		if (!dm.noise) th.noiseCool = 1.0;
+		else if ((simt - noiseTime) >= 1.0)
+		{
+			noiseTime = simt;
+			th.noiseCool = disp::Rel( 1.0, hydmodel::SIGMA_NOISE_COOL, noiseGen.Normal(), dm.scale );
+		}
+	}
+
 	if (STS()->GetOptions()->HydraulicThermal())
 	{
 		// the scenario started with the APU running and has no temperatures: the system is warm
@@ -263,6 +280,7 @@ bool WSB::OnParseLine(const char* keyword, const char* line)
 	double v = 0.0;
 	if (sscanf_s( line, "%lf", &v ) == 1)
 	{
+		stateLoaded = true;
 		if (!_stricmp( keyword, "Hyd" )) {th.hyd = v; thermalLoaded = true; return true;}
 		if (!_stricmp( keyword, "Oil" )) {th.oil = v; thermalLoaded = true; return true;}
 		if (!_stricmp( keyword, "Water" )) {th.water = hydmodel::Clamp01( v / hydmodel::WATER_TANK ) * hydmodel::WATER_TANK; return true;}

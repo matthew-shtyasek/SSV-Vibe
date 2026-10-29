@@ -40,6 +40,9 @@ namespace dps
 		private:
 			unsigned short RMS_SEL;
 
+			DiscInPort dipBFCCRTDisplay;
+			DiscInPort dipBFCCRTSelect[2];
+
 			void OnPaint_SM_SPEC94_PASS( vc::MDU* pMDU ) const;
 			void OnPaint_SM_DISP95_PASS( vc::MDU* pMDU ) const;
 			void OnPaint_SM_DISP96_PASS( vc::MDU* pMDU ) const;
@@ -47,6 +50,7 @@ namespace dps
 			void OnPaint_SM_DISP169_PASS( vc::MDU* pMDU ) const;
 			void OnPaint_SM_ANTENNA_PASS( vc::MDU* pMDU ) const;
 			void OnPaint_SM_PLBAYDOORS_PASS( vc::MDU* pMDU ) const;
+			void OnPaint_SM_SPEC86( vc::MDU* pMDU ) const;
 
 			bool ItemInput_SM_SPEC94_PASS( int item, const char* Data );
 			bool ItemInput_SM_DISP95_PASS( int item, const char* Data );
@@ -56,6 +60,8 @@ namespace dps
 		public:
 			explicit SMDisplays( SimpleGPCSystem* _gpc );
 			~SMDisplays( void );
+
+			void Realize( void ) override;
 
 			bool OnMajorModeChange( unsigned int newMajorMode ) override;
 

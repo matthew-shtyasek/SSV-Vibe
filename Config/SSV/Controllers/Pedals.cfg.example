@@ -2,7 +2,7 @@
 # The names of the axes are the usual ones for pedals (rudder = Axis RZ, toe brakes = Axis X and Axis Y): check them with Ctrl+J and change SUBDEVID.
 # RPTA: +1 = right pedal forward (yaw right). The rudder pedals work in the left or right seat (commander or pilot), in the atmosphere.
 # BRAKE_LEFT and BRAKE_RIGHT use the whole range of the axis (released = one end, pressed = the other end): set DEADZONE to 0 and REVERSE
-# so that the pressed pedal gives the higher value. SBTC (speedbrake and thrust controller) works the same way (+1 = lever forward).
+# so that the pressed pedal gives the higher value. Check it: with the pedals released the BRAKE line of the hydraulics log (SSV_FlightLogs) must show pedals 0.00; if it shows 1.00 change REVERSE. SBTC (speedbrake and thrust controller) works the same way (+1 = lever forward).
 INPUT	SUBDEVID	REVERSE	DEADZONE	EXPO	CENTER
 RPTA	Axis RZ	false	0.03	0	0
 BRAKE_LEFT	Axis X	true	0	0	0

@@ -69,6 +69,7 @@ Date         Developer
 
 
 #include "AtlantisSubsystem.h"
+#include "Dispersion.h"
 #include "APUModel.h"
 #include <DiscInPort.h>
 #include <DiscOutPort.h>
@@ -125,6 +126,9 @@ public:
 	double GetValveTemperature() const {return th.valve;}
 	/** True if the APU was destroyed (detonation of the hydrazine, uncontained overspeed). */
 	bool IsFailed() const {return failed;}
+	/** True if the destroyed APU leaks hydrazine (while the FUEL TK VLV switch is in OPEN and there is fuel). */
+	bool IsLeaking() const {return leaking && (FuelMass[0] > 0.0);}
+	bool IsCooling() const {return coolingTime > 0.0;}
 	bool SingleParamParseLine() const override {return true;};
 	double GetSubsystemMass() const override;
 	void Realize() override;
@@ -139,12 +143,22 @@ public:
 	typedef enum {OFF, START, ON, SHUTDOWN} APU_STATE;
 private:
 	bool ReadyToStart() const;
-	void Fail( const char* reason );
+	enum FailMode {FAIL_SEIZED, FAIL_EXPLOSION, FAIL_FIRE};
+	/** Destroys the APU. An explosion has a bang and a leak of the fuel; a fire (damage of another APU) has a leak only; the seized bearings none. */
+	void Fail( const char* reason, FailMode mode = FAIL_SEIZED, bool collateral = true );
+	void SpreadDamage( bool explosion );// destroys another APU that works
+	void StartFire( const char* reason );// the hydrazine that leaks burns (in the air)
+	void UpdateFire( double simt, double simdt, bool leakNow );// ignition, end of the fire, random fire of the option
+	void UpdateEffects( double simdt, bool leakNow );// flash, fire, smoke and vapour seen from outside
+	void CreateEffects( void );// streams and light (when they are needed the first time)
 
 	int ID;
 
 	double FuelMass[2];
 	double HydraulicPressure[2];
+	disp::Noise pumpNoise;// noise of the pressure of the pump
+	double pumpWander = 0.0;// [psi] slow variation of the pressure of the pump (noise)
+	double pumpWanderTime = -100.0;
 	double FuelPress[2];
 	double APUSpeed[2];
 
@@ -154,10 +168,22 @@ private:
 	bool autoShutdownLatch;// the controller closed the fuel tank isolation valves (auto shutdown), until the APU OPERATE switch is in OFF
 	bool overspeedShutdown;// the last auto shutdown was an overspeed: the APU must not be restarted
 	bool failed;// destroyed
+	bool leaking = false;// the lines are broken: the hydrazine leaks while the fuel tank isolation valves are open
+	double leakFactor = 1.0, leakTime = 0.0;// relative rate of the leak of this failure, time of leak [s]
+	double leakJitter = 0.0, leakJitterTime = -10.0;
+	bool leakFireChecked = false;// the check of the fire that spreads to another APU was done
+	bool burning = false;// the hydrazine that leaks burns (needs air)
+	double fireOut = 0.0;// [s] since the leak ended while it burns
+	double boomTime = 0.0, debrisTime = 0.0;// [s] left of the flash and of the smoke of an explosion
+	PSTREAM_HANDLE psFlash = NULL, psFire = NULL, psSmoke = NULL, psVapor = NULL;
+	double lvFlash = 0.0, lvFire = 0.0, lvSmoke = 0.0, lvVapor = 0.0;// levels of the streams
+	LightEmitter* fxLight = NULL;
 	int failure;// failure for tests (scenario): 0 = none, 1 = the speed falls (underspeed), 2 = the speed rises (overspeed)
 	apumodel::Thermal th;
 	bool thermalLoaded;
 	double coolingTime;// continuous time of injector cooling [s]
+	int hydLogKey[10] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1};// flight data log: switches and state of the last line
+	double hydLogTime = -1000.0;
 
 	DiscInPort APU_Run, APU_HydPumpPress;
 	DiscInPort APU_CntlrPwr, APU_FuelTankValves;

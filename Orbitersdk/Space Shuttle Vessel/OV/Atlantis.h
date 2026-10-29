@@ -157,6 +157,12 @@ Date         Developer
 #include <discsignals.h>
 #include <Sensor.h>
 #include <EngConst.h>
+#include <cstdint>
+#include "Dispersion.h"
+#include "RCSJets.h"
+#include "FlightLog.h"
+#include <map>
+#include <tuple>
 
 
 typedef struct {
@@ -468,47 +474,23 @@ class Atlantis: public VESSEL4
 		THRUSTER_HANDLE th_ssme[3];                // handles for SSME
 		THRUSTER_HANDLE th_oms[2];               // handles for OMS engines
 		THRUSTER_HANDLE th_srb[2];                 // handles for SRB engines
-		/*
-		0	FL PU
-		1	FR PU
-		2	L PU
-		3	R PU
-		4	F PD
-		5	L PD
-		6	R PD
-
-		7	F YL
-		8	L YL
-		9	F YR
-		10	R YR
-
-		11	F RL
-		12	L RL
-		13	R RL
-		14	F RR
-		15	L RR
-		16	R RR
-		*/
-		THRUSTER_HANDLE th_att_rcs[17];
-		/*
-		0	FL Z-
-		1	FR Z-
-		2	L Z-
-		3	R Z-
-		4	F Z+
-		5	L Z+
-		6	R Z+
-
-		7	F Y-
-		8	R Y-
-		9	F Y+
-		10	L Y+
-
-		11	L X+
-		12	R X+
-		13	F X-
-		*/
-		THRUSTER_HANDLE th_att_lin[14];
+		// the 44 jets of the RCS (38 primary and 6 vernier), in the order of rcsjets::Jets()
+		THRUSTER_HANDLE th_rcs[rcsjets::COUNT];
+		rcsjets::Valve rcsValve[rcsjets::COUNT];
+		double rcsTolThrust[rcsjets::COUNT], rcsTolIsp[rcsjets::COUNT], rcsTolDelay[rcsjets::COUNT];// tolerances of each jet (fixed for the vehicle)
+		double rcsFireThrust[rcsjets::COUNT], rcsFireIsp[rcsjets::COUNT], rcsFireDelay[rcsjets::COUNT];// noise of the last firing of each jet
+		disp::Noise rcsNoise;
+		uint64_t rcsFailed;// jets that do not work (bits)
+		bool rcsNoseOn[3], rcsAftOn[3];// jets of the forward module and of the pods that the DAP may use for each rotation axis
+		bool rcsTolApplied;
+		bool rcsTolOn;
+		double rcsTolScale;
+		uint64_t rcsTolSeed;
+		std::map<std::tuple<int, int, int, int, uint64_t>, uint64_t> rcsSelections;// cache of the selection of the jets
+		void UpdateRCSJets( double simt, double simdt );
+		void ApplyRCSTolerances( void );
+		uint64_t RCSRotationSet( int axis, int sign, int k, bool vernier );
+		uint64_t RCSTranslationSet( int axis, int sign );
 
 		bool bSSMEsDefined, bOMSDefined, bRCSDefined;
 
@@ -543,8 +525,6 @@ class Atlantis: public VESSEL4
 		 */
 		THRUSTER_HANDLE thMPSDump[8];
 
-		THGROUP_HANDLE thg_pitchup, thg_pitchdown, thg_yawleft, thg_yawright, thg_rollleft, thg_rollright;
-		THGROUP_HANDLE thg_transfwd, thg_transaft, thg_transup, thg_transdown, thg_transright, thg_transleft;
 		UINT ex_main[3];						   // main engine exhaust
 		std::vector<UINT> vExRCS;				   // RCS exhaust
 		std::vector<PSTREAM_HANDLE> vExStreamRCS;  // RCS exhaust stream
@@ -560,6 +540,7 @@ class Atlantis: public VESSEL4
 		void UpdateRCSFlames( void );
 		double RCSThrustReduction( void ) const;// factor by which the DAPs reduce the thrust of the RCS with the time acceleration (see RCSMath.h)
 		PARTICLESTREAMSPEC RCS_PSSpec;
+		PARTICLESTREAMSPEC RCS_VPSSpec;// vernier jets (24 lbf against 870 lbf of the primary ones)
 		SURFHANDLE RCS_Exhaust_tex;
 		AIRFOILHANDLE hStackAirfoil;
 		AIRFOILHANDLE hOVAirfoilV;
@@ -598,6 +579,9 @@ class Atlantis: public VESSEL4
 		bool SBTCTO_Input;
 		double SBTC_Input;
 
+		bool launchTimeFileWritten = false;
+		bool rmsFineKey = false;
+	uint64_t toleranceSeed = 0;// seed of the tolerances of this vehicle (0: from the name)// Ctrl held: the deflection of the hand controllers is reduced for the RMS (fine adjustment)
 		double LeftBrake_Input;
 		double RightBrake_Input;
 
@@ -877,6 +861,13 @@ class Atlantis: public VESSEL4
 		virtual DiscreteBundleManager* BundleManager() const;
 		mission::Mission* GetMissionData() const;
 		SSVOptions* GetOptions( void ) const;
+
+		/** @return seed of the tolerances of this vehicle: the saved one, or one from the name of the vehicle (the same vehicle has the same parts) */
+		uint64_t GetToleranceSeed( void ) const;
+		/** @return the dispersions (tolerances, noise, scale) of the hydraulics */
+		disp::Mode GetHydraulicDispersion( void ) const;
+		/** @return the dispersions (tolerances, noise, scale) of the RCS */
+		disp::Mode GetRCSDispersion( void ) const;
 		HandControllers* GetHandControllers( void ) const { return pHC; }
 
 
@@ -964,8 +955,29 @@ class Atlantis: public VESSEL4
 		void CalcSSMEThrustAngles( unsigned int eng, double& degAngleP, double& degAngleY ) const;
 
 		//Thruster Control; called from OrbitDAP class
-		void EnableThrusters(const int Thrusters[], int nThrusters);
-		void DisableThrusters(const int Thrusters[], int nThrusters);
+		/** Selects the jets that the DAP may use for a rotation axis (0 = pitch, 1 = yaw, 2 = roll): the ones of the forward module and the ones of the pods. */
+		void SetRotationJets( int axis, bool nose, bool aft );
+		/** Use of the RCS jets since the start (for the data log of the DAP): time with the valves open [s of the simulation] and firings, of the primary and the vernier jets. */
+		struct RCSUse
+		{
+			double onTimePrimary = 0.0, onTimeVernier = 0.0;
+			unsigned pulsesPrimary = 0, pulsesVernier = 0;
+		} rcsUse;
+		double RCSPropellantTotal( void ) const;// kg in the three tanks of the RCS
+		/** @return file of the log of the hydraulics (APUs, aerosurfaces, brakes; see FlightLog.h), NULL if the option FlightDataLog is off */
+		flightlog::Writer* HydLog( void );
+		/** @return file of the log of the rotation (angular rate at the changes of the c.g. and of the inertia, see FlightLog.h), NULL if the option FlightDataLog is off */
+		flightlog::Writer* RotLog( void );
+	private:
+		flightlog::Writer hydLogFile;
+		flightlog::Writer rotLogFile;
+		double rotLogTime = -1.0e9;// [s] simulated time of the last ROT line
+		VECTOR3 rotLogRates = {0.0, 0.0, 0.0};// [rad/s] angular rate of the last ROT line
+	public:
+		bool RCSRailsConsume( double dt, double kgPerHour );// the DAP on rails subtracts the mean propellant use of the hold from the RCS tanks; false if there is not enough
+		/** Jet that does not work (it is not selected) or that works again. */
+		void SetJetFailed( int jet, bool failed );
+		bool IsJetFailed( int jet ) const { return (rcsFailed & rcsjets::Bit( jet )) != 0; }
 
 		/**
 		 * Wrapper for AddAnimationComponent

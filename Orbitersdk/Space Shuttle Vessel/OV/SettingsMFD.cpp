@@ -2,6 +2,7 @@
 #include "Atlantis.h"
 #include "SSVOptions.h"
 #include "WSB.h"
+#include "APU.h"
 #include "HandControllers.h"
 
 
@@ -43,6 +44,7 @@ void SettingsMFD::SetPage( int newPage )
 		hc->SetRawPolling( newPage == settings::PAGE_CONTROLLERS );
 	}
 	page = newPage;
+	editor.SetRealism( newPage == settings::PAGE_REALISM );
 }
 
 void SettingsMFD::Apply( void )
@@ -133,6 +135,13 @@ void SettingsMFD::DrawStatus( oapi::Sketchpad* skp )
 		skp->SetTextColor( COLOR_TEXT );
 		sprintf_s( buf, sizeof( buf ), "SYSTEM %d", sys );
 		skp->Text( static_cast<int>(cw), y, buf, static_cast<int>(strlen( buf )) );
+		const APU* apu = sts->GetAPU( sys );
+		if (apu != NULL)
+		{
+			skp->SetTextColor( COLOR_VALUE );
+			sprintf_s( buf, sizeof( buf ), "APU %3.0f%%  %4.0f PSI  FUEL %3.0f LB", apu->GetAPUSpeed(), apu->GetHydraulicPressure(), apu->GetFuelLevel() );
+			skp->Text( static_cast<int>(12 * cw), y, buf, static_cast<int>(strlen( buf )) );
+		}
 		y += line;
 		if (wsb == NULL)
 		{
@@ -166,13 +175,38 @@ void SettingsMFD::DrawStatus( oapi::Sketchpad* skp )
 			skp->Text( static_cast<int>(23 * cw), y, "APU SEIZED", 10 );
 		}
 		y += line;
+		if (apu != NULL)
+		{
+			// temperatures that decide a restart (limits 400 / 210 / 200 F), and the chance that the hydrazine detonates at a start now
+			const double ti = apu->GetInjectorTemperature(), tp = apu->GetPumpTemperature(), tv = apu->GetValveTemperature();
+			const bool hot = (ti > apumodel::LIMIT_INJECTOR_F) || (tp > apumodel::LIMIT_PUMP_F) || (tv > apumodel::LIMIT_VALVE_F);
+			skp->SetTextColor( hot ? COLOR_WARNING : COLOR_VALUE );
+			sprintf_s( buf, sizeof( buf ), "  INJ %3.0f PMP %3.0f VLV %3.0f F", ti, tp, tv );
+			skp->Text( static_cast<int>(cw), y, buf, static_cast<int>(strlen( buf )) );
+			if (apu->IsFailed())
+			{
+				skp->SetTextColor( COLOR_WARNING );
+				const char* st = apu->IsLeaking() ? "DESTROYED, LEAK" : "DESTROYED";
+				skp->Text( static_cast<int>(30 * cw), y, st, static_cast<int>(strlen( st )) );
+			}
+			else
+			{
+				const char* st = apu->IsCooling() ? "INJ COOL" : (hot ? "HOT" : "OK");
+				skp->SetTextColor( hot ? COLOR_WARNING : COLOR_NOTE );
+				char st2[40];
+				if (hot) sprintf_s( st2, sizeof( st2 ), "%s %2.0f%% BANG", st, 100.0 * apumodel::DetonationProbability( apumodel::Thermal{ti, tp, tv, 0.0, false} ) );
+				else sprintf_s( st2, sizeof( st2 ), "%s", st );
+				skp->Text( static_cast<int>(30 * cw), y, st2, static_cast<int>(strlen( st2 )) );
+			}
+			y += line;
+		}
 	}
 }
 
 void SettingsMFD::DrawSettings( oapi::Sketchpad* skp )
 {
 	{
-		Title( skp, "SSV SETTINGS" );
+		Title( skp, editor.IsRealism() ? "SSV REALISM" : "SSV SETTINGS" );
 		skp->SetTextColor( COLOR_TEXT );
 
 		const int line = static_cast<int>(ch);
@@ -184,8 +218,8 @@ void SettingsMFD::DrawSettings( oapi::Sketchpad* skp )
 
 		for (int r = 0; r < rows; r++)
 		{
-			const int i = first + r;
-			if (i >= settings::COUNT) break;
+			const int i = editor.IndexAt( first + r );
+			if (i < 0) break;
 			const settings::Item& it = settings::ITEMS[i];
 			const bool selected = (i == editor.Cursor());
 			const bool changedFromDefault = !settings::IsDefault( i, editor.Value( i ) );

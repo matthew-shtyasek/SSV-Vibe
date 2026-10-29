@@ -149,17 +149,77 @@ namespace apumodel
 		return (t.injector <= LIMIT_INJECTOR_F) && (t.pump <= LIMIT_PUMP_F) && (t.valve <= LIMIT_VALVE_F);
 	}
 
+	// detonation of the hydrazine and its consequences (estimates of this file: there are no published data)
+	inline constexpr double DETONATION_MAX = 0.95;// the probability of a start above the limits never reaches 1
+	inline constexpr double DETONATION_SCALE_INJECTOR_F = 150.0;// [F] above the limit at which the probability is 63%
+	inline constexpr double DETONATION_SCALE_PUMP_F = 45.0;// the same for the pump and the valve module (the margin of the limits is narrower: 60 F instead of 200 F)
+	inline constexpr double LEAK_RATE = 1.0;// [lb/s] hydrazine that leaks from a destroyed APU with the FUEL TK VLV switch in OPEN: a ruptured line of a tank under pressure (estimate: 1/4 inch line, 365 psi, a restricted flow; about 3 lb/s if the line were open)
+	inline constexpr double LEAK_SIGMA = 0.3;// relative scatter of the rate of a leak (each failure)
+	inline constexpr double LEAK_JITTER = 0.1;// relative variation of the rate (each second)
+	inline constexpr double COLLATERAL_EXPLOSION = 0.5;// probability that the explosion of an APU destroys another one too
+	inline constexpr double COLLATERAL_FIRE = 0.15;// probability that the fire of a leak that lasts FIRE_SPREAD_TIME destroys another APU
+	inline constexpr double FIRE_SPREAD_TIME = 60.0;// [s] of leak
+	inline constexpr double HYD_LOSS_EXPLOSION = 0.5;// probability that the explosion breaks the pump or a line of the hydraulic system of the APU: the reservoir leaks (estimate, no source)
+	inline constexpr double HYD_LOSS_FIRE = 0.2;// the same for a fire: the hydraulic fluid (MIL-H-83282) burns slowly, the lines burn through (estimate, no source)
+
+	// fire of the hydrazine that leaks: it needs air (on orbit the compartment is purged with nitrogen); the figures are estimates, no source
+	inline constexpr double FIRE_MIN_PRESSURE = 10000.0;// [Pa] ambient pressure from which a leak can burn (about 16 km of altitude)
+	inline constexpr double IGNITION_RATE = 1.0 / 90.0;// [1/s] ignition of a leak in the air (a mean of 90 s)
+	inline constexpr double FIRE_AFTER_LEAK = 45.0;// [s] that a fire lasts after the leak ended
+	inline constexpr double EXPLOSION_IGNITES = 0.5;// probability that an explosion in the air starts a fire at once
+	inline constexpr double BOOM_TIME = 1.5;// [s] of the flash of an explosion
+	inline constexpr double DEBRIS_TIME = 20.0;// [s] of the smoke and debris of an explosion
+
+	/** True if there is air for a fire at this ambient pressure [Pa]. */
+	inline bool AirForFire( double pressure )
+	{
+		return pressure >= FIRE_MIN_PRESSURE;
+	}
+
+	/** Probability that a leak ignites in a step dt [s] at the ambient pressure [Pa]. */
+	inline double IgnitionProbability( double dt, double pressure )
+	{
+		if (!AirForFire( pressure ) || (dt <= 0.0)) return 0.0;
+		return 1.0 - std::exp( -IGNITION_RATE * dt );
+	}
+
+	/** Probability that a working APU starts to leak and burn at random (the STS-9 kind) in a step dt [s], with the rate [1/hour] of the option. */
+	inline double RandomFireProbability( double dt, double ratePerHour, double pressure )
+	{
+		if (!AirForFire( pressure ) || (dt <= 0.0) || (ratePerHour <= 0.0)) return 0.0;
+		return 1.0 - std::exp( -ratePerHour * dt / 3600.0 );
+	}
+
+	/** Probability 1 - exp(-excess / scale) of a detonation, 0 inside the limit, DETONATION_MAX at most. */
+	inline double ExcessProbability( double excess, double scale )
+	{
+		if (excess <= 0.0) return 0.0;
+		const double p = 1.0 - exp( -excess / scale );
+		return (std::min)( DETONATION_MAX, p );
+	}
+
 	/**
 	 * Probability that the hydrazine detonates when an APU is started (or the fuel reaches the gas generator) with these temperatures:
-	 * zero inside the limits, one when they are exceeded by 200 F (injector) or by 60 F (pump, valve module).
+	 * zero inside the limits, growing above them (injector 400 F: 28% at 450 F, 73% at 600 F; the pump and the valve module have a narrower scale).
 	 */
 	inline double DetonationProbability( const Thermal& t )
 	{
-		double p = 0.0;
-		if (t.injector > LIMIT_INJECTOR_F) p = (std::max)( p, (std::min)( 1.0, (t.injector - LIMIT_INJECTOR_F) / 200.0 ) );
-		if (t.pump > LIMIT_PUMP_F) p = (std::max)( p, (std::min)( 1.0, (t.pump - LIMIT_PUMP_F) / 60.0 ) );
-		if (t.valve > LIMIT_VALVE_F) p = (std::max)( p, (std::min)( 1.0, (t.valve - LIMIT_VALVE_F) / 60.0 ) );
+		double p = ExcessProbability( t.injector - LIMIT_INJECTOR_F, DETONATION_SCALE_INJECTOR_F );
+		p = (std::max)( p, ExcessProbability( t.pump - LIMIT_PUMP_F, DETONATION_SCALE_PUMP_F ) );
+		p = (std::max)( p, ExcessProbability( t.valve - LIMIT_VALVE_F, DETONATION_SCALE_PUMP_F ) );
 		return p;
+	}
+
+	/** Relative rate of a leak of a failure from a normal random number (mean 0, sigma 1): 1 +- 30%, between 0.5 and 1.8. */
+	inline double LeakFactor( double gauss )
+	{
+		return (std::max)( 0.5, (std::min)( 1.8, 1.0 + (LEAK_SIGMA * gauss) ) );
+	}
+
+	/** Rate of the leak [lb/s] from the factor of the failure and the variation of this second (normal random number). */
+	inline double LeakRate( double factor, double jitterGauss )
+	{
+		return LEAK_RATE * factor * (std::max)( 0.7, (std::min)( 1.3, 1.0 + (LEAK_JITTER * jitterGauss) ) );
 	}
 
 	/** Speed that the controller holds [%]. */

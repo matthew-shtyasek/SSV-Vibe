@@ -15,7 +15,10 @@ Date         Developer
 2024/12/30   GLS
 ********************************************/
 #include "APU.h"
+#include "WSB.h"
+#include "HydActuator.h"
 #include "Atlantis.h"
+#include "SSVOptions.h"
 #include "../SSVSound.h"
 
 
@@ -173,21 +176,209 @@ void APU::Realize()
 	return;
 }
 
-void APU::Fail( const char* reason )
+/** Normal random number (mean 0, sigma 1). */
+static double Gauss( void )
+{
+	double s = 0.0;
+	for (int i = 0; i < 12; i++) s += oapiRand();
+	return s - 6.0;
+}
+
+namespace
+{
+	// where the gas of an APU leaves the aft compartment: the access doors 50-1/50-2 and the aft vent doors (frame of the mesh, from the groups DOOR_50-x and VENT_DOOR_x_8 of OV.msh).
+	// The drawing of the equipment of the aft compartment (NASA CR-193229) puts APU 1 and 2 on the port side and APU 3 on the starboard side; the exact places inside are not known.
+	const VECTOR3 FX_POS[3] = {_V( -2.80, -0.65, -10.30 ), _V( -2.96, -1.56, -12.07 ), _V( 2.80, -0.65, -10.30 )};
+	const VECTOR3 FX_DIR[3] = {_V( -0.55, 0.45, -0.70 ), _V( -0.55, 0.30, -0.78 ), _V( 0.55, 0.45, -0.70 )};
+}
+
+void APU::StartFire( const char* reason )
+{
+	if (burning) return;
+	burning = true;
+	fireOut = 0.0;
+	oapiWriteLogV( "(SSV_OV) [WARNING] APU %d: fire in the aft compartment (%s)", ID, reason );
+}
+
+void APU::Fail( const char* reason, FailMode mode, bool collateral )
 {
 	failed = true;
 	State = OFF;
 	APUSpeed[1] = 0.0;
 	FuelPress[1] = 0.0;
 	HydraulicPressure[1] = 0.0;
-	oapiWriteLogV( "(SSV_OV) [WARNING] APU %d is destroyed: %s", ID, reason );
+	oapiWriteLogV( "(SSV_OV) [WARNING] APU %d is destroyed (%s): %s", ID, (mode == FAIL_EXPLOSION) ? "explosion" : ((mode == FAIL_FIRE) ? "fire" : "seized"), reason );
+	if (mode != FAIL_SEIZED)
+	{
+		// the fuel lines are broken
+		leaking = true;
+		leakFactor = apumodel::LeakFactor( Gauss() );
+		leakTime = 0.0;
+		leakFireChecked = false;
+
+		// the fire of a hydrazine leak needs air
+		const bool air = apumodel::AirForFire( STS()->GetAtmPressure() );
+		if (air && ((mode == FAIL_FIRE) || (oapiRand() < apumodel::EXPLOSION_IGNITES))) StartFire( "the hydrazine ignited" );
+
+		// the pump is a part of the APU and the lines are next to it: the hydraulic system can lose its fluid
+		const double lossChance = (mode == FAIL_EXPLOSION) ? apumodel::HYD_LOSS_EXPLOSION : apumodel::HYD_LOSS_FIRE;
+		WSB* wsb = STS()->GetWSB( ID );
+		if ((wsb != NULL) && (oapiRand() < lossChance))
+		{
+			wsb->SetFailure( WSB::FAIL_HYD_LEAK, true );
+			oapiWriteLogV( "(SSV_OV) [WARNING] APU %d: the hydraulic system %d loses its fluid", ID, ID );
+		}
+	}
+	if (mode == FAIL_EXPLOSION)
+	{
+		boomTime = apumodel::BOOM_TIME;
+		debrisTime = apumodel::DEBRIS_TIME;
+		if (!oapiCameraInternal()) SoundPlay( STS()->GetSound(), APU_1_BANG + ID - 1 );// muffled bang, heard outside only (not from the cockpit)
+		if (collateral && (oapiRand() < apumodel::COLLATERAL_EXPLOSION)) SpreadDamage( true );
+	}
+	return;
+}
+
+void APU::UpdateFire( double simt, double simdt, bool leakNow )
+{
+	const double p = STS()->GetAtmPressure();
+	if (!failed)
+	{
+		// random fire (option, to train): a working APU leaks and burns in the air, like the injector stem of STS-9
+		const double rate = STS()->GetOptions()->APURandomFireRate();
+		if ((rate > 0.0) && (State == ON) && (oapiRand() < apumodel::RandomFireProbability( simdt, rate, p)))
+			Fail( "random failure: a crack of the injector stem, the hydrazine leaks and burns", FAIL_FIRE );
+		return;
+	}
+	if (!burning)
+	{
+		if (leakNow && (oapiRand() < apumodel::IgnitionProbability( simdt, p ))) StartFire( "the leaking hydrazine ignited in the air" );
+		return;
+	}
+	if (!apumodel::AirForFire( p ))
+	{
+		burning = false;
+		oapiWriteLogV( "(SSV_OV) [INFO] APU %d: the fire went out (no air)", ID );
+	}
+	else if (!leakNow)
+	{
+		fireOut += simdt;
+		if (fireOut >= apumodel::FIRE_AFTER_LEAK)
+		{
+			burning = false;
+			oapiWriteLogV( "(SSV_OV) [INFO] APU %d: the fire burned out", ID );
+		}
+	}
+	else fireOut = 0.0;
+	return;
+}
+
+void APU::CreateEffects( void )
+{
+	if (psFlash != NULL) return;
+	const VECTOR3 ofs = STS()->GetOrbiterCoGOffset();// local frame = frame of the mesh + ofs
+	const VECTOR3 pos = FX_POS[ID - 1] + ofs;
+	VECTOR3 dir = FX_DIR[ID - 1];
+	dir = dir / length( dir );
+	static SURFHANDLE texFlame = oapiRegisterParticleTexture( "SSV\\OV\\SSMEstream" );
+	static SURFHANDLE texSmoke = oapiRegisterParticleTexture( "contrail1" );
+	static PARTICLESTREAMSPEC flash = {0, 0.8, 80, 8, 0.6, 0.7, 10, 3, PARTICLESTREAMSPEC::EMISSIVE, PARTICLESTREAMSPEC::LVL_FLAT, 1, 1, PARTICLESTREAMSPEC::ATM_FLAT, 1, 1, 0};
+	static PARTICLESTREAMSPEC fire = {0, 0.35, 40, 4, 0.3, 1.0, 3, 4, PARTICLESTREAMSPEC::EMISSIVE, PARTICLESTREAMSPEC::LVL_FLAT, 1, 1, PARTICLESTREAMSPEC::ATM_FLAT, 1, 1, 0};
+	static PARTICLESTREAMSPEC smoke = {0, 0.6, 20, 5, 0.35, 10, 2.5, 4, PARTICLESTREAMSPEC::DIFFUSE, PARTICLESTREAMSPEC::LVL_FLAT, 1, 1, PARTICLESTREAMSPEC::ATM_FLAT, 1, 1, 0};
+	static PARTICLESTREAMSPEC vapor = {0, 0.15, 12, 3, 0.4, 4, 0.8, 2, PARTICLESTREAMSPEC::DIFFUSE, PARTICLESTREAMSPEC::LVL_FLAT, 1, 1, PARTICLESTREAMSPEC::ATM_FLAT, 1, 1, 0};
+	flash.tex = texFlame;
+	fire.tex = texFlame;
+	smoke.tex = texSmoke;
+	vapor.tex = texSmoke;
+	psFlash = STS()->AddParticleStream( &flash, pos, dir, &lvFlash );
+	psFire = STS()->AddParticleStream( &fire, pos, dir, &lvFire );
+	psSmoke = STS()->AddParticleStream( &smoke, pos, dir, &lvSmoke );
+	psVapor = STS()->AddParticleStream( &vapor, pos, dir, &lvVapor );
+	COLOUR4 diff = {1.0f, 0.55f, 0.2f, 0.0f}, zero = {0.0f, 0.0f, 0.0f, 0.0f}, amb = {0.3f, 0.15f, 0.05f, 0.0f};
+	fxLight = STS()->AddPointLight( pos, 40.0, 1.0, 0.05, 0.002, diff, zero, amb );
+	if (fxLight != NULL) fxLight->Activate( false );
+}
+
+void APU::UpdateEffects( double simdt, bool leakNow )
+{
+	const bool anything = (boomTime > 0.0) || (debrisTime > 0.0) || burning || leakNow;
+	if (!anything)
+	{
+		if (psFlash != NULL)
+		{
+			lvFlash = lvFire = lvSmoke = lvVapor = 0.0;
+			if (fxLight != NULL) fxLight->Activate( false );
+		}
+		return;
+	}
+	CreateEffects();
+	if (boomTime > 0.0) boomTime = (std::max)( 0.0, boomTime - simdt );
+	if (debrisTime > 0.0) debrisTime = (std::max)( 0.0, debrisTime - simdt );
+	lvFlash = (boomTime > 0.0) ? 1.0 : 0.0;
+	lvFire = burning ? 1.0 : 0.0;
+	lvSmoke = (burning || (debrisTime > 0.0)) ? 1.0 : 0.0;
+	lvVapor = (leakNow && !burning) ? 1.0 : 0.0;
+	if (fxLight != NULL)
+	{
+		const bool lit = (boomTime > 0.0) || burning;
+		fxLight->Activate( lit );
+		if (lit) fxLight->SetIntensity( (boomTime > 0.0) ? 1.0 : (0.4 + (0.6 * oapiRand())) );// the fire flickers
+	}
+	return;
+}
+
+void APU::SpreadDamage( bool explosion )
+{
+	APU* others[3];
+	int n = 0;
+	for (int i = 1; i <= 3; i++)
+	{
+		APU* a = STS()->GetAPU( i );
+		if ((a != NULL) && (a != this) && !a->failed) others[n++] = a;
+	}
+	if (n == 0) return;
+	int k = static_cast<int>(oapiRand() * n);
+	if (k >= n) k = n - 1;
+	char reason[160];
+	sprintf_s( reason, sizeof( reason ), "%s of APU %d damaged it", explosion ? "the explosion" : "the fire of the hydrazine leak", ID );
+	// the damage of an explosion does not spread again by explosion; a leak that it starts can still burn another APU
+	others[k]->Fail( reason, explosion ? FAIL_EXPLOSION : FAIL_FIRE, false );
 	return;
 }
 
 void APU::OnPreStep(double simt, double simdt, double mjd)
 {
+	// the hydrazine leaks from the broken lines while the fuel tank isolation valves are open; a leak that lasts can burn another APU
+	if (failed && leaking)
+	{
+		if (APU_FuelTankValves.IsSet() && (FuelMass[1] > 0.0))
+		{
+			if ((simt - leakJitterTime) >= 1.0)
+			{
+				leakJitterTime = simt;
+				leakJitter = Gauss();
+			}
+			FuelMass[1] = (std::max)( 0.0, FuelMass[1] - (apumodel::LeakRate( leakFactor, leakJitter ) * simdt) );
+			leakTime += simdt;
+			if (!leakFireChecked && (leakTime >= apumodel::FIRE_SPREAD_TIME))
+			{
+				leakFireChecked = true;
+				oapiWriteLogV( "(SSV_OV) [WARNING] APU %d: the hydrazine leaks for %.0f s (FUEL TK VLV not closed), the fire can spread to another APU", ID, leakTime );
+				if (oapiRand() < apumodel::COLLATERAL_FIRE) SpreadDamage( false );
+			}
+		}
+		else if (FuelMass[1] <= 0.0) leaking = false;
+	}
+
+	// fire and effects seen from outside
+	{
+		const bool leakNow = failed && leaking && APU_FuelTankValves.IsSet() && (FuelMass[1] > 0.0);
+		UpdateFire( simt, simdt, leakNow );
+		UpdateEffects( simdt, leakNow );
+	}
+
 	// the bearings seize when the lube oil is not cooled
-	if (WSB_Seize.IsSet() && !failed) Fail( "the lube oil was too hot and the bearings seized" );
+	if (WSB_Seize.IsSet() && !failed) Fail( "the lube oil was too hot and the bearings seized", FAIL_SEIZED );
 
 	// the APUs of a scenario that starts with the APU running are hot
 	if (!thermalLoaded)
@@ -210,7 +401,7 @@ void APU::OnPreStep(double simt, double simdt, double mjd)
 		{
 			const double p = apumodel::DetonationProbability( th );
 			oapiWriteLogV( "(SSV_OV) [WARNING] APU %d: the fuel tank isolation valves opened again after the auto shutdown (the FUEL TK VLV switch was not in CLOSE)", ID );
-			if (oapiRand() < p) Fail( "hydrazine detonation, the fuel reached a gas generator above the temperature limits" );
+			if (oapiRand() < p) Fail( "hydrazine detonation, the fuel reached a gas generator above the temperature limits", FAIL_EXPLOSION );
 		}
 	}
 	const bool valvesOpen = APU_FuelTankValves.IsSet() && !autoShutdownLatch;
@@ -260,7 +451,7 @@ void APU::OnPreStep(double simt, double simdt, double mjd)
 					if (overspeedShutdown) p = 1.0;
 					if (oapiRand() < p)
 					{
-						Fail( overspeedShutdown ? "uncontained overspeed, the APU was started after an overspeed shutdown" : "hydrazine detonation, the APU was started above the temperature limits" );
+						Fail( overspeedShutdown ? "uncontained overspeed, the APU was started after an overspeed shutdown" : "hydrazine detonation, the APU was started above the temperature limits", FAIL_EXPLOSION );
 					}
 					else
 					{
@@ -348,28 +539,54 @@ void APU::OnPreStep(double simt, double simdt, double mjd)
 				if (HydraulicPressure[1] > 400.0 * simdt) HydraulicPressure[1] -= 400.0 * simdt;
 				else HydraulicPressure[1] = 0.0;
 			}
-			else if(APU_HydPumpPress.IsSet()) {
-				if(HydraulicPressure[1]<2950) {
-					if(HydraulicPressure[1]>2900)
-						HydraulicPressure[1]=3000-(10*oapiRand());
-					else
-						HydraulicPressure[1]+=200*simdt;
-				}
-				else if(HydraulicPressure[1]>3050)
-					HydraulicPressure[1]-=200*simdt;
-				else
-					HydraulicPressure[1]+=2.0 * oapiRand() - 1.0;
-			}
 			else {
-				if(HydraulicPressure[1]<850) {
-					if(HydraulicPressure[1]>800)
-						HydraulicPressure[1]=900-10*oapiRand();
-					else HydraulicPressure[1]+=200*simdt;
+				// set points of the pump of this vehicle: 3000 psi (the regulation is 2900-3100) in NORM, about 800 psi (500-1000) in LOW,
+				// with the tolerances of the part and the slow variation (noise) of the options of the realism page
+				const disp::Mode dm = STS()->GetHydraulicDispersion();
+				const uint64_t seed = STS()->GetToleranceSeed();
+				double hiSet = 3000.0;
+				double loSet = 800.0;
+				if (dm.tolerances)
+				{
+					hiSet = disp::Abs( hiSet, hydact::PUMP_SIGMA, disp::Fixed( seed, disp::id::HYD_PUMP_SET + ID - 1 ), dm.scale );
+					loSet = disp::Abs( loSet, hydact::PUMP_LOW_SIGMA, disp::Fixed( seed, disp::id::HYD_PUMP_LOW + ID - 1 ), dm.scale );
 				}
-				else if(HydraulicPressure[1]>950)
-					HydraulicPressure[1]-=200*simdt;
+				if (!dm.noise) pumpWander = 0.0;
+				else if ((simt - pumpWanderTime) >= 1.0)
+				{
+					pumpWanderTime = simt;
+					pumpWander = disp::Abs( 0.0, hydact::PUMP_NOISE_SIGMA, pumpNoise.Normal(), dm.scale );
+				}
+				hiSet += pumpWander;
+				loSet += 0.3 * pumpWander;
+				if (hiSet < 2900.0) hiSet = 2900.0;
+				if (hiSet > 3100.0) hiSet = 3100.0;
+				if (loSet < 500.0) loSet = 500.0;
+				if (loSet > 1000.0) loSet = 1000.0;
+
+				if(APU_HydPumpPress.IsSet()) {
+					if(HydraulicPressure[1]<(hiSet - 50.0)) {
+						if(HydraulicPressure[1]>(hiSet - 100.0))
+							HydraulicPressure[1]=hiSet-(10*oapiRand());
+						else
+							HydraulicPressure[1]+=200*simdt;
+					}
+					else if(HydraulicPressure[1]>(hiSet + 50.0))
+						HydraulicPressure[1]-=200*simdt;
+					else
+						HydraulicPressure[1]+=2.0 * oapiRand() - 1.0;
+				}
 				else {
-					HydraulicPressure[1]+=(2.0*oapiRand() - 1.0);
+					if(HydraulicPressure[1]<(loSet - 50.0)) {
+						if(HydraulicPressure[1]>(loSet - 100.0))
+							HydraulicPressure[1]=loSet-10*oapiRand();
+						else HydraulicPressure[1]+=200*simdt;
+					}
+					else if(HydraulicPressure[1]>(loSet + 50.0))
+						HydraulicPressure[1]-=200*simdt;
+					else {
+						HydraulicPressure[1]+=(2.0*oapiRand() - 1.0);
+					}
 				}
 			}
 
@@ -387,6 +604,29 @@ void APU::OnPropagate(double simt, double simdt, double mjd)
 
 void APU::OnPostStep(double simt, double simdt, double mjd)
 {
+	// flight data log: when the switches or the state change, and periodically while the APU works or is hot
+	{
+		const char* const states[] = {"OFF", "START", "ON", "SHUTDOWN"};
+		const int key[10] = {static_cast<int>(State), APU_Run.IsSet() ? 1 : 0, APU_InjectorCool.IsSet() ? 1 : 0, APU_FuelTankValves.IsSet() ? 1 : 0, APU_CntlrPwr.IsSet() ? 1 : 0,
+			APU_HydPumpPress.IsSet() ? 1 : 0, ReadyToStart() ? 1 : 0, failed ? 1 : 0, autoShutdownLatch ? 1 : 0, IsLeaking() ? 1 : 0};
+		const bool changed = memcmp( key, hydLogKey, sizeof( key ) ) != 0;
+		const bool hot = (State != OFF) || (th.injector > apumodel::LIMIT_INJECTOR_F) || (th.pump > apumodel::LIMIT_PUMP_F) || (th.valve > apumodel::LIMIT_VALVE_F);
+		const double acc = oapiGetTimeAcceleration();
+		if (changed || (hot && ((simt - hydLogTime) >= max( 10.0, acc ))))
+		{
+			flightlog::Writer* log = STS()->HydLog();
+			if (log != NULL)
+			{
+				const int s = static_cast<int>(State);
+				log->Line( "APU id=%d simt=%.1f acc=%.1f why=%s state=%s run=%d inj_cool=%d tk_valves=%d cntlr_pwr=%d pump_norm=%d ready=%d latch=%d failed=%d wsb_ready=%d speed=%.1f hyd_psi=%.0f fuel_lb=%.1f inj_F=%.0f pump_F=%.0f valve_F=%.0f detonation_p=%.2f leak=%d",
+					ID, simt, acc, changed ? "change" : "periodic", ((s >= 0) && (s < 4)) ? states[s] : "?", key[1], key[2], key[3], key[4], key[5], key[6], key[8], key[7], WSB_Ready.IsSet() ? 1 : 0,
+					APUSpeed[0], HydraulicPressure[0], FuelMass[0], th.injector, th.pump, th.valve, apumodel::DetonationProbability( th ), key[9] );
+			}
+			memcpy( hydLogKey, key, sizeof( key ) );
+			hydLogTime = simt;
+		}
+	}
+
 	FuTkPress.SetValue( (FuelMass[0] / APU_FUEL_TANK_MASS) * 365 );
 	APU_HydraulicPress.SetLine((float)(HydraulicPressure[0]/1000.0));
 
@@ -417,6 +657,12 @@ void APU::OnSaveState(FILEHANDLE scn) const
 	oapiWriteScenario_float( scn, "Valve", th.valve );
 	oapiWriteScenario_float( scn, "Soak", th.soak );
 	if (autoShutdownLatch) oapiWriteScenario_int( scn, "Latch", 1 );
+	if (leaking)
+	{
+		char leak[96];
+		sprintf_s( leak, sizeof( leak ), "%.3f %.1f %d", leakFactor, leakTime, leakFireChecked ? 1 : 0 );
+		oapiWriteScenario_string( scn, "Leak", leak );
+	}
 	if (overspeedShutdown) oapiWriteScenario_int( scn, "Overspeed", 1 );
 	if (failed) oapiWriteScenario_int( scn, "Failed", 1 );
 	if (failure != 0) oapiWriteScenario_int( scn, "Failure", failure );
@@ -453,6 +699,12 @@ bool APU::OnParseLine(const char *line)
 	else if (!_strnicmp( line, "Speed", 5 ))
 	{
 		sscanf_s( line + 5, "%lf", &APUSpeed[0] );
+		// old scenarios saved speeds that no running APU has (for example 305%); the controller would trip at once (overspeed or underspeed)
+		if (((State == START) || (State == ON)) && ((APUSpeed[0] < apumodel::UNDERSPEED_PCT) || (APUSpeed[0] > apumodel::OVERSPEED_PCT)))
+		{
+			oapiWriteLogV( "(SSV_OV) [WARNING] APU %d: speed %.0f%% of the scenario is out of the range of a running APU, 100%% used", ID, APUSpeed[0] );
+			APUSpeed[0] = 100.0;
+		}
 		APUSpeed[1]=APUSpeed[0];
 		return true;
 	}
@@ -483,6 +735,14 @@ bool APU::OnParseLine(const char *line)
 	else if (!_strnicmp( line, "Latch", 5 ))
 	{
 		autoShutdownLatch = true;
+		return true;
+	}
+	else if (!_strnicmp( line, "Leak", 4 ))
+	{
+		int checked = 0;
+		sscanf_s( line + 4, "%lf %lf %d", &leakFactor, &leakTime, &checked );
+		leakFireChecked = (checked != 0);
+		leaking = true;
 		return true;
 	}
 	else if (!_strnicmp( line, "Overspeed", 9 ))

@@ -1,0 +1,5 @@
+BEGIN_HYPERDESC
+<h1>Training scenarios</h1>
+
+<p>Failures of the APUs and of the hydraulic systems to train in the air: underspeed and overspeed, an explosion with a leak and a fire, a hot restart, a leak of the hydraulic fluid. Each one says in its description what happened.</p>
+END_HYPERDESC

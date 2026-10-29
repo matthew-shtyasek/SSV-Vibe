@@ -20,6 +20,9 @@ static char g_debugstring[1024];
 #include "../OV/PDRSLogic.h"
 #include "../OV/PDRSProtocol.h"
 #include "../OV/HydModel.h"
+#include "../OV/Dispersion.h"
+#include "../OV/HydActuator.h"
+#include "../OV/RCSJets.h"
 #include "../OV/ParameterValues.h"
 #include "../OV/SettingsModel.h"
 #include "../OV/FreeMoveMath.h"
@@ -27,10 +30,14 @@ static char g_debugstring[1024];
 #include "../OV/CabinLightingData.h"
 #include "../OV/MassProps.h"
 #include "../OV/HandControllers.h"
+#include "../OV/FlightLog.h"
 #include <fstream>
+#include <map>
+#include <tuple>
 #include <string>
 #include <vector>
 
+static bool g_verbose = false;
 static int g_checks = 0;
 static int g_failed = 0;
 
@@ -531,16 +538,43 @@ static void test_apu_model( void )
 	Thermal d = ColdThermal();
 	d.injector = 400.0;
 	CHECK_NEAR( DetonationProbability( d ), 0.0, 1e-12 );
-	d.injector = 500.0;
-	CHECK_NEAR( DetonationProbability( d ), 0.5, 1e-12 );
-	d.injector = 700.0;
-	CHECK_NEAR( DetonationProbability( d ), 1.0, 1e-12 );
+	d.injector = 450.0;
+	CHECK_NEAR( DetonationProbability( d ), 1.0 - exp( -50.0 / 150.0 ), 1e-12 );// 28%
+	d.injector = 600.0;
+	CHECK_NEAR( DetonationProbability( d ), 1.0 - exp( -200.0 / 150.0 ), 1e-12 );// 74%
+	d.injector = 5000.0;
+	CHECK_NEAR( DetonationProbability( d ), DETONATION_MAX, 1e-12 );
 	d = ColdThermal();
 	d.pump = 240.0;
-	CHECK_NEAR( DetonationProbability( d ), 0.5, 1e-12 );
+	CHECK_NEAR( DetonationProbability( d ), 1.0 - exp( -30.0 / 45.0 ), 1e-12 );
 	d = ColdThermal();
 	d.valve = 230.0;
-	CHECK_NEAR( DetonationProbability( d ), 0.5, 1e-12 );
+	CHECK_NEAR( DetonationProbability( d ), 1.0 - exp( -30.0 / 45.0 ), 1e-12 );
+
+	// leak of a destroyed APU: the scatter of the failure and the variation are limited around the rate of a working APU
+	CHECK_NEAR( LeakFactor( 0.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( LeakFactor( -100.0 ), 0.5, 1e-12 );
+	CHECK_NEAR( LeakFactor( 100.0 ), 1.8, 1e-12 );
+	CHECK_NEAR( LeakFactor( 1.0 ), 1.3, 1e-12 );
+	CHECK_NEAR( LeakRate( 1.0, 0.0 ), LEAK_RATE, 1e-12 );
+	CHECK( (HYD_LOSS_EXPLOSION > HYD_LOSS_FIRE) && (HYD_LOSS_FIRE > 0.0) && (HYD_LOSS_EXPLOSION < 1.0) );
+
+	// fire of a leak: needs air (not on orbit), starts at random, the random fire of the option follows the rate
+	CHECK( !AirForFire( 0.0 ) );
+	CHECK( !AirForFire( FIRE_MIN_PRESSURE - 1.0 ) );
+	CHECK( AirForFire( 101325.0 ) );
+	CHECK_NEAR( IgnitionProbability( 1.0, 0.0 ), 0.0, 1e-15 );
+	CHECK_NEAR( IgnitionProbability( 1.0, 101325.0 ), 1.0 - std::exp( -IGNITION_RATE ), 1e-12 );
+	CHECK_NEAR( IgnitionProbability( 0.0, 101325.0 ), 0.0, 1e-15 );
+	CHECK_NEAR( RandomFireProbability( 3600.0, 0.0, 101325.0 ), 0.0, 1e-15 );
+	CHECK_NEAR( RandomFireProbability( 3600.0, 1.0, 0.0 ), 0.0, 1e-15 );
+	CHECK_NEAR( RandomFireProbability( 3600.0, 1.0, 101325.0 ), 1.0 - std::exp( -1.0 ), 1e-12 );
+	CHECK( (EXPLOSION_IGNITES > 0.0) && (EXPLOSION_IGNITES < 1.0) && (BOOM_TIME > 0.0) && (DEBRIS_TIME > BOOM_TIME) );
+	CHECK( LeakRate( 1.0, 100.0 ) <= (LEAK_RATE * 1.3 + 1e-12) );
+	CHECK( LeakRate( 1.0, -100.0 ) >= (LEAK_RATE * 0.7 - 1e-12) );
+	CHECK( (LEAK_RATE * FIRE_SPREAD_TIME) < 350.0 );// the fire check comes while there is still fuel
+	CHECK_NEAR( COLLATERAL_EXPLOSION, 0.5, 1e-12 );
+	CHECK_NEAR( COLLATERAL_FIRE, 0.15, 1e-12 );
 	for (int i = 0; i < 100; i++)
 	{
 		Thermal a = ColdThermal();
@@ -616,6 +650,20 @@ static void test_rms_reaction( void )
 	for (int i = 0; i < 20; i++) j.Update( _V( 0.0, 0.0, 0.0 ), 0.05, a );
 	j.Update( _V( 5.0, 0.0, 0.0 ), 0.05, a );
 	CHECK( length( a ) <= MAX_ACCELERATION + 1e-12 );
+	// ... and it gives no force at all, neither in that step nor after it (a velocity of 1000 m/s in the filter kept the limit of the acceleration for seconds)
+	{
+		AccelEstimator s;
+		double impulse = 0.0;
+		VECTOR3 p = _V( 0.0, 0.0, 0.0 );
+		for (int i = 0; i < 2000; i++)
+		{
+			if (i == 3) p = _V( 11.7, 0.0, 0.0 );// jump of 11.7 m in a step of 0.01 s
+			VECTOR3 acc;
+			if (s.Update( p, 0.01, acc )) impulse += length( acc ) * 0.01;
+			else CHECK( length( acc ) == 0.0 );
+		}
+		CHECK_NEAR( impulse, 0.0, 1e-9 );
+	}
 
 	// conservation of the momentum: the payload (m) moves relative to the orbiter (M) from rest to rest, the orbiter receives the opposite
 	// impulses and the center of mass of both does not move
@@ -1265,14 +1313,19 @@ static void test_settings( const char* root )
 		CHECK( e.Cursor() == 0 );
 		CHECK( !e.IsDirty() );
 		for (int i = 0; i < COUNT; i++) CHECK_NEAR( e.Value( i ), ITEMS[i].def, 1e-12 );
-		e.Move( -1 );// circular
-		CHECK( e.Cursor() == (COUNT - 1) );
+		int lastMain = 0;
+		for (int i = 0; i < COUNT; i++) lastMain = !IsRealismGroup( ITEMS[i].group ) ? i : lastMain;
+		e.Move( -1 );// circular, the options of the page REALISM are not in this list
+		CHECK( e.Cursor() == lastMain );
 		e.Move( 1 );
 		CHECK( e.Cursor() == 0 );
-		for (int i = 0; i < COUNT; i++) e.Move( 1 );
+		for (int i = 0; i < e.Lines(); i++) e.Move( 1 );
 		CHECK( e.Cursor() == 0 );
+		CHECK( e.Lines() + [&]() { Editor r; r.SetRealism( true ); return r.Lines(); }() == COUNT );
 
-		// change and reset of an option
+		// change and reset of an option (RMS_REACTION is on the page REALISM)
+		e.SetRealism( true );
+		CHECK( ITEMS[e.Cursor()].group >= FIRST_REALISM_GROUP );
 		while (e.Cursor() != RMS_REACTION) e.Move( 1 );
 		CHECK( e.Change( 1 ) );
 		CHECK_NEAR( e.Value( RMS_REACTION ), 1.0, 1e-12 );
@@ -1283,6 +1336,7 @@ static void test_settings( const char* root )
 		CHECK_NEAR( e.Value( RMS_REACTION ), 0.0, 1e-12 );
 		CHECK( e.IsDirty() );
 		CHECK( !e.ResetItem() );// it is already the default
+		e.SetRealism( false );
 		// a float at the limit does not change, and does not make the list dirty
 		e.MarkSaved();
 		while (e.Cursor() != POSITION_LABEL_TIME) e.Move( 1 );
@@ -1294,6 +1348,9 @@ static void test_settings( const char* root )
 
 		// all the defaults
 		CHECK( e.ResetAll() );
+		e.SetRealism( true );
+		e.ResetAll();
+		e.SetRealism( false );
 		for (int i = 0; i < COUNT; i++) CHECK_NEAR( e.Value( i ), ITEMS[i].def, 1e-12 );
 		CHECK( !e.ResetAll() );
 
@@ -1305,16 +1362,24 @@ static void test_settings( const char* root )
 		CHECK( !e.IsDirty() );
 
 		// windows: the selected line is always shown
-		for (int rows = 1; rows <= (COUNT + 3); rows++)
+		for (int view = 0; view < 2; view++)
 		{
-			Editor w;
-			for (int c = 0; c < COUNT; c++)
+			for (int rows = 1; rows <= (COUNT + 3); rows++)
 			{
-				const int first = w.FirstRow( rows );
-				CHECK( first >= 0 );
-				CHECK( (rows >= COUNT) ? (first == 0) : ((first + rows) <= COUNT) );
-				CHECK( (w.Cursor() >= first) && (w.Cursor() < (first + ((rows < COUNT) ? rows : COUNT))) );
-				w.Move( 1 );
+				Editor w;
+				w.SetRealism( view == 1 );
+				const int n = w.Lines();
+				for (int c = 0; c < n; c++)
+				{
+					const int first = w.FirstRow( rows );
+					CHECK( first >= 0 );
+					CHECK( (rows >= n) ? (first == 0) : ((first + rows) <= n) );
+					// the position of the selected line in the list
+					int pos = 0;
+					while (w.IndexAt( pos ) != w.Cursor()) pos++;
+					CHECK( (pos >= first) && (pos < (first + ((rows < n) ? rows : n))) );
+					w.Move( 1 );
+				}
 			}
 		}
 	}
@@ -1336,9 +1401,22 @@ static void test_settings( const char* root )
 		// going forward through all the groups comes back to the first
 		Editor c;
 		int groups = 1;
-		for (int i = 1; i < COUNT; i++) groups += (ITEMS[i].group != ITEMS[i - 1].group) ? 1 : 0;
+		for (int i = 1; i < COUNT; i++) groups += ((ITEMS[i].group != ITEMS[i - 1].group) && !IsRealismGroup( ITEMS[i].group )) ? 1 : 0;
 		for (int i = 0; i < groups; i++) c.MoveGroup( 1 );
 		CHECK( c.Cursor() == 0 );
+		// the same on the page REALISM
+		Editor r;
+		r.SetRealism( true );
+		const int r0 = r.Cursor();
+		int rgroups = 0;
+		for (int i = 1; i < COUNT; i++) rgroups += ((ITEMS[i].group != ITEMS[i - 1].group) && IsRealismGroup( ITEMS[i].group )) ? 1 : 0;
+		CHECK( rgroups == (GROUP_COUNT - FIRST_REALISM_GROUP) );
+		for (int i = 0; i < rgroups; i++) r.MoveGroup( 1 );
+		CHECK( r.Cursor() == r0 );
+		CHECK( FindKey( "HydraulicTolerances" ) == HYDRAULIC_TOLERANCES );
+		CHECK( FindKey( "RCSNoise" ) == RCS_NOISE );
+		CHECK( IsRealismGroup( ITEMS[HYDRAULIC_NOISE].group ) && IsRealismGroup( ITEMS[TOLERANCE_SCALE].group ) );
+		CHECK( !IsRealismGroup( ITEMS[AUTO_ACTION_LANDING_GEAR].group ) );
 	}
 
 	// rows of the page of the failures: 3 systems with 6 kinds each
@@ -2251,30 +2329,53 @@ static void test_adi( void )
 	}
 }
 
+static void test_flight_log( void )
+{
+	tm t = {};
+	t.tm_year = 126; t.tm_mon = 9; t.tm_mday = 28; t.tm_hour = 18; t.tm_min = 5; t.tm_sec = 9;
+	char name[160];
+	flightlog::FileName( name, sizeof( name ), "SSV_OV:1", t );
+	CHECK( strcmp( name, "SSV_FlightLogs\\SSV_OV_1_20261028_180509.log" ) == 0 );// the characters that a file name can not have are replaced
+	flightlog::FileName( name, sizeof( name ), "", t );
+	CHECK( strcmp( name, "SSV_FlightLogs\\_20261028_180509.log" ) == 0 );
+	// the option is on by default and is in the configuration file of the vehicle (test of the table of the options)
+	CHECK( settings::ITEMS[settings::FLIGHT_DATA_LOG].def == 1.0 );
+}
+
 static void test_rcs_reduction( void )
 {
 	using namespace rcsmath;
 
-	// no reduction up to the time acceleration of the option, then the acceleration divided by it
-	CHECK_NEAR( ThrustReduction( 1.0, 10.0 ), 1.0, 1e-12 );
-	CHECK_NEAR( ThrustReduction( 5.0, 10.0 ), 1.0, 1e-12 );
-	CHECK_NEAR( ThrustReduction( 10.0, 10.0 ), 1.0, 1e-12 );
-	CHECK_NEAR( ThrustReduction( 20.0, 10.0 ), 2.0, 1e-12 );
-	CHECK_NEAR( ThrustReduction( 1000.0, 10.0 ), 100.0, 1e-12 );
-	// the old behavior (option none): reduced by the acceleration
-	CHECK_NEAR( ThrustReduction( 10.0, 1.0 ), 10.0, 1e-12 );
-	CHECK_NEAR( ThrustReduction( 100.0, 1.0 ), 100.0, 1e-12 );
-	// below no acceleration, or nonsense
-	CHECK_NEAR( ThrustReduction( 0.5, 10.0 ), 1.0, 1e-12 );
-	CHECK_NEAR( ThrustReduction( 0.0, 0.0 ), 1.0, 1e-12 );
-	CHECK_NEAR( ThrustReduction( 4.0, -3.0 ), 4.0, 1e-12 );
-
-	// the impulse of a step (level times step) is the one of the real time while the acceleration is above the limit: step grows as acceleration
-	for (double acc = 10.0; acc <= 1000.0; acc *= 10.0)
+	// the thrust is divided by the time acceleration (1 in real time or slower): the impulse of a step does not depend on the acceleration
+	CHECK_NEAR( ThrustReduction( 1.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( ThrustReduction( 0.5 ), 1.0, 1e-12 );
+	CHECK_NEAR( ThrustReduction( 0.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( ThrustReduction( 10.0 ), 10.0, 1e-12 );
+	CHECK_NEAR( ThrustReduction( 1000.0 ), 1000.0, 1e-12 );
+	for (double acc = 1.0; acc <= 10000.0; acc *= 10.0)
 	{
-		const double level = 1.0 / ThrustReduction( acc, 10.0 );
-		const double step = acc * 0.0167;
-		CHECK_NEAR( level * step, 10.0 * 0.0167, 1e-9 );// the impulse per frame stays that of the full thrust at the limit
+		const double step = acc / 30.0;
+		CHECK_NEAR( step / ThrustReduction( acc ), 1.0 / 30.0, 1e-9 );
+	}
+
+	// on rails from the time acceleration of the option (0 or 1 = never)
+	CHECK( !OnRails( 1000.0, 0.0 ) );
+	CHECK( !OnRails( 1000.0, 1.0 ) );
+	CHECK( !OnRails( 999.0, 1000.0 ) );
+	CHECK( OnRails( 1000.0, 1000.0 ) );
+	CHECK( OnRails( 10000.0, 1000.0 ) );
+	// mean propellant use of the hold: the figures of the JSC planning (0.7 lb/hr in LVLH, 3.6 lb/hr inertial)
+	CHECK_NEAR( RailsPropellantRate( true ), 0.7 * 0.4536, 0.02 );
+	CHECK_NEAR( RailsPropellantRate( false ), 3.6 * 0.4536, 0.05 );
+
+	// the torque of the vernier jets in the DAP: the true one of the 2 jets (not a tenth of the primary torque), smaller than the primary by more than 50 times
+	for (int axis = 0; axis < 3; axis++)
+	{
+		const double t = rcsjets::VernierTorque( axis, _V( 0.0, 0.0, 0.0 ) );
+		const double ratio = rcsjets::VernierTorqueRatio( axis, _V( 0.0, 0.0, 0.0 ) );
+		CHECK( t > 100.0 );
+		CHECK( ratio < 0.02 );
+		if (axis != 2) CHECK( (t > 2000.0) && (t < 6000.0) );// 2 jets of 24 lbf with arms of 20 m
 	}
 }
 
@@ -2465,8 +2566,669 @@ static void test_controller_assign( void )
 	CHECK_NEAR( ctrlmath::DefaultDeadzone( "RHC_ROLL" ), 0.05, 1e-12 );
 }
 
+static void test_dispersion( void )
+{
+	// the tolerance of a part does not change, and depends on the seed and on the part
+	CHECK( disp::Fixed( 12345, 7 ) == disp::Fixed( 12345, 7 ) );
+	CHECK( disp::Fixed( 12345, 7 ) != disp::Fixed( 12346, 7 ) );
+	CHECK( disp::Fixed( 12345, 7 ) != disp::Fixed( 12345, 8 ) );
+	// the seeds that are near and the identifiers that are near are not alike
+	int same = 0;
+	for (uint32_t id = 0; id < 1000; id++) same += (fabs( disp::Fixed( 1, id ) - disp::Fixed( 2, id ) ) < 1e-6) ? 1 : 0;
+	CHECK( same == 0 );
+
+	// standard normal: mean 0, deviation 1 (limited to 3: 0.997)
+	{
+		const int n = 200000;
+		double sum = 0.0, sum2 = 0.0, maxAbs = 0.0;
+		for (int i = 0; i < n; i++)
+		{
+			const double z = disp::Fixed( 987654321ULL, static_cast<uint32_t>(i) );
+			sum += z;
+			sum2 += z * z;
+			maxAbs = (std::max)( maxAbs, fabs( z ) );
+		}
+		const double mean = sum / n;
+		const double sd = sqrt( (sum2 / n) - (mean * mean) );
+		CHECK_NEAR( mean, 0.0, 0.01 );
+		CHECK_NEAR( sd, 0.997, 0.005 );// the values above 3 are set to 3
+		CHECK( maxAbs <= disp::TRUNCATION );
+		CHECK( maxAbs > 2.8 );// the tails are there
+	}
+
+	// the noise: not the same value twice, the same sequence from the same seed, limited
+	{
+		disp::Noise a( 42 ), b( 42 ), c( 43 );
+		bool allEqual = true, differs = false;
+		double prev = 1e9;
+		for (int i = 0; i < 1000; i++)
+		{
+			const double x = a.Normal(), y = b.Normal(), z = c.Normal();
+			if (x != y) allEqual = false;
+			if (x != z) differs = true;
+			CHECK( fabs( x ) <= disp::TRUNCATION );
+			CHECK( x != prev );
+			prev = x;
+		}
+		CHECK( allEqual );
+		CHECK( differs );
+		for (int i = 0; i < 1000; i++)
+		{
+			const double u = a.Uniform();
+			CHECK( (u > 0.0) && (u < 1.0) );
+		}
+	}
+
+	// values with a dispersion
+	CHECK_NEAR( disp::Rel( 100.0, 0.02, 1.5 ), 103.0, 1e-9 );
+	CHECK_NEAR( disp::Rel( 100.0, 0.02, 1.5, 0.0 ), 100.0, 1e-12 );// scale 0: nominal
+	CHECK_NEAR( disp::Abs( 3000.0, 30.0, -2.0, 0.5 ), 2970.0, 1e-9 );
+	CHECK( disp::SeedFromText( "Discovery" ) == disp::SeedFromText( "Discovery" ) );
+	CHECK( disp::SeedFromText( "Discovery" ) != disp::SeedFromText( "Atlantis" ) );
+}
+
+
+static void test_hyd_actuators( void )
+{
+	using namespace hydact;
+	// power of a system
+	CHECK_NEAR( Power( 3000.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( Power( 2800.0 ), 1.0, 1e-12 );
+	CHECK_NEAR( Power( 900.0 ), 0.0, 1e-12 );
+	CHECK_NEAR( Power( 1900.0 ), 0.5, 1e-12 );
+	for (double p = 0.0; p < 3200.0; p += 50.0) CHECK( Power( p + 50.0 ) >= Power( p ) );
+
+	// the switching valves of the elevons: the sources of DISP 87
+	const double all[3] = {3000.0, 3000.0, 3000.0};
+	CHECK( ElevonSystem( all, 0 ) == 2 );// left outboard: 3
+	CHECK( ElevonSystem( all, 1 ) == 1 );// left inboard: 2
+	CHECK( ElevonSystem( all, 2 ) == 2 );// right inboard: 3
+	CHECK( ElevonSystem( all, 3 ) == 1 );// right outboard: 2
+	const double no3[3] = {3000.0, 3000.0, 0.0};
+	CHECK( ElevonSystem( no3, 0 ) == 0 );// the first standby: 1
+	CHECK( ElevonSystem( no3, 2 ) == 0 );
+	CHECK( ElevonSystem( no3, 1 ) == 1 );
+	const double only2[3] = {0.0, 3000.0, 0.0};
+	for (int e = 0; e < ELEVONS; e++) CHECK( ElevonSystem( only2, e ) == 1 );
+	const double none[3] = {0.0, 500.0, 1200.0};
+	for (int e = 0; e < ELEVONS; e++) CHECK( ElevonSystem( none, e ) == -1 );
+	const double edge[3] = {1300.0, 1400.0, 1000.0};// the valve switches between 1200 and 1500
+	CHECK( ElevonSystem( edge, 0 ) == 1 );// system 1 is below the switching pressure of 1350, the next source is 1 (index 0): 1300 no; index 1: 1400 yes
+	CHECK( ElevonSystem( edge, 0, -100.0 ) == 0 );// a valve that switches at 1250 stays on the system 1 (1300)
+
+	// rate: 20 deg/s, 13.9 deg/s with the four on the same system
+	int sh[ELEVONS];
+	ElevonSharing( all, nullptr, sh );
+	for (int e = 0; e < ELEVONS; e++) CHECK( sh[e] == 2 );
+	for (int e = 0; e < ELEVONS; e++) CHECK_NEAR( ElevonRate( sh[e] ), 20.0, 1e-12 );
+	ElevonSharing( only2, nullptr, sh );
+	for (int e = 0; e < ELEVONS; e++) CHECK( sh[e] == 4 );
+	for (int e = 0; e < ELEVONS; e++) CHECK_NEAR( ElevonRate( sh[e] ), 13.9, 1e-12 );
+	ElevonSharing( no3, nullptr, sh );
+	for (int e = 0; e < ELEVONS; e++) CHECK( sh[e] == 2 );// the elevons of the lost system 3 go to the system 1, the others stay on the 2
+	CHECK( ElevonRate( 3 ) < 20.0 );
+	CHECK( ElevonRate( 3 ) > 13.9 );
+	ElevonSharing( none, nullptr, sh );
+	for (int e = 0; e < ELEVONS; e++) CHECK( sh[e] == 0 );
+
+	// three motors
+	const double full[3] = {1.0, 1.0, 1.0};
+	const double two[3] = {1.0, 1.0, 0.0};
+	const double one[3] = {0.0, 0.0, 1.0};
+	const double zero[3] = {0.0, 0.0, 0.0};
+	CHECK_NEAR( MotorDriveOutput( full ), 1.0, 1e-12 );
+	CHECK_NEAR( MotorDriveOutput( two ), 0.8, 1e-12 );
+	CHECK_NEAR( MotorDriveOutput( one ), 0.5, 1e-12 );// the manual: about half
+	CHECK_NEAR( MotorDriveOutput( zero ), 0.0, 1e-12 );
+	const double weak[3] = {1.0, 1.0, 0.5};// a system with a low pressure is between two and three motors
+	CHECK( (MotorDriveOutput( weak ) > 0.8) && (MotorDriveOutput( weak ) < 1.0) );
+	CHECK_NEAR( RSB_RATE_ONE_MOTOR / 0.5, 10.86, 0.01 );// full rate of the speedbrake
+
+	// brakes: systems 1 and 2, the system 3 takes over one
+	const double b123[3] = {3000.0, 3000.0, 3000.0};
+	const double b12[3] = {3000.0, 3000.0, 0.0};
+	const double b13[3] = {3000.0, 0.0, 3000.0};
+	const double b3[3] = {0.0, 0.0, 3000.0};
+	const double b1[3] = {3000.0, 0.0, 0.0};
+	const double bn[3] = {0.0, 0.0, 0.0};
+	CHECK_NEAR( BrakePower( b123 ), 1.0, 1e-12 );
+	CHECK_NEAR( BrakePower( b12 ), 1.0, 1e-12 );
+	CHECK_NEAR( BrakePower( b13 ), 1.0, 1e-12 );// the system 3 takes the place of the 2
+	CHECK_NEAR( BrakePower( b3 ), 0.5, 1e-12 );// only one of the two lost systems is taken over
+	CHECK_NEAR( BrakePower( b1 ), 0.5, 1e-12 );// the system 3 and one other lost: half
+	CHECK_NEAR( BrakePower( bn ), 0.0, 1e-12 );
+	// steering
+	CHECK( SteeringPower( b123 ) );
+	CHECK( SteeringPower( b13 ) );
+	const double n2[3] = {0.0, 3000.0, 3000.0};
+	CHECK( SteeringPower( n2 ) );
+	const double n3[3] = {1200.0, 1000.0, 3000.0};
+	CHECK( !SteeringPower( n3 ) );// caster mode
+
+	// slew
+	CHECK_NEAR( Slew( 0.0, 10.0, 3.0 ), 3.0, 1e-12 );
+	CHECK_NEAR( Slew( 0.0, -10.0, 3.0 ), -3.0, 1e-12 );
+	CHECK_NEAR( Slew( 0.0, 2.0, 3.0 ), 2.0, 1e-12 );
+
+	// float with no pressure: toward the angle of the flow, faster with the dynamic pressure, never past it
+	CHECK_NEAR( ElevonFloatAngle( 0.0 ), 0.0, 1e-12 );
+	CHECK( ElevonFloatAngle( 30.0 ) < 0.0 );
+	CHECK( ElevonFloatAngle( 200.0 ) >= FLOAT_MIN );
+	double pos = 10.0;
+	for (int i = 0; i < 2000; i++)
+	{
+		const double next = FloatStep( pos, -5.0, 3000.0, 0.1 );
+		CHECK( next <= pos + 1e-12 );
+		CHECK( next >= -5.0 - 1e-12 );
+		pos = next;
+	}
+	CHECK_NEAR( pos, -5.0, 0.01 );
+	CHECK( fabs( FloatStep( 10.0, 0.0, 5000.0, 1.0 ) ) < fabs( FloatStep( 10.0, 0.0, 500.0, 1.0 ) ) );// faster with more dynamic pressure
+	// blowback: none with full power at moderate loads, all the load with no power
+	CHECK_NEAR( BlowbackShare( 1.0, 3000.0, 10.0, 0.0 ), 0.0, 1e-12 );
+	CHECK( BlowbackShare( 0.1, 8000.0, 20.0, 0.0 ) > 0.0 );
+	CHECK( BlowbackShare( 0.0, 8000.0, 20.0, 0.0 ) > 0.99 );
+	CHECK_NEAR( BlowbackShare( 0.0, 3000.0, 0.0, 0.0 ), 0.0, 1e-12 );// at the free angle there is no load
+}
+
+
+static void test_hyd_tolerances( void )
+{
+	using namespace hydmodel;
+	disp::Mode off;
+	disp::Mode on;
+	on.tolerances = true;
+	State a = InitialState();
+	ApplyTolerances( a, 777, 0, off );
+	CHECK_NEAR( a.tolOilHeat, 1.0, 1e-12 );
+	CHECK_NEAR( a.tolHydCool, 1.0, 1e-12 );
+	CHECK_NEAR( a.tolOilSet, 0.0, 1e-12 );
+	ApplyTolerances( a, 777, 0, on );
+	State b = InitialState();
+	ApplyTolerances( b, 777, 1, on );
+	CHECK( a.tolOilHeat != 1.0 );
+	CHECK( a.tolOilHeat != b.tolOilHeat );// another system, other parts
+	CHECK( (a.tolOilSet >= (-3.0 * SIGMA_OIL_SET)) && (a.tolOilSet <= (3.0 * SIGMA_OIL_SET)) );
+	CHECK( (a.tolHydCool >= (1.0 - 3.0 * SIGMA_COOL)) && (a.tolHydCool <= (1.0 + 3.0 * SIGMA_COOL)) );
+	State c = InitialState();
+	ApplyTolerances( c, 777, 0, on );
+	CHECK( c.tolHydHeat == a.tolHydHeat );// the same vehicle, the same parts
+	disp::Mode zero = on;
+	zero.scale = 0.0;
+	ApplyTolerances( c, 777, 0, zero );
+	CHECK_NEAR( c.tolHydHeat, 1.0, 1e-12 );
+	CHECK_NEAR( c.tolHydSet, 0.0, 1e-12 );
+
+	// the spray starts at the set point of this system, and cools with the flow of its bars
+	Input in;
+	in.speed = 1.0;
+	in.pumpNorm = true;
+	in.load = 1.0;
+	in.ambient = AMBIENT;
+	in.powered = true;
+	in.controller = 1;
+	in.n2Open = true;
+	State nom = InitialState(), hot = InitialState(), strong = InitialState();
+	nom.hyd = hot.hyd = strong.hyd = 215.0;
+	nom.oil = hot.oil = strong.oil = 255.0;
+	nom.through = hot.through = strong.through = true;
+	hot.tolHydSet = 6.0;// the set point is higher: less spray at the same temperature
+	strong.tolHydCool = 1.3;
+	Step( nom, in, 0.1 );
+	Step( hot, in, 0.1 );
+	Step( strong, in, 0.1 );
+	CHECK( hot.hydDuty < nom.hydDuty );
+	CHECK_NEAR( strong.hydDuty, nom.hydDuty, 1e-12 );
+	CHECK( (215.0 - strong.hyd) > (215.0 - nom.hyd) );// more cooling with more flow
+	CHECK( (strong.water < nom.water) );// and more water used
+}
+
+
+static std::string jet_names( uint64_t set )
+{
+	std::string r;
+	for (int i = 0; i < rcsjets::COUNT; i++)
+	{
+		if (set & rcsjets::Bit( i )) r += std::string( rcsjets::Jets()[i].name ) + " ";
+	}
+	return r;
+}
+
+static void test_rcs_jets( void )
+{
+	using namespace rcsjets;
+	const int ROLL_AXIS = ROT_ROLL;
+	const VECTOR3 cg = _V( 0.0, 0.0, 0.0 );
+	CHECK( COUNT == 44 );
+	int primary = 0, vernier = 0, fwd = 0;
+	for (int i = 0; i < COUNT; i++)
+	{
+		primary += Jets()[i].vernier ? 0 : 1;
+		vernier += Jets()[i].vernier ? 1 : 0;
+		fwd += (Jets()[i].tank == TANK_FWD) ? 1 : 0;
+		CHECK( (Len3( Jets()[i].dir ) > 0.9) && (Len3( Jets()[i].dir ) < 1.1) );// not exactly unit vectors in the data
+		CHECK( Jets()[i].thrust > 90.0 );
+		CHECK( Find( Jets()[i].name ) == i );
+	}
+	CHECK( primary == PRIMARY_COUNT );
+	CHECK( vernier == 6 );
+	CHECK( fwd == 16 );// 14 primary and 2 vernier
+	CHECK( Find( "L2U" ) >= 0 );
+	CHECK( Find( "XXX" ) == -1 );
+	CHECK_NEAR( Jets()[Find( "F1F" )].thrust, 887.9 * 4.4482216, 5.0 );
+	CHECK_NEAR( Jets()[Find( "L5D" )].thrust, 24.0 * 4.4482216, 1.0 );
+
+	// rotations: the set turns about the axis, with little force and little moment about the other axes
+	const char* axisName[3] = {"pitch", "yaw", "roll"};
+	for (int axis = 0; axis < 3; axis++)
+	{
+		for (int sign = -1; sign <= 1; sign += 2)
+		{
+			for (int vern = 0; vern < 2; vern++)
+			{
+				const int k = vern ? 2 : 8;
+				const uint64_t set = SelectRotation( axis, sign, k, vern != 0, 0, cg );
+				CHECK( (Count( set ) >= 1) && (Count( set ) <= k) );
+				VECTOR3 f, m;
+				SetWrench( set, cg, f, m );
+				const VECTOR3 a = RotationAxis( axis, sign );
+				const double along = Dot3( m, a );
+				CHECK( along > 0.0 );
+				const VECTOR3 perp = m - (a * along);
+				if (g_verbose) printf( "%s %+d %s: %s| along %.0f perp %.0f force %.0f\n", axisName[axis], sign, vern ? "vern" : "pri", jet_names( set ).c_str(), along, Len3( perp ), Len3( f ) );
+				if (axis != ROLL_AXIS) CHECK( Len3( perp ) < ((vern ? 0.6 : 0.35) * along) );// the couple is clean (the roll is coupled with the others in the real vehicle too)
+				CHECK( Len3( f ) < (0.5 * Jets()[0].thrust * k) );// the forces cancel (as far as the geometry allows)
+				// the vernier jets are in the set of the vernier mode only
+				for (int i = 0; i < COUNT; i++)
+				{
+					if (set & Bit( i )) CHECK( Jets()[i].vernier == (vern != 0) );
+				}
+			}
+		}
+	}
+	// a jet that does not work is not selected, and the set still turns about the axis
+	{
+		const uint64_t all = SelectRotation( ROT_PITCH, 1, 8, false, 0, cg );
+		const uint64_t failed = all & (~all + 1);// the lowest jet of the set
+		const uint64_t other = SelectRotation( ROT_PITCH, 1, 8, false, failed, cg );
+		CHECK( (other & failed) == 0 );
+		CHECK( (Count( other ) >= 4) && (Count( other ) <= 8) );
+	}
+	// only the aft jets
+	{
+		const uint64_t aft = SelectRotation( ROT_PITCH, 1, 4, false, RegionMask( true ), cg );
+		CHECK( (Count( aft ) >= 2) && (Count( aft ) <= 4) );
+		CHECK( (aft & RegionMask( true )) == 0 );
+	}
+	// translations: force along the axis with little moment
+	const char* trName[3] = {"fwd", "right", "up"};
+	for (int axis = 0; axis < 3; axis++)
+	{
+		for (int sign = -1; sign <= 1; sign += 2)
+		{
+			const uint64_t set = SelectTranslation( axis, sign, 0, cg );
+			CHECK( Count( set ) >= 2 );
+			VECTOR3 f, m;
+			SetWrench( set, cg, f, m );
+			const VECTOR3 a = TranslationAxis( axis, sign );
+			const double along = Dot3( f, a );
+			if (g_verbose) printf( "trans %s %+d: %s| force %.0f of %.0f, moment %.0f\n", trName[axis], sign, jet_names( set ).c_str(), along, Len3( f ), Len3( m ) );
+			CHECK( along > 3000.0 );
+			CHECK( fabs( along - Len3( f ) ) < (0.1 * along) );// along the axis
+			CHECK( Len3( m ) < (0.35 * along * LEVER) );
+			for (int i = 0; i < COUNT; i++)
+			{
+				if (set & Bit( i )) CHECK( !Jets()[i].vernier );
+			}
+		}
+	}
+	// the vernier jets have a tenth of the moment or less
+	for (int axis = 0; axis < 3; axis++)
+	{
+		const double r = VernierTorqueRatio( axis, cg );
+		CHECK( (r > 0.0) && (r < 0.1) );
+	}
+
+	// the valve: delays and minimum on-time
+	{
+		Valve v;
+		double on = 0.0;
+		const double dt = 0.001;
+		// a command of 20 ms lasts at least the 80 ms (plus the delays of the valve)
+		for (int i = 0; i < 1000; i++)
+		{
+			on += StepValve( v, (i < 20), dt, PRIMARY_DELAY_ON, PRIMARY_DELAY_OFF ) * dt;
+		}
+		CHECK_NEAR( on, MIN_ON_TIME - PRIMARY_DELAY_ON + PRIMARY_DELAY_OFF, 0.004 );// the command lasts 80 ms, the valve is open that time less the delay on, plus the delay off
+		// a long command: its length (the delays on and off almost cancel each other)
+		Valve w;
+		double on2 = 0.0;
+		for (int i = 0; i < 1000; i++) on2 += StepValve( w, (i < 400), dt, PRIMARY_DELAY_ON, PRIMARY_DELAY_OFF ) * dt;
+		CHECK_NEAR( on2, 0.400 - PRIMARY_DELAY_ON + PRIMARY_DELAY_OFF, 0.004 );
+		// the thrust is not on before the delay
+		Valve z;
+		double first = 0.0;
+		for (int i = 0; i < 30; i++) first += StepValve( z, true, dt, PRIMARY_DELAY_ON, PRIMARY_DELAY_OFF );
+		CHECK( first < 1.0 );
+		// with a long step (time acceleration) the share is between 0 and 1
+		Valve y;
+		const double share = StepValve( y, true, 0.5, PRIMARY_DELAY_ON, PRIMARY_DELAY_OFF );
+		CHECK( (share > 0.9) && (share < 1.0) );
+	}
+
+	// installation of the jets: tolerances change the direction a little, and the same seed gives the same
+	disp::Mode on;
+	on.tolerances = true;
+	disp::Mode off;
+	const int jet = Find( "L2U" );
+	const VECTOR3 d0 = InstalledDirection( jet, 5, off );
+	const VECTOR3 d1 = InstalledDirection( jet, 5, on );
+	const VECTOR3 d2 = InstalledDirection( jet, 5, on );
+	CHECK_NEAR( Len3( d1 ), 1.0, 1e-9 );
+	CHECK( Len3( d1 - d0 ) > 0.0 );
+	CHECK( Len3( d1 - d0 ) < (3.0 * 3.0 * SIGMA_ANGLE * 0.01745 * 1.5) );// at most 3 sigma about two axes
+	CHECK( Len3( d1 - d2 ) == 0.0 );
+	CHECK( Len3( InstalledPosition( jet, 5, on ) - Jets()[jet].pos ) < 0.05 );
+	CHECK( Len3( InstalledPosition( jet, 5, off ) - Jets()[jet].pos ) == 0.0 );
+}
+
+
+/**
+ * Simulation of the orbiter with the real jets: rigid body (mass and moments of inertia of an orbiter with the payload bay empty), the 44 jets
+ * with their valves, the selection of the jets of the vessel (rcsjets::SelectRotation and SelectTranslation) and a phase plane controller that
+ * does what the orbit DAP does (rate limits, level 1/3, 2/3, 1 by the size of the error, vernier mode with the level 0.1). It tests how the
+ * jets and the control behave as a whole (the real DAP needs the Orbiter and is not in this test).
+ */
+struct RcsSim
+{
+	const double mass = 100000.0;// [kg]
+	const double inertia[3] = {8.7e6, 9.0e6, 1.1e6};// [kg m^2] about x (pitch), y (yaw), z (roll)
+	double theta[3] = {0.0, 0.0, 0.0};// attitude about the axes of the DAP (pitch up, yaw right, roll right) [deg]
+	double rate[3] = {0.0, 0.0, 0.0};// [deg/s] the same axes
+	double velocity[3] = {0.0, 0.0, 0.0};// [m/s] in the frame of the vessel
+	double fuel = 0.0;// [kg]
+	double jetSeconds = 0.0;
+	double time = 0.0;
+	rcsjets::Valve valve[rcsjets::COUNT];
+	uint64_t failed = 0;
+	bool tolerances = false;
+	bool noise = false;
+	uint64_t seed = 12345;
+	disp::Noise gen;
+	double tolThrust[rcsjets::COUNT], tolDelay[rcsjets::COUNT], fireThrust[rcsjets::COUNT], fireDelay[rcsjets::COUNT];
+	std::map<std::tuple<int, int, int, int, uint64_t>, uint64_t> cache;
+	double cmdRot[3] = {0.0, 0.0, 0.0};// level of the DAP with sign
+	double trackRate[3] = {0.0, 0.0, 0.0};// [deg/s] rate that the attitude follows (LVLH: the orbital rate)
+	double disturb[3] = {0.0, 0.0, 0.0};// [deg/s^2] angular acceleration of the environment (gravity gradient)
+	int cmdTrans[3] = {0, 0, 0};// forward, right, down
+
+	RcsSim( void )
+	{
+		for (int j = 0; j < rcsjets::COUNT; j++) tolThrust[j] = tolDelay[j] = fireThrust[j] = fireDelay[j] = 1.0;
+	}
+
+	void SetTolerances( bool tol, bool noiseOn )
+	{
+		tolerances = tol;
+		noise = noiseOn;
+		for (int j = 0; j < rcsjets::COUNT; j++)
+		{
+			const uint32_t b = disp::id::RCS_JET + (16u * (uint32_t)j);
+			tolThrust[j] = tol ? disp::Rel( 1.0, rcsjets::SIGMA_THRUST, disp::Fixed( seed, b + rcsjets::TOL_THRUST ) ) : 1.0;
+			tolDelay[j] = tol ? disp::Rel( 1.0, rcsjets::SIGMA_DELAY, disp::Fixed( seed, b + rcsjets::TOL_DELAY ) ) : 1.0;
+		}
+	}
+
+	uint64_t RotationSet( int axis, int sign, int k, bool vernier )
+	{
+		const std::tuple<int, int, int, int, uint64_t> key( axis, sign, k, vernier ? 1 : 0, failed );
+		const auto it = cache.find( key );
+		if (it != cache.end()) return it->second;
+		return cache[key] = rcsjets::SelectRotation( axis, sign, k, vernier, failed, _V( 0.0, 0.0, 0.0 ) );
+	}
+
+	uint64_t TranslationSet( int axis, int sign )
+	{
+		const std::tuple<int, int, int, int, uint64_t> key( axis + 10, sign, 0, 0, failed );
+		const auto it = cache.find( key );
+		if (it != cache.end()) return it->second;
+		return cache[key] = rcsjets::SelectTranslation( axis, sign, failed, _V( 0.0, 0.0, 0.0 ) );
+	}
+
+	/** One step: the commands select the jets, the valves open, the body moves. */
+	void Step( double dt )
+	{
+		using namespace rcsjets;
+		uint64_t on = 0;
+		for (int i = 0; i < 3; i++)
+		{
+			if (fabs( cmdRot[i] ) > 0.0001)
+			{
+				bool vern;
+				const int k = RotationJetCount( i, fabs( cmdRot[i] ), vern );
+				on |= RotationSet( i, (cmdRot[i] > 0.0) ? 1 : -1, k, vern );
+			}
+			if (cmdTrans[i] != 0) on |= TranslationSet( i, (i == 2) ? -cmdTrans[i] : cmdTrans[i] );
+		}
+		VECTOR3 f = _V( 0.0, 0.0, 0.0 ), m = _V( 0.0, 0.0, 0.0 );
+		for (int j = 0; j < COUNT; j++)
+		{
+			const bool command = ((on & Bit( j )) != 0) && ((failed & Bit( j )) == 0);
+			if (command && !valve[j].requested && noise)
+			{
+				fireThrust[j] = disp::Rel( 1.0, NOISE_THRUST, gen.Normal() );
+				fireDelay[j] = disp::Rel( 1.0, NOISE_DELAY, gen.Normal() );
+			}
+			const bool vern = Jets()[j].vernier;
+			const double dly = tolDelay[j] * fireDelay[j];
+			const double share = StepValve( valve[j], command, dt, (vern ? VERNIER_DELAY_ON : PRIMARY_DELAY_ON) * dly, (vern ? VERNIER_DELAY_OFF : PRIMARY_DELAY_OFF) * dly );
+			if (share <= 0.0) continue;
+			const double level = share * tolThrust[j] * fireThrust[j];
+			f = f + (Force( j ) * level);
+			m = m + (Moment( j, _V( 0.0, 0.0, 0.0 ) ) * level);
+			fuel += level * Jets()[j].thrust * dt / ((vern ? VERNIER_ISP : PRIMARY_ISP) * 9.80665);
+			jetSeconds += share * dt;
+		}
+		// rotation in the frame of the vessel; the axes of the DAP: pitch up = -x, yaw right = +y, roll right = -z
+		const double w[3] = {-rate[0], rate[1], -rate[2]};
+		const double alpha[3] = {m.x / inertia[0], m.y / inertia[1], m.z / inertia[2]};// [rad/s^2]
+		for (int i = 0; i < 3; i++)
+		{
+			const double sgn = (i == 1) ? 1.0 : -1.0;
+			const double nw = w[i] + (alpha[i] * DEG * dt) + (sgn * disturb[i] * dt);
+			const double sign = (i == 1) ? 1.0 : -1.0;
+			theta[i] += sign * 0.5 * (w[i] + nw) * dt;
+			rate[i] = sign * nw;
+		}
+		velocity[0] += f.x / mass * dt;
+		velocity[1] += f.y / mass * dt;
+		velocity[2] += f.z / mass * dt;
+		time += dt;
+	}
+
+	// phase plane controller of the DAP (the logic of OrbitDAP::RotationControl): rate error against a limit, level by the size of the error
+	double attDb = 1.0, rateDb = 0.2, rateLimit = 0.1, maxRate = 0.5, gain = 0.25;
+	bool vernierMode = false;
+	void Control( const double* target )
+	{
+		for (int i = 0; i < 3; i++)
+		{
+			const double err = target[i] - theta[i];
+			double wdes = trackRate[i] + (gain * err);
+			wdes = (wdes > maxRate) ? maxRate : ((wdes < -maxRate) ? -maxRate : wdes);
+			if ((fabs( err ) < attDb) && (fabs( rate[i] - trackRate[i] ) < rateDb) && !vernierMode) wdes = trackRate[i];
+			const double rerr = wdes - rate[i];
+			const double limit = vernierMode ? 0.02 : (((fabs( err ) < attDb) && (fabs( wdes - trackRate[i] ) < 1e-9)) ? 0.05 : rateLimit);
+			if (fabs( rerr ) > limit)
+			{
+				double level = vernierMode ? 0.1 : 1.0;
+				if (!vernierMode)
+				{
+					const double scale = fabs( rerr ) / limit;
+					if (scale < 2.0) level = 1.0 / 3.0;
+					else if (scale < 5.0) level = 0.667;
+				}
+				cmdRot[i] = (rerr > 0.0) ? level : -level;
+			}
+			else cmdRot[i] = 0.0;
+		}
+	}
+
+	void Run( double seconds, const double* target, double dt = 0.04 )
+	{
+		const int n = static_cast<int>(seconds / dt);
+		double moving[3] = {target[0], target[1], target[2]};
+		for (int i = 0; i < n; i++)
+		{
+			for (int a = 0; a < 3; a++) moving[a] = target[a] + (trackRate[a] * time);
+			Control( moving );
+			Step( dt );
+		}
+	}
+};
+
+static void test_rcs_closed_loop( void )
+{
+	using namespace rcsjets;
+	const double zero[3] = {0.0, 0.0, 0.0};
+	const char* an[3] = {"pitch", "yaw", "roll"};
+
+	// 1. hold: an error of 2 degrees in each axis is removed, the rates settle in the deadband and the fuel use is small
+	for (int mode = 0; mode < 3; mode++)
+	{
+		RcsSim sim;
+		if (mode == 1) sim.SetTolerances( true, false );// tolerances of the parts
+		if (mode == 2) sim.SetTolerances( true, true );// and noise of each firing
+		sim.theta[0] = 2.0;
+		sim.theta[1] = -2.0;
+		sim.theta[2] = 1.5;
+		sim.Run( 240.0, zero );
+		if (g_verbose) printf( "hold %d: err %.2f %.2f %.2f rate %.3f %.3f %.3f fuel %.2f kg, jet seconds %.1f, v %.3f %.3f %.3f\n", mode, sim.theta[0], sim.theta[1], sim.theta[2], sim.rate[0], sim.rate[1], sim.rate[2], sim.fuel, sim.jetSeconds, sim.velocity[0], sim.velocity[1], sim.velocity[2] );
+		for (int i = 0; i < 3; i++)
+		{
+			CHECK( fabs( sim.theta[i] ) < 1.2 );
+			CHECK( fabs( sim.rate[i] ) < 0.3 );
+		}
+		CHECK( sim.fuel < 25.0 );// 6 degrees of error removed with the minimum pulses of 80 ms (a better controller uses less: the DAP will be tuned)
+		CHECK( sim.fuel > 0.1 );
+	}
+
+	// 2. the vernier mode: a small error removed with the vernier jets, with much less fuel than the primary mode
+	{
+		RcsSim pri, ver;
+		pri.theta[0] = ver.theta[0] = 0.8;
+		pri.attDb = ver.attDb = 0.2;
+		ver.vernierMode = true;
+		pri.Run( 240.0, zero );
+		ver.Run( 240.0, zero );
+		if (g_verbose) printf( "vernier: err %.3f rate %.4f fuel %.3f kg (primary %.3f, err %.3f)\n", ver.theta[0], ver.rate[0], ver.fuel, pri.fuel, pri.theta[0] );
+		CHECK( fabs( ver.theta[0] ) < 0.35 );
+		CHECK( ver.fuel < pri.fuel );
+		for (int j = 0; j < COUNT; j++) CHECK( (ver.valve[j].commanded == false) || Jets()[j].vernier );// only vernier jets
+	}
+
+	// 3. a rotation of 5 degrees in each axis: the target is reached and the cross coupling (translation) stays small
+	{
+		RcsSim sim;
+		const double target[3] = {5.0, -5.0, 5.0};
+		sim.Run( 300.0, target );
+		if (g_verbose) printf( "maneuver: theta %.2f %.2f %.2f rate %.3f %.3f %.3f fuel %.2f v %.3f %.3f %.3f\n", sim.theta[0], sim.theta[1], sim.theta[2], sim.rate[0], sim.rate[1], sim.rate[2], sim.fuel, sim.velocity[0], sim.velocity[1], sim.velocity[2] );
+		for (int i = 0; i < 3; i++)
+		{
+			CHECK( fabs( sim.theta[i] - target[i] ) < 1.2 );
+			CHECK( fabs( sim.rate[i] ) < 0.3 );
+		}
+		const double dv = sqrt( (sim.velocity[0] * sim.velocity[0]) + (sim.velocity[1] * sim.velocity[1]) + (sim.velocity[2] * sim.velocity[2]) );
+		CHECK( dv < 0.5 );// the jets of the rotations cancel their forces (as far as the geometry allows)
+	}
+
+	// 4. every jet that works can fail: the control still holds (the jets are selected again)
+	{
+		RcsSim healthy;
+		healthy.theta[0] = 3.0;
+		healthy.Run( 240.0, zero );
+		int controllable = 0;
+		for (int j = 0; j < PRIMARY_COUNT + 6; j++)
+		{
+			if (Jets()[j].vernier) continue;
+			RcsSim sim;
+			sim.failed = Bit( j );
+			sim.theta[0] = 3.0;
+			sim.theta[1] = -3.0;
+			sim.theta[2] = 2.0;
+			sim.Run( 240.0, zero );
+			bool ok = true;
+			for (int i = 0; i < 3; i++) ok = ok && (fabs( sim.theta[i] ) < 1.5) && (fabs( sim.rate[i] ) < 0.35);
+			controllable += ok ? 1 : 0;
+			if (!ok && g_verbose) printf( "jet %s failed: err %.2f %.2f %.2f rate %.3f %.3f %.3f\n", Jets()[j].name, sim.theta[0], sim.theta[1], sim.theta[2], sim.rate[0], sim.rate[1], sim.rate[2] );
+		}
+		CHECK( controllable == PRIMARY_COUNT );// any single failure: still controllable
+		// the pods lost: the forward jets alone cannot turn the vehicle about the three axes (not a failure of the test: the vehicle is lost)
+		RcsSim aftOnly;
+		aftOnly.failed = RegionMask( true ) & ~0ULL;
+		aftOnly.theta[0] = 3.0;
+		aftOnly.Run( 240.0, zero );
+		CHECK( fabs( aftOnly.theta[0] ) < 1.5 );// the pods alone turn the vehicle in pitch
+	}
+
+	// 5. translation: the acceleration of each axis and the rotation that it causes (the DAP corrects it)
+	for (int axis = 0; axis < 3; axis++)
+	{
+		RcsSim sim;
+		sim.cmdTrans[axis] = 1;
+		for (int i = 0; i < 25; i++) sim.Step( 0.04 );// 1 s
+		sim.cmdTrans[axis] = 0;
+		const double speed = fabs( sim.velocity[(axis == 0) ? 2 : ((axis == 1) ? 0 : 1)] );
+		double wmax = 0.0;
+		for (int i = 0; i < 3; i++) wmax = (std::max)( wmax, fabs( sim.rate[i] ) );
+		if (g_verbose) printf( "trans %d: speed %.3f m/s after 1 s, rotation %.3f deg/s\n", axis, speed, wmax );
+		CHECK( speed > 0.1 );// 0.1 m/s in 1 s with the force of the jets
+		CHECK( speed < 0.5 );
+		CHECK( wmax < 0.6 );// the rotation that a translation causes can be corrected
+	}
+
+	// 5b. attitude hold in LVLH, payload bay to Earth with the principal axes along the axes of the orbit (ZLV, Y-POP): the gravity gradient
+	// has only the torque of the product of inertia (3 w^2 Ixz, about 1.5 Nm), plus a disturbance of the environment (venting, crew) of 10 Nm
+	// that changes sign every 5 minutes. Real data (planning of the JSC, 1977, Table II): the vernier hold in LVLH uses 0.7 lb/hr at 100 nmi
+	// (0.32 kg/hr); the inertial hold 3.6 lb/hr (1.6 kg/hr). The primary jets are not used for the hold (no figure published).
+	for (int vern = 0; vern < 2; vern++)
+	{
+		RcsSim sim;
+		sim.vernierMode = (vern != 0);
+		sim.gain = vern ? 0.01 : 0.25;
+		sim.trackRate[0] = 360.0 / 5400.0;
+		const double gg = (3.0 * pow( 6.283185307 / 5400.0, 2 ) * 0.3e6 / sim.inertia[0]) * DEG;
+		const double env = (10.0 / sim.inertia[0]) * DEG;
+		double fuelAt = 0.0;
+		for (int block = 0; block < 12; block++)
+		{
+			sim.disturb[0] = gg + ((block % 2) ? env : -env);
+			sim.Run( 300.0, zero );
+		}
+		fuelAt = sim.fuel;
+		if (g_verbose) printf( "LVLH hold %s, 1 hour: fuel %.2f kg (%.2f lb/hr; the real vernier hold 0.7 lb/hr), error %.2f deg, jet seconds %.1f\n", vern ? "vernier" : "primary", fuelAt, fuelAt / 0.4536, sim.theta[0] - (sim.trackRate[0] * sim.time), sim.jetSeconds );
+		CHECK( fabs( sim.theta[0] - (sim.trackRate[0] * sim.time) ) < 1.5 );// it follows the orbit
+		if (vern) CHECK( fuelAt < 1.0 );// within a factor 3 of the real 0.32 kg/hr: the DAP is tuned against flights
+	}
+
+	// 6. impulse of a single pulse: the minimum on-time, the fuel of one pulse of the jets is small
+	{
+		RcsSim sim;
+		sim.cmdRot[0] = 1.0 / 3.0;
+		sim.Step( 0.04 );
+		sim.cmdRot[0] = 0.0;
+		for (int i = 0; i < 25; i++) sim.Step( 0.04 );
+		if (g_verbose) printf( "one pulse: rate %.3f deg/s, fuel %.3f kg\n", sim.rate[0], sim.fuel );
+		CHECK( sim.rate[0] > 0.0 );// the minimum impulse of 80 ms lasts beyond the 40 ms of the command
+		CHECK( sim.fuel > 0.01 );
+		CHECK( sim.fuel < 1.0 );
+	}
+}
+
+
 int main( int argc, char** argv )
 {
+	g_verbose = (getenv( "RCS_VERBOSE" ) != NULL);
 	srand( 12345 );
 	test_pdrs_logic();
 	test_frames();
@@ -2497,7 +3259,13 @@ int main( int argc, char** argv )
 	test_emergency_lighting();
 	test_hyd_quantity();
 	test_rcs_reduction();
+	test_flight_log();
 	test_adi();
+	test_dispersion();
+	test_hyd_actuators();
+	test_hyd_tolerances();
+	test_rcs_jets();
+	test_rcs_closed_loop();
 	test_controller_examples( (argc > 1) ? argv[1] : NULL );
 	printf( "%d checks, %d failed\n", g_checks, g_failed );
 	return (g_failed == 0) ? 0 : 1;

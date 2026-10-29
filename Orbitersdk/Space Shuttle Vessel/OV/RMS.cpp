@@ -598,6 +598,8 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 		VECTOR3 acc;
 		const VECTOR3 armPos = posArmCoM + RMS_MESH_OFFSET;
 		if (reactArmEst.Update( armPos, simdt, acc )) STS()->AddForce( rmsreact::ReactionForce( massprops::ARM_MASS, acc ), armPos + ofs );
+		const double armAcc = length( acc );
+		const double armRaw = reactArmEst.RawAcceleration();
 
 		if (attachedPayload != NULL)
 		{
@@ -609,7 +611,26 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 			VECTOR3 gpos, lpos;
 			attachedPayload->GetGlobalPos( gpos );
 			STS()->Global2Local( gpos, lpos );
-			if (reactEst.Update( lpos - ofs, simdt, acc )) STS()->AddForce( rmsreact::ReactionForce( attachedPayload->GetMass(), acc ), lpos );
+			if (reactEst.Update( lpos - ofs, simdt, acc ))
+			{
+				const VECTOR3 force = rmsreact::ReactionForce( attachedPayload->GetMass(), acc );
+				STS()->AddForce( force, lpos );
+
+				// log of the rotation: the reaction of the arm, once a second of simulated time while the payload moves (or when the limit holds the acceleration back)
+				const VECTOR3 v = reactEst.Velocity();
+				if (((simt - reactLogTime) >= 1.0) && ((length( v ) > 1.0e-4) || reactEst.Capped()))
+				{
+					if (flightlog::Writer* rl = STS()->RotLog())
+					{
+						const VECTOR3 torque = rmsreact::ReactionTorque( lpos, force );
+						rl->Line( "RMSR simt=%.2f acc=%.1f dt=%.3f mass=%.0f pos=%.3f,%.3f,%.3f v=%.5f,%.5f,%.5f speed=%.5f a_raw=%.4f a_used=%.4f capped=%d force=%.1f torque=%.0f,%.0f,%.0f arm_a_raw=%.4f arm_a_used=%.4f joints=%.1f,%.1f,%.1f,%.1f,%.1f,%.1f",
+							simt, oapiGetTimeAcceleration(), simdt, attachedPayload->GetMass(), lpos.x, lpos.y, lpos.z, v.x, v.y, v.z, length( v ), reactEst.RawAcceleration(), length( acc ), reactEst.Capped() ? 1 : 0,
+							length( force ), torque.x, torque.y, torque.z, armRaw, armAcc,
+							joint_angle[0], joint_angle[1], joint_angle[2], joint_angle[3], joint_angle[4], joint_angle[5] );
+						reactLogTime = simt;
+					}
+				}
+			}
 		}
 		else
 		{
@@ -622,6 +643,12 @@ void RMS::OnPreStep(double simt, double simdt, double mjd)
 		reactEst.Reset();
 		reactArmEst.Reset();
 		reactPayload = NULL;
+		// the step is too long for the reaction (time acceleration): say it once in a while, so the log explains why the rotation does not follow the arm
+		if (STS()->GetOptions()->RMSReaction() && (attachedPayload != NULL) && (simdt >= 0.5) && ((simt - reactLogTime) >= 10.0))
+		{
+			if (flightlog::Writer* rl = STS()->RotLog()) rl->Line( "RMSR_OFF simt=%.2f acc=%.1f dt=%.3f (no reaction: the step is longer than 0.5 s)", simt, oapiGetTimeAcceleration(), simdt );
+			reactLogTime = simt;
+		}
 	}
 
 	// make sure RMS is powered and can be operated

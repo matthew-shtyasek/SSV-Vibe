@@ -19,7 +19,10 @@ Date         Developer
 2022/08/21   GLS
 ********************************************/
 #include "LandingGear.h"
+#include "HydActuator.h"
+#include "APU.h"
 #include "Atlantis.h"
+#include "dps/IDP.h"
 #include "meshres.h"
 #include <MathSSV.h>
 #include <cassert>
@@ -318,10 +321,38 @@ void LandingGear::Brakes( void )
 		RightBrakeCommand = range( 0.0, max(CDRRight, PLTRight), 1.0 ) * 0.2;
 	}
 
-	if (STS()->HydraulicsOK() && !TouchdownProtection)
+	// braking power of the hydraulic systems (1 and 2, the 3 takes over one that is lost)
+	double hydPressure[3];
+	for (int s = 0; s < 3; s++) hydPressure[s] = STS()->GetAPU( s + 1 )->GetHydraulicPressure();
+	double brakeGain = hydact::BrakePower( hydPressure );
+	if (STS()->GetHydraulicDispersion().tolerances) brakeGain *= disp::Rel( 1.0, hydact::BRAKE_GAIN_SIGMA, disp::Fixed( STS()->GetToleranceSeed(), disp::id::HYD_BRAKE_GAIN ), STS()->GetHydraulicDispersion().scale );
+	const bool applied = (brakeGain > 0.0) && !TouchdownProtection;
+	if (applied)
 	{
-		STS()->SetWheelbrakeLevel( LeftBrakeCommand, 1, false );
-		STS()->SetWheelbrakeLevel( RightBrakeCommand, 2, false );
+		STS()->SetWheelbrakeLevel( LeftBrakeCommand * brakeGain, 1, false );
+		STS()->SetWheelbrakeLevel( RightBrakeCommand * brakeGain, 2, false );
+	}
+
+	// log of the brakes: once a second while a pedal is pressed
+	{
+		double CDRLeft, CDRRight, PLTLeft, PLTRight;
+		STS()->GetBrakePosition( CDRLeft, CDRRight, PLTLeft, PLTRight );
+		const double pedal = max( max( CDRLeft, CDRRight ), max( PLTLeft, PLTRight ) );
+		const double simt = oapiGetSimTime();
+		if ((pedal > 0.0) && ((simt - brakeLogTime) >= 1.0))
+		{
+			brakeLogTime = simt;
+			flightlog::Writer* log = STS()->HydLog();
+			if (log != NULL)
+			{
+				const dps::IDP* idp = STS()->GetIDP( 1 );
+				log->Line( "BRAKE simt=%.1f acc=%.1f seat=%d pedals=%.2f,%.2f,%.2f,%.2f cmd=%.3f,%.3f mn=%d%d%d antiskid=%d protect=%d psi=%.0f,%.0f,%.0f gain=%.2f applied=%d level=%.3f,%.3f wow=%d%d%d ry_auto=%d",
+					simt, oapiGetTimeAcceleration(), STS()->GetVCMode(), CDRLeft, CDRRight, PLTLeft, PLTRight, LeftBrakeCommand, RightBrakeCommand,
+					dipBrakesMNA.IsSet() ? 1 : 0, dipBrakesMNB.IsSet() ? 1 : 0, dipBrakesMNC.IsSet() ? 1 : 0, dipAntiSkid.IsSet() ? 1 : 0, TouchdownProtection ? 1 : 0,
+					hydPressure[0], hydPressure[1], hydPressure[2], brakeGain, applied ? 1 : 0, STS()->GetWheelbrakeLevel( 1 ), STS()->GetWheelbrakeLevel( 2 ),
+					NLG_NoWOW ? 0 : 1, LMG_NoWOW ? 0 : 1, RMG_NoWOW ? 0 : 1, ((idp != NULL) && idp->GetAutoRollYawState()) ? 1 : 0 );
+			}
+		}
 	}
 	return;
 }
@@ -335,7 +366,9 @@ void LandingGear::NWS( double dt )
 	bool SteeringEngagedValve = true;// true = closed
 	if ((dipNWS1_ENABLE_A_CMD.IsSet() || dipNWS2_ENABLE_A_CMD.IsSet()) && (dipNWS1_ENABLE_B_CMD.IsSet() || dipNWS2_ENABLE_B_CMD.IsSet()))
 	{
-		if (STS()->HydraulicsOK()) SteeringEngagedValve = false;
+		double nwsPressure[3];
+		for (int s = 0; s < 3; s++) nwsPressure[s] = STS()->GetAPU( s + 1 )->GetHydraulicPressure();
+		if (hydact::SteeringPower( nwsPressure )) SteeringEngagedValve = false;// otherwise the wheel stays in caster mode
 	}
 
 	if (!SteeringEngagedValve)

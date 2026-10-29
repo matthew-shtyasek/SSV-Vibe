@@ -170,6 +170,18 @@ namespace dps
 		void OnSaveState(FILEHANDLE scn) const override;
 
 		bool Get_MNVR_TRACK_OPTION() const;
+
+		/** Option and target of the universal pointing, for the flight data log (angles in deg). */
+		struct LogInfo
+		{
+			int option;// 0 = none, 1 = MNVR, 2 = TRK, 3 = ROT
+			int targetId;// see TGT_ID
+			double ra, dec, lat, lon, alt;// of the target (RA/DEC for celestial targets, LAT/LON/ALT [nmi] for the Earth-fixed target)
+			int bodyVectorId;
+			double bodyPitch, bodyYaw, omicron;
+			bool threeAxis;
+		};
+		LogInfo GetLogInfo() const;
 		void GetRequiredQuaternion(double& QS, VECTOR3& QV) const;
 		VECTOR3 Get_REQD_BRATE() const;
 		double Get_GMTR() const;

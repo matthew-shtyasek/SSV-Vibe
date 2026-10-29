@@ -68,6 +68,8 @@ Date         Developer
 #include "AtlantisSubsystem.h"
 #include <discsignals.h>
 #include <Orbitersdk.h>
+#include "HydActuator.h"
+#include "Dispersion.h"
 
 
 using namespace discsignals;
@@ -95,6 +97,14 @@ class AeroSurfaces:public AtlantisSubsystem
 		DiscOutPort dopRudder;
 		DiscOutPort dopSpeedBrake;
 		DiscOutPort dopBodyFlap;
+
+		// tolerances and noise of the hydraulic actuators
+		disp::Noise noise;
+		double noiseTime;
+		double hydLogTime = -100.0;// flight data log of the surfaces
+		unsigned logSteps = 0, logLimited = 0;// steps of the elevons since the last line, and the ones with the rate limit active
+		bool logMoved = false;
+		double noiseRate[hydact::ELEVONS + 2];// elevons, rudder/speedbrake, body flap
 
 		// physical status [deg]
 		double Elevon_LOB;

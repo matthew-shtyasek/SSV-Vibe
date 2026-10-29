@@ -130,7 +130,7 @@ inline constexpr double OMS_ISP0 = 316*9.80665;
 inline constexpr double OMS_ISP1 = OMS_ISP0*0.75;
 // Vacuum and sea-level fuel-specific impulse for Orbital Maneuvering System [m/s]
 
-inline constexpr double RCS_ISP0 = OMS_ISP0;
+inline constexpr double RCS_ISP0 = 289*9.80665;// primary thrusters (the OMS has 316 s)
 inline constexpr double RCS_ISP1 = RCS_ISP0*0.75;
 // Vacuum and sea-level fuel-specific impulse for Reaction Control System [m/s]
 

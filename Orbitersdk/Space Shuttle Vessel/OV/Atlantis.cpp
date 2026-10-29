@@ -714,12 +714,18 @@ pActiveLatches( 5, NULL ), pXRSound(NULL)
 	thMPSDump[7] = NULL;
 	th_srb[0] = th_srb[1] = NULL;
 
-	thg_pitchup = thg_pitchdown = NULL;
-	thg_yawleft = thg_yawright = NULL;
-	thg_rollleft = thg_rollright = NULL;
-	thg_transfwd = thg_transaft = NULL;
-	thg_transleft = thg_transright = NULL;
-	thg_transup = thg_transdown = NULL;
+	for (int j = 0; j < rcsjets::COUNT; j++)
+	{
+		th_rcs[j] = NULL;
+		rcsTolThrust[j] = rcsTolIsp[j] = rcsTolDelay[j] = 1.0;
+		rcsFireThrust[j] = rcsFireIsp[j] = rcsFireDelay[j] = 1.0;
+	}
+	rcsFailed = 0;
+	for (int ax = 0; ax < 3; ax++) rcsNoseOn[ax] = rcsAftOn[ax] = true;
+	rcsTolApplied = false;
+	rcsTolOn = false;
+	rcsTolScale = 1.0;
+	rcsTolSeed = 0;
 
 	bSSMEsDefined = false;
 	bOMSDefined = false;
@@ -883,6 +889,14 @@ pActiveLatches( 5, NULL ), pXRSound(NULL)
 	RCS_PSSpec.atmsmap = PARTICLESTREAMSPEC::ATM_FLAT;
 	RCS_PSSpec.amin = 1.0;
 	RCS_PSSpec.tex = RCS_tex;
+	// the vernier jets have 1/36 of the thrust of the primary ones: a small and short plume
+	RCS_VPSSpec = RCS_PSSpec;
+	RCS_VPSSpec.srcsize = 0.05;
+	RCS_VPSSpec.srcrate = 400.0;
+	RCS_VPSSpec.lifetime = 0.03;
+	RCS_VPSSpec.growthrate = 12.0;
+	RCS_VPSSpec.lmin = 0.35;
+	RCS_VPSSpec.lmax = 0.35;
 
 
 	SSMEGH2burn[0] = NULL;
@@ -968,6 +982,29 @@ void Atlantis::clbkSetClassCaps( FILEHANDLE cfg )
 	}
 }
 
+uint64_t Atlantis::GetToleranceSeed( void ) const
+{
+	return (toleranceSeed != 0) ? toleranceSeed : disp::SeedFromText( GetName() );
+}
+
+disp::Mode Atlantis::GetHydraulicDispersion( void ) const
+{
+	disp::Mode m;
+	m.tolerances = GetOptions()->HydraulicTolerances();
+	m.noise = GetOptions()->HydraulicNoise();
+	m.scale = GetOptions()->ToleranceScale();
+	return m;
+}
+
+disp::Mode Atlantis::GetRCSDispersion( void ) const
+{
+	disp::Mode m;
+	m.tolerances = GetOptions()->RCSTolerances();
+	m.noise = GetOptions()->RCSNoise();
+	m.scale = GetOptions()->ToleranceScale();
+	return m;
+}
+
 void Atlantis::clbkSaveState( FILEHANDLE scn )
 {
 	try
@@ -988,6 +1025,21 @@ void Atlantis::clbkSaveState( FILEHANDLE scn )
 
 		// custom parameters
 		oapiWriteScenario_int(scn, "CONFIGURATION", status);
+		{
+			char seed[32];
+			sprintf_s( seed, sizeof( seed ), "%llu", static_cast<unsigned long long>(GetToleranceSeed()) );
+			oapiWriteScenario_string( scn, "TOLERANCE_SEED", seed );
+		}
+		if (rcsFailed != 0)
+		{
+			// jets of the RCS that do not work
+			std::string names;
+			for (int j = 0; j < rcsjets::COUNT; j++)
+			{
+				if (rcsFailed & rcsjets::Bit( j )) names += std::string( rcsjets::Jets()[j].name ) + " ";
+			}
+			oapiWriteScenario_string( scn, "RCS_FAILED", const_cast<char*>(names.c_str()) );
+		}
 		oapiWriteScenario_int( scn, "VC_POS", VCMode );
 
 		sprintf( cbuf, "%0.2f %0.2f", LeftSBTC, RightSBTC );
@@ -1036,6 +1088,22 @@ void Atlantis::clbkLoadStateEx( FILEHANDLE scn, void* status )
 			if (!_strnicmp(line, "CONFIGURATION", 13))
 			{
 				sscanf(line + 13, "%d", &this->status);
+			}
+			else if (!_strnicmp(line, "RCS_FAILED", 10))
+			{
+				char names[256];
+				strncpy_s( names, sizeof( names ), line + 10, _TRUNCATE );
+				char* context = NULL;
+				for (char* tok = strtok_s( names, " \t\r\n", &context ); tok != NULL; tok = strtok_s( NULL, " \t\r\n", &context ))
+				{
+					const int jet = rcsjets::Find( tok );
+					if (jet >= 0) rcsFailed |= rcsjets::Bit( jet );
+				}
+			}
+			else if (!_strnicmp(line, "TOLERANCE_SEED", 14))
+			{
+				unsigned long long seed = 0;
+				if (sscanf( line + 14, "%llu", &seed ) == 1) toleranceSeed = static_cast<uint64_t>(seed);
 			}
 			else if (!_strnicmp(line, "VC_POS", 6))
 			{
@@ -1325,6 +1393,19 @@ void Atlantis::clbkPreStep( double simt, double simdt, double mjd )
 			met = pMTU->GetMETDay(0)*86400.0 + pMTU->GetMETHour(0)*3600.0 + pMTU->GetMETMin(0)*60.0 + pMTU->GetMETSec(0) + pMTU->GetMETMilli(0) / 1000.0;
 		}
 
+		// scenarios after liftoff have no countdown of the LCC: the time of liftoff for other add-ons (Shuttle FDO MFD) is the current time minus the MET
+		if (!launchTimeFileWritten && (status != STATE_PRELAUNCH))
+		{
+			launchTimeFileWritten = true;
+			std::ofstream file( "./Config/SSV/LaunchTime.txt" );
+			if (file.is_open())
+			{
+				char cbuf[64];
+				sprintf_s( cbuf, 64, "LAUNCH_MJD %.10f", oapiGetSimMJD() - (met / 86400.0) );
+				file << cbuf << std::endl;
+			}
+		}
+
 		UpdateControllers( simdt );
 
 		UpdateRCSFlames();// the visible level of the flames of the RCS (with time acceleration)
@@ -1349,226 +1430,8 @@ void Atlantis::clbkPreStep( double simt, double simdt, double mjd )
 		for (int i = NAVMODE_KILLROT; i <= NAVMODE_HOLDALT; i++) DeactivateNavmode(i);
 
 
-		// check inputs from GPC and set thrusters
-		//PITCH Commands to Thrusters
-		double pitchcmd = RotThrusterCommands[PITCH].GetVoltage();
-		// diagnostics of the RCS with time acceleration: the hand controller is deflected and no jet is commanded
-		{
-			static double lastRCSLog = -100.0;
-			const double acc = oapiGetTimeAcceleration();
-			const double defl = fabs( LeftRHC[0] ) + fabs( LeftRHC[1] ) + fabs( LeftRHC[2] ) + fabs( RightRHC[0] ) + fabs( RightRHC[1] ) + fabs( RightRHC[2] ) + fabs( AftRHC[0] ) + fabs( AftRHC[1] ) + fabs( AftRHC[2] );
-			const double cmd = fabs( pitchcmd ) + fabs( RotThrusterCommands[YAW].GetVoltage() ) + fabs( RotThrusterCommands[ROLL].GetVoltage() );
-			if ((acc > 1.0) && (defl > 0.3) && (cmd < 0.0001) && ((simt - lastRCSLog) > 10.0))
-			{
-				lastRCSLog = simt;
-				oapiWriteLogV( "(SSV_OV) [INFO] RCS: time acceleration x%.1f, hand controller deflected (L %.2f %.2f %.2f, R %.2f %.2f %.2f, A %.2f %.2f %.2f) and no rotation jet commanded (ControlRMS %d)", acc,
-					LeftRHC[0], LeftRHC[1], LeftRHC[2], RightRHC[0], RightRHC[1], RightRHC[2], AftRHC[0], AftRHC[1], AftRHC[2], ControlRMS ? 1 : 0 );
-			}
-		}
-		if (pitchcmd > 0.0001)
-		{
-			SetThrusterGroupLevel(thg_pitchup, pitchcmd);
-			SetThrusterGroupLevel(thg_pitchdown, 0.0);
-
-			if (lastRotCommand[PITCH] != 1) {
-				lastRotCommand[PITCH] = 1;
-				if ((pitchcmd * RCSThrustReduction()) > 0.101) SoundPlay( pXRSound, PRCS_SOUND );
-				else SoundPlay( pXRSound, VRCS_SOUND );
-			}
-		}
-		else if (pitchcmd < -0.0001)
-		{
-			SetThrusterGroupLevel(thg_pitchdown, -pitchcmd);
-			SetThrusterGroupLevel(thg_pitchup, 0.0);
-
-			if (lastRotCommand[PITCH] != -1) {
-				lastRotCommand[PITCH] = -1;
-				if ((pitchcmd * RCSThrustReduction()) < -0.101) SoundPlay( pXRSound, PRCS_SOUND );
-				else SoundPlay( pXRSound, VRCS_SOUND );
-			}
-		}
-		else
-		{
-			SetThrusterGroupLevel(thg_pitchup, 0.0);
-			SetThrusterGroupLevel(thg_pitchdown, 0.0);
-			lastRotCommand[PITCH] = 0;
-
-		}
-
-
-		//YAW Commands to thrusters
-		if (RotThrusterCommands[YAW].GetVoltage() > 0.0001) {
-			SetThrusterGroupLevel(thg_yawright, RotThrusterCommands[YAW].GetVoltage());
-			SetThrusterGroupLevel(thg_yawleft, 0.0);
-
-			if (lastRotCommand[YAW] != 1) {
-				lastRotCommand[YAW] = 1;
-				if ((RotThrusterCommands[YAW].GetVoltage() * RCSThrustReduction()) > 0.101) SoundPlay( pXRSound, PRCS_SOUND );
-				else SoundPlay( pXRSound, VRCS_SOUND );
-			}
-		}
-		else if (RotThrusterCommands[YAW].GetVoltage() < -0.0001) {
-			SetThrusterGroupLevel(thg_yawleft, -RotThrusterCommands[YAW].GetVoltage());
-			SetThrusterGroupLevel(thg_yawright, 0.0);
-
-			if (lastRotCommand[YAW] != -1) {
-				lastRotCommand[YAW] = -1;
-				if ((RotThrusterCommands[YAW].GetVoltage() * RCSThrustReduction()) < -0.101) SoundPlay( pXRSound, PRCS_SOUND );
-				else SoundPlay( pXRSound, VRCS_SOUND );
-			}
-		}
-		else {
-			SetThrusterGroupLevel(thg_yawright, 0.0);
-			SetThrusterGroupLevel(thg_yawleft, 0.0);
-			lastRotCommand[YAW] = 0;
-		}
-
-		//ROLL Commands to Thruster
-		if (RotThrusterCommands[ROLL].GetVoltage() > 0.0001) {
-			SetThrusterGroupLevel(thg_rollright, RotThrusterCommands[ROLL].GetVoltage());
-			SetThrusterGroupLevel(thg_rollleft, 0.0);
-
-			if (lastRotCommand[ROLL] != 1) {
-				lastRotCommand[ROLL] = 1;
-				if ((RotThrusterCommands[ROLL].GetVoltage() * RCSThrustReduction()) > 0.101) SoundPlay( pXRSound, PRCS_SOUND );
-				else SoundPlay( pXRSound, VRCS_SOUND );
-			}
-		}
-		else if (RotThrusterCommands[ROLL].GetVoltage() < -0.0001) {
-			SetThrusterGroupLevel(thg_rollleft, -RotThrusterCommands[ROLL].GetVoltage());
-			SetThrusterGroupLevel(thg_rollright, 0.0);
-
-			if (lastRotCommand[ROLL] != -1) {
-				lastRotCommand[ROLL] = -1;
-				if ((RotThrusterCommands[ROLL].GetVoltage() * RCSThrustReduction()) < -0.101) SoundPlay( pXRSound, PRCS_SOUND );
-				else SoundPlay( pXRSound, VRCS_SOUND );
-			}
-		}
-		else {
-			SetThrusterGroupLevel(thg_rollright, 0.0);
-			SetThrusterGroupLevel(thg_rollleft, 0.0);
-			lastRotCommand[ROLL] = 0;
-		}
-
-		// SERC
-		if (RotThrusterCommands[3].GetVoltage() > 0.0001)
-		{
-			// roll left
-			SetThrusterLevel(th_att_rcs[12], RotThrusterCommands[3].GetVoltage());// L1U, L2U, L4U
-			SetThrusterLevel(th_att_rcs[13], RotThrusterCommands[3].GetVoltage());// R2D, R3D, R4D
-			SetThrusterLevel(th_att_rcs[7], RotThrusterCommands[3].GetVoltage());// F2R, F4R
-			SetThrusterLevel(th_att_rcs[10], RotThrusterCommands[3].GetVoltage());// R1R, R2R, R3R, R4R
-
-			SetThrusterLevel(th_att_rcs[16], 0);// R1U, R2U, R4U
-			SetThrusterLevel(th_att_rcs[15], 0);// L2D, L3D, L4D
-			SetThrusterLevel(th_att_rcs[9], 0);// F1L, F3L
-			SetThrusterLevel(th_att_rcs[8], 0);// L1L, L2L, L3L, L4L
-
-			SERCstop = false;
-		}
-		else if (RotThrusterCommands[3].GetVoltage() < -0.0001)
-		{
-			// roll right
-			SetThrusterLevel(th_att_rcs[12], 0);// L1U, L2U, L4U
-			SetThrusterLevel(th_att_rcs[13], 0);// R2D, R3D, R4D
-			SetThrusterLevel(th_att_rcs[7], 0);// F2R, F4R
-			SetThrusterLevel(th_att_rcs[10], 0);// R1R, R2R, R3R, R4R
-
-			SetThrusterLevel(th_att_rcs[16], -RotThrusterCommands[3].GetVoltage());// R1U, R2U, R4U
-			SetThrusterLevel(th_att_rcs[15], -RotThrusterCommands[3].GetVoltage());// L2D, L3D, L4D
-			SetThrusterLevel(th_att_rcs[9], -RotThrusterCommands[3].GetVoltage());// F1L, F3L
-			SetThrusterLevel(th_att_rcs[8], -RotThrusterCommands[3].GetVoltage());// L1L, L2L, L3L, L4L
-
-			SERCstop = false;
-		}
-		else
-		{
-			if (SERCstop == false)
-			{
-				SetThrusterLevel(th_att_rcs[12], 0);// L1U, L2U, L4U
-				SetThrusterLevel(th_att_rcs[13], 0);// R2D, R3D, R4D
-				SetThrusterLevel(th_att_rcs[7], 0);// F2R, F4R
-				SetThrusterLevel(th_att_rcs[10], 0);// R1R, R2R, R3R, R4R
-
-				SetThrusterLevel(th_att_rcs[16], 0);// R1U, R2U, R4U
-				SetThrusterLevel(th_att_rcs[15], 0);// L2D, L3D, L4D
-				SetThrusterLevel(th_att_rcs[9], 0);// F1L, F3L
-				SetThrusterLevel(th_att_rcs[8], 0);// L1L, L2L, L3L, L4L
-
-				SERCstop = true;
-			}
-		}
-
-
-		if (TransThrusterCommands[0].GetVoltage() > 0.0001) {
-			SetThrusterGroupLevel(thg_transfwd, 1.0);
-			SetThrusterGroupLevel(thg_transaft, 0.0);
-
-			if (lastTransCommand[0] != 1) {
-				lastTransCommand[0] = 1;
-				SoundPlay( pXRSound, PRCS_SOUND );
-			}
-		}
-		else if (TransThrusterCommands[0].GetVoltage() < -0.0001) {
-			SetThrusterGroupLevel(thg_transaft, 1.0);
-			SetThrusterGroupLevel(thg_transfwd, 0.0);
-
-			if (lastTransCommand[0] != -1) {
-				lastTransCommand[0] = -1;
-				SoundPlay( pXRSound, PRCS_SOUND );
-			}
-		}
-		else {
-			SetThrusterGroupLevel(thg_transfwd, 0.0);
-			SetThrusterGroupLevel(thg_transaft, 0.0);
-			lastTransCommand[0] = 0;
-		}
-		if (TransThrusterCommands[1].GetVoltage() > 0.0001) {
-			SetThrusterGroupLevel(thg_transright, 1.0);
-			SetThrusterGroupLevel(thg_transleft, 0.0);
-
-			if (lastTransCommand[1] != 1) {
-				lastTransCommand[1] = 1;
-				SoundPlay( pXRSound, PRCS_SOUND );
-			}
-		}
-		else if (TransThrusterCommands[1].GetVoltage() < -0.0001) {
-			SetThrusterGroupLevel(thg_transleft, 1.0);
-			SetThrusterGroupLevel(thg_transright, 0.0);
-
-			if (lastTransCommand[1] != -1) {
-				lastTransCommand[1] = -1;
-				SoundPlay( pXRSound, PRCS_SOUND );
-			}
-		}
-		else {
-			SetThrusterGroupLevel(thg_transright, 0.0);
-			SetThrusterGroupLevel(thg_transleft, 0.0);
-			lastTransCommand[1] = 0;
-		}
-		if (TransThrusterCommands[2].GetVoltage() > 0.0001) {
-			SetThrusterGroupLevel(thg_transdown, 1.0);
-			SetThrusterGroupLevel(thg_transup, 0.0);
-
-			if (lastTransCommand[2] != 1) {
-				lastTransCommand[2] = 1;
-				SoundPlay( pXRSound, PRCS_SOUND );
-			}
-		}
-		else if (TransThrusterCommands[2].GetVoltage() < -0.0001) {
-			SetThrusterGroupLevel(thg_transup, 1.0);
-			SetThrusterGroupLevel(thg_transdown, 0.0);
-
-			if (lastTransCommand[2] != -1) {
-				lastTransCommand[2] = -1;
-				SoundPlay( pXRSound, PRCS_SOUND );
-			}
-		}
-		else {
-			SetThrusterGroupLevel(thg_transdown, 0.0);
-			SetThrusterGroupLevel(thg_transup, 0.0);
-			lastTransCommand[2] = 0;
-		}
+		// RCS: the commands of the DAP select the jets (real jets, valves with delays, tolerances and noise)
+		UpdateRCSJets( simt, simdt );
 
 		// during launch, turn engine light source on
 		if (status <= STATE_STAGE2 && GetSSMEThrustLevel(0) > 1.0) {
@@ -1592,6 +1455,22 @@ void Atlantis::clbkPreStep( double simt, double simdt, double mjd )
 		//oapiWriteLog(oapiDebugString());
 
 		if (status > STATE_PRELAUNCH) UpdateMassAndCoG(); // TODO: refine
+
+		// log of the rotation: once a second of simulated time while the rate changes, or every 10 s
+		if (flightlog::Writer* rl = RotLog())
+		{
+			VECTOR3 w;
+			GetAngularVel( w );
+			const double t = oapiGetSimTime();
+			const double dw = length( w - rotLogRates ) * DEG;
+			if (((t - rotLogTime) >= 1.0 && (dw > 0.005)) || ((t - rotLogTime) >= 10.0))
+			{
+				rl->Line( "ROT simt=%.2f acc=%.1f w=%.5f,%.5f,%.5f dw=%.5f mass=%.0f pmi=%.2f,%.2f,%.2f cog=%.3f,%.3f,%.3f", t, oapiGetTimeAcceleration(), w.x * DEG, w.y * DEG, w.z * DEG, dw,
+					GetMass(), appliedPMI.x, appliedPMI.y, appliedPMI.z, currentCoG.x, currentCoG.y, currentCoG.z );
+				rotLogTime = t;
+				rotLogRates = w;
+			}
+		}
 
 		UpdateVCMove( simdt );
 
@@ -2016,6 +1895,14 @@ int Atlantis::clbkConsumeDirectKey( char* kstate )
 			RightBrake_Input = 1.0;
 		}
 		else RightBrake_Input = 0.0;
+
+		// Shift = fine adjustment of the arm: it is a flag only, the default processing of Orbiter (numpad) does not see the key
+		rmsFineKey = ControlRMS && KEYMOD_SHIFT( kstate ) && !KEYMOD_CONTROL( kstate ) && !KEYMOD_ALT( kstate );
+		if (rmsFineKey)
+		{
+			RESETKEY( kstate, OAPI_KEY_LSHIFT );
+			RESETKEY( kstate, OAPI_KEY_RSHIFT );
+		}
 		return 0;
 	}
 	catch (std::exception &e)
@@ -2056,6 +1943,9 @@ int Atlantis::clbkConsumeBufferedKey( DWORD key, bool down, char* kstate )
 			}
 		}
 
+		// with the arm controlled Shift only means the fine adjustment (the trim of the RHC is of the RCS)
+		const bool shiftFine = ControlRMS && KEYMOD_SHIFT( kstate ) && !KEYMOD_CONTROL( kstate ) && !KEYMOD_ALT( kstate );
+
 		if (!down) {
 			if (KEYMOD_ALT(kstate)) {
 				if (VCMode >= VC_PLBCAMA && VCMode <= VC_RMSCAM) {
@@ -2077,7 +1967,7 @@ int Atlantis::clbkConsumeBufferedKey( DWORD key, bool down, char* kstate )
 					}
 				}
 			}
-			else if (KEYMOD_SHIFT(kstate))
+			else if (KEYMOD_SHIFT(kstate) && !shiftFine)
 			{
 				switch (key)
 				{
@@ -2095,7 +1985,7 @@ int Atlantis::clbkConsumeBufferedKey( DWORD key, bool down, char* kstate )
 						return 1;
 				}
 			}
-			else if (!KEYMOD_ALT(kstate) && !KEYMOD_SHIFT(kstate)) { // Ctrl or unmodified
+			else if (!KEYMOD_ALT(kstate) && (!KEYMOD_SHIFT(kstate) || shiftFine)) { // Ctrl or unmodified (Shift: fine adjustment of the arm)
 				switch (key) {
 				case OAPI_KEY_LEFT:
 				case OAPI_KEY_RIGHT:
@@ -2239,7 +2129,7 @@ int Atlantis::clbkConsumeBufferedKey( DWORD key, bool down, char* kstate )
 				}
 			}
 		}
-		else if (KEYMOD_SHIFT(kstate))
+		else if (KEYMOD_SHIFT(kstate) && !shiftFine)
 		{
 			switch (key)
 			{
@@ -2257,7 +2147,7 @@ int Atlantis::clbkConsumeBufferedKey( DWORD key, bool down, char* kstate )
 					return 1;
 			}
 		}
-		else /*if (!KEYMOD_SHIFT(kstate) && !KEYMOD_ALT(kstate))*/ { // unmodified keys
+		else /*if (!KEYMOD_SHIFT(kstate) && !KEYMOD_ALT(kstate))*/ { // unmodified keys (and Shift: fine adjustment of the arm)
 			if (vcFreeMove)
 			{
 				switch (key)
@@ -3060,10 +2950,12 @@ void assertValidHandles(const char* context, THRUSTER_HANDLE *thx, int count)
 // --------------------------------------------------------------
 // Attitude controls (RCS) during orbital phase
 // --------------------------------------------------------------
+constexpr double RCS_THRUST_ROOM = 1.06;// the maximum thrust of a jet over the nominal one, for the tolerances
+
 void Atlantis::CreateAttControls_RCS(VECTOR3 center)
 {
 	// delete existing exhaust definitions and update positions
-	// we only need to define the thruster positions once; after that ShiftCG should set up positions
+	// we only need to define the thrusters once; after that ShiftCG should set up positions
 	while (!vExRCS.empty()) {
 		DelExhaust(vExRCS.back());
 		vExRCS.pop_back();
@@ -3075,225 +2967,32 @@ void Atlantis::CreateAttControls_RCS(VECTOR3 center)
 	rcsFlames.clear();
 	rcsFlameLevel.clear();
 
-	// set of attitude thrusters (idealised). The arrangement is such that no angular
-	// momentum is created in linear mode, and no linear momentum is created in rotational mode.
-	// PU, PD, Z+, Z-
-	if (!bRCSDefined) {
-		th_att_rcs[0] = CreateThruster(_V(-1.6, 0, 15.5), _V( 0.601815, 0.798636, 0.0 ), RCS_THRUST, ph_frcs, RCS_ISP0, RCS_ISP1);
-		th_att_rcs[1] = CreateThruster(_V(1.6, 0, 15.5), _V( -0.601815, 0.798636, 0.0 ), RCS_THRUST, ph_frcs, RCS_ISP0, RCS_ISP1);
-		th_att_rcs[2] = CreateThruster(_V(0, 0, -15.5), _V(0, -1, 0), RCS_THRUST, ph_lrcs, RCS_ISP0, RCS_ISP1);
-		th_att_rcs[3] = CreateThruster(_V(0, 0, -15.5), _V(0, -1, 0), RCS_THRUST, ph_rrcs, RCS_ISP0, RCS_ISP1);
-		th_att_rcs[4] = CreateThruster(_V(0, 0, 15.5), _V(0, -1, 0), RCS_THRUST, ph_frcs, RCS_ISP0, RCS_ISP1);
-		th_att_rcs[5] = CreateThruster(_V(0, 0, -15.5), _V(0.2844, 0.9481, 0.1422), RCS_THRUST, ph_lrcs, RCS_ISP0, RCS_ISP1);
-		th_att_rcs[6] = CreateThruster(_V(0, 0, -15.5), _V(-0.2844, 0.9481, 0.1422), RCS_THRUST, ph_rrcs, RCS_ISP0, RCS_ISP1);
-		thg_pitchup = CreateThrusterGroup(th_att_rcs, 4, THGROUP_USER);
-		thg_pitchdown = CreateThrusterGroup(th_att_rcs + 4, 3, static_cast<THGROUP_TYPE>(THGROUP_USER + 1));
-
-		th_att_lin[0] = CreateThruster(_V(-1.6, 0, 15.5), _V( 0.601815, 0.798636, 0.0 ), RCS_THRUST, ph_frcs, RCS_ISP0, RCS_ISP1);
-		th_att_lin[1] = CreateThruster(_V(1.6, 0, 15.5), _V( -0.601815, 0.798636, 0.0 ), RCS_THRUST, ph_frcs, RCS_ISP0, RCS_ISP1);
-		th_att_lin[5] = CreateThruster(_V(0, 0, -15.5), _V(0, -1, 0), RCS_THRUST, ph_lrcs, RCS_ISP0, RCS_ISP1);
-		th_att_lin[6] = CreateThruster(_V(0, 0, -15.5), _V(0, -1, 0), RCS_THRUST, ph_rrcs, RCS_ISP0, RCS_ISP1);
-		th_att_lin[4] = CreateThruster(_V(0, 0, 15.5), _V(0, -1, 0), RCS_THRUST, ph_frcs, RCS_ISP0, RCS_ISP1);
-		th_att_lin[2] = CreateThruster(_V(0, 0, -15.5), _V(0.2844, 0.9481, 0.1422), RCS_THRUST, ph_lrcs, RCS_ISP0, RCS_ISP1);
-		th_att_lin[3] = CreateThruster(_V(0, 0, -15.5), _V(-0.2844, 0.9481, 0.1422), RCS_THRUST, ph_rrcs, RCS_ISP0, RCS_ISP1);
-		thg_transup = CreateThrusterGroup(th_att_lin, 4, static_cast<THGROUP_TYPE>(THGROUP_USER + 2));
-		thg_transdown = CreateThrusterGroup(th_att_lin + 4, 3, static_cast<THGROUP_TYPE>(THGROUP_USER + 3));
+	// the 44 jets with the position, direction and thrust of the Orbiter Data Book, with the tolerances of their installation (option)
+	const rcsjets::Def* jets = rcsjets::Jets();
+	const disp::Mode dm = GetRCSDispersion();
+	const uint64_t seed = GetToleranceSeed();
+	for (int j = 0; j < rcsjets::COUNT; j++)
+	{
+		const VECTOR3 pos = center + rcsjets::InstalledPosition( j, seed, dm );
+		const VECTOR3 dir = rcsjets::InstalledDirection( j, seed, dm );
+		if (!bRCSDefined)
+		{
+			PROPELLANT_HANDLE ph = (jets[j].tank == rcsjets::TANK_FWD) ? ph_frcs : ((jets[j].tank == rcsjets::TANK_LEFT) ? ph_lrcs : ph_rrcs);
+			const double isp0 = (jets[j].vernier ? rcsjets::VERNIER_ISP : rcsjets::PRIMARY_ISP) * 9.80665;
+			// the maximum thrust has room for the tolerances over the nominal one (the level is scaled)
+			th_rcs[j] = CreateThruster( pos, dir, jets[j].thrust * RCS_THRUST_ROOM, ph, isp0, isp0 * 0.75 );
+		}
+		else
+		{
+			SetThrusterRef( th_rcs[j], pos );
+			SetThrusterDir( th_rcs[j], dir );
+		}
+		if (jets[j].vernier) AddVRCSExhaust( th_rcs[j], pos, -dir );
+		else AddRCSExhaust( th_rcs[j], pos, -dir );
 	}
-	else { // update thruster positions
-		SetThrusterRef(th_att_rcs[0], _V(-1.6, 0, 15.5));
-		SetThrusterRef(th_att_rcs[1], _V(1.6, 0, 15.5));
-		SetThrusterRef(th_att_rcs[2], _V(0, 0, -15.5));
-		SetThrusterRef(th_att_rcs[3], _V(0, 0, -15.5));
-		SetThrusterRef(th_att_rcs[4], _V(0, 0, 15.5));
-		SetThrusterRef(th_att_rcs[5], _V(0, 0, -15.5));
-		SetThrusterRef(th_att_rcs[6], _V(0, 0, -15.5));
-
-		SetThrusterRef(th_att_lin[0], _V(-1.6, 0, 15.5));
-		SetThrusterRef(th_att_lin[1], _V(1.6, 0, 15.5));
-		SetThrusterRef(th_att_lin[5], _V(0, 0, -15.5));
-		SetThrusterRef(th_att_lin[6], _V(0, 0, -15.5));
-		SetThrusterRef(th_att_lin[4], _V(0, 0, 15.5));
-		SetThrusterRef(th_att_lin[2], _V(0, 0, -15.5));
-		SetThrusterRef(th_att_lin[3], _V(0, 0, -15.5));
-	}
-
-	AddRCSExhaust( th_att_rcs[0], center + _V( -1.560068, -1.52057, 15.759464 ), _V( -0.601815, -0.798636, 0.0 ) );//F1D
-	AddRCSExhaust( th_att_rcs[0], center + _V( -1.682242, -1.482724, 15.388624 ), _V( -0.601815, -0.798636, 0.0 ) );//F3D
-
-	AddRCSExhaust( th_att_rcs[1], center + _V( 1.560068, -1.52057, 15.759464 ), _V( 0.601815, -0.798636, 0.0 ) );//F2D
-	AddRCSExhaust( th_att_rcs[1], center + _V( 1.682242, -1.482724, 15.388624 ), _V( 0.601815, -0.798636, 0.0 ) );//F4D
-
-	AddRCSExhaust( th_att_rcs[2], center + _V( -3.3528, 1.6176, -14.2674 ), _V( 0.0, 1.0, 0.0 ) );//L4U
-	AddRCSExhaust( th_att_rcs[2], center + _V( -3.3528, 1.6176, -14.5976 ), _V( 0.0, 1.0, 0.0 ) );//L2U
-	AddRCSExhaust( th_att_rcs[2], center + _V( -3.3528, 1.6176, -14.9278 ), _V( 0.0, 1.0, 0.0 ) );//L1U
-
-	AddRCSExhaust( th_att_rcs[3], center + _V( 3.3528, 1.6176, -14.2674 ), _V( 0.0, 1.0, 0.0 ) );//R4U
-	AddRCSExhaust( th_att_rcs[3], center + _V( 3.3528, 1.6176, -14.5976 ), _V( 0.0, 1.0, 0.0 ) );//R2U
-	AddRCSExhaust( th_att_rcs[3], center + _V( 3.3528, 1.6176, -14.9278 ), _V( 0.0, 1.0, 0.0 ) );//R1U
-
-	AddRCSExhaust( th_att_rcs[4], center + _V( -0.3656076, -0.085216, 15.325505 ), _V( 0.0, 1.0, 0.0 ) );//F1U
-	AddRCSExhaust( th_att_rcs[4], center + _V( 0.0, -0.058038, 15.3257082 ), _V( 0.0, 1.0, 0.0 ) );//F3U
-	AddRCSExhaust( th_att_rcs[4], center + _V( 0.3656076, -0.085216, 15.325505 ), _V( 0.0, 1.0, 0.0 ) );//F2U
-
-	AddRCSExhaust( th_att_rcs[5], center + _V( -2.84353, 0.52286, -14.2674 ), _V( -0.2844, -0.9481, -0.1422 ) );//L4D
-	AddRCSExhaust( th_att_rcs[5], center + _V( -2.84353, 0.52286, -14.5976 ), _V( -0.2844, -0.9481, -0.1422 ) );//L2D
-	AddRCSExhaust( th_att_rcs[5], center + _V( -2.84353, 0.52286, -14.9278 ), _V( -0.2844, -0.9481, -0.1422 ) );//L3D
-
-	AddRCSExhaust( th_att_rcs[6], center + _V( 2.84353, 0.52286, -14.2674 ), _V( 0.2844, -0.9481, -0.1422 ) );//R4D
-	AddRCSExhaust( th_att_rcs[6], center + _V( 2.84353, 0.52286, -14.5976 ), _V( 0.2844, -0.9481, -0.1422 ) );//R2D
-	AddRCSExhaust( th_att_rcs[6], center + _V( 2.84353, 0.52286, -14.9278 ), _V( 0.2844, -0.9481, -0.1422 ) );//R3D
-
-	AddRCSExhaust( th_att_lin[0], center + _V( -1.560068, -1.52057, 15.759464 ), _V( -0.601815, -0.798636, 0.0 ) );//F1D
-	AddRCSExhaust( th_att_lin[0], center + _V( -1.682242, -1.482724, 15.388624 ), _V( -0.601815, -0.798636, 0.0 ) );//F3D
-
-	AddRCSExhaust( th_att_lin[1], center + _V( 1.560068, -1.52057, 15.759464 ), _V( 0.601815, -0.798636, 0.0 ) );//F2D
-	AddRCSExhaust( th_att_lin[1], center + _V( 1.682242, -1.482724, 15.388624 ), _V( 0.601815, -0.798636, 0.0 ) );//F4D
-
-	AddRCSExhaust( th_att_lin[5], center + _V( -3.3528, 1.6176, -14.2674 ), _V( 0.0, 1.0, 0.0 ) );//L4U
-	AddRCSExhaust( th_att_lin[5], center + _V( -3.3528, 1.6176, -14.5976 ), _V( 0.0, 1.0, 0.0 ) );//L2U
-	AddRCSExhaust( th_att_lin[5], center + _V( -3.3528, 1.6176, -14.9278 ), _V( 0.0, 1.0, 0.0 ) );//L1U
-
-	AddRCSExhaust( th_att_lin[6], center + _V( 3.3528, 1.6176, -14.2674 ), _V( 0.0, 1.0, 0.0 ) );//R4U
-	AddRCSExhaust( th_att_lin[6], center + _V( 3.3528, 1.6176, -14.5976 ), _V( 0.0, 1.0, 0.0 ) );//R2U
-	AddRCSExhaust( th_att_lin[6], center + _V( 3.3528, 1.6176, -14.9278 ), _V( 0.0, 1.0, 0.0 ) );//R1U
-
-	AddRCSExhaust( th_att_lin[4], center + _V( -0.3656076, -0.085216, 15.325505 ), _V( 0.0, 1.0, 0.0 ) );//F1U
-	AddRCSExhaust( th_att_lin[4], center + _V( 0.0, -0.058038, 15.3257082 ), _V( 0.0, 1.0, 0.0 ) );//F3U
-	AddRCSExhaust( th_att_lin[4], center + _V( 0.3656076, -0.085216, 15.325505 ), _V( 0.0, 1.0, 0.0 ) );//F2U
-
-	AddRCSExhaust( th_att_lin[2], center + _V( -2.84353, 0.52286, -14.2674 ), _V( -0.2844, -0.9481, -0.1422 ) );//L4D
-	AddRCSExhaust( th_att_lin[2], center + _V( -2.84353, 0.52286, -14.5976 ), _V( -0.2844, -0.9481, -0.1422 ) );//L2D
-	AddRCSExhaust( th_att_lin[2], center + _V( -2.84353, 0.52286, -14.9278 ), _V( -0.2844, -0.9481, -0.1422 ) );//L3D
-
-	AddRCSExhaust( th_att_lin[3], center + _V( 2.84353, 0.52286, -14.2674 ), _V( 0.2844, -0.9481, -0.1422 ) );//R4D
-	AddRCSExhaust( th_att_lin[3], center + _V( 2.84353, 0.52286, -14.5976 ), _V( 0.2844, -0.9481, -0.1422 ) );//R2D
-	AddRCSExhaust( th_att_lin[3], center + _V( 2.84353, 0.52286, -14.9278 ), _V( 0.2844, -0.9481, -0.1422 ) );//R3D
-
-	// YL, YR, Y+, Y-
-	if (!bRCSDefined) {
-		th_att_rcs[7] = CreateThruster(_V(0, 0, 15.5), _V(-1, 0, 0), RCS_THRUST, ph_frcs, RCS_ISP0, RCS_ISP1);
-		th_att_rcs[8] = CreateThruster(_V(0, 0, -15.5), _V(1, 0, 0), RCS_THRUST, ph_lrcs, RCS_ISP0, RCS_ISP1);
-		th_att_rcs[9] = CreateThruster(_V(0, 0, 15.5), _V(1, 0, 0), RCS_THRUST, ph_frcs, RCS_ISP0, RCS_ISP1);
-		th_att_rcs[10] = CreateThruster(_V(0, 0, -15.5), _V(-1, 0, 0), RCS_THRUST, ph_rrcs, RCS_ISP0, RCS_ISP1);
-		thg_yawleft = CreateThrusterGroup(th_att_rcs + 7, 2, static_cast<THGROUP_TYPE>(THGROUP_USER + 4));
-		thg_yawright = CreateThrusterGroup(th_att_rcs + 9, 2, static_cast<THGROUP_TYPE>(THGROUP_USER + 5));
-
-		th_att_lin[7] = CreateThruster(_V(0, 0, 15.5), _V(-1, 0, 0), RCS_THRUST, ph_frcs, RCS_ISP0, RCS_ISP1);
-		th_att_lin[8] = CreateThruster(_V(0, 0, -15.5), _V(-1, 0, 0), RCS_THRUST, ph_rrcs, RCS_ISP0, RCS_ISP1);
-		th_att_lin[9] = CreateThruster(_V(0, 0, 15.5), _V(1, 0, 0), RCS_THRUST, ph_frcs, RCS_ISP0, RCS_ISP1);
-		th_att_lin[10] = CreateThruster(_V(0, 0, -15.5), _V(1, 0, 0), RCS_THRUST, ph_lrcs, RCS_ISP0, RCS_ISP1);
-		thg_transleft = CreateThrusterGroup(th_att_lin + 7, 2, static_cast<THGROUP_TYPE>(THGROUP_USER + 6));
-		thg_transright = CreateThrusterGroup(th_att_lin + 9, 2, static_cast<THGROUP_TYPE>(THGROUP_USER + 7));
-	}
-	else { // update thruster positions
-		SetThrusterRef(th_att_rcs[7], _V(0, 0, 15.5));
-		SetThrusterRef(th_att_rcs[8], _V(0, 0, -15.5));
-		SetThrusterRef(th_att_rcs[9], _V(0, 0, 15.5));
-		SetThrusterRef(th_att_rcs[10], _V(0, 0, -15.5));
-
-		SetThrusterRef(th_att_lin[7], _V(0, 0, 15.5));
-		SetThrusterRef(th_att_lin[8], _V(0, 0, -15.5));
-		SetThrusterRef(th_att_lin[9], _V(0, 0, 15.5));
-		SetThrusterRef(th_att_lin[10], _V(0, 0, -15.5));
-	}
-
-	AddRCSExhaust( th_att_rcs[7], center + _V( 1.7653, -1.094358, 15.027182 ), _V( 1.0, 0.0, 0.0 ) );//F2R
-	AddRCSExhaust( th_att_rcs[7], center + _V( 1.4879066, -1.46215, 14.9754168 ), _V( 1.0, 0.0, 0.0 ) );//F4R
-	AddRCSExhaust( th_att_rcs[9], center + _V( -1.7653, -1.094358, 15.027182 ), _V( -1.0, 0.0, 0.0 ) );//F1L
-	AddRCSExhaust( th_att_rcs[9], center + _V( -1.4879066, -1.46215, 14.9754168 ), _V( -1.0, 0.0, 0.0 ) );//F3L
-
-	AddRCSExhaust( th_att_rcs[8], center + _V( -3.806698, 1.0715, -14.2674 ), _V( -1.0, 0.0, 0.0 ) );//L4L
-	AddRCSExhaust( th_att_rcs[8], center + _V( -3.806698, 1.0715, -14.5976 ), _V( -1.0, 0.0, 0.0 ) );//L2L
-	AddRCSExhaust( th_att_rcs[8], center + _V( -3.806698, 1.0715, -14.9278 ), _V( -1.0, 0.0, 0.0 ) );//L3L
-	AddRCSExhaust( th_att_rcs[8], center + _V( -3.806698, 1.0715, -15.258 ), _V( -1.0, 0.0, 0.0 ) );//L1L
-
-	AddRCSExhaust( th_att_rcs[10], center + _V( 3.806698, 1.0715, -14.2674 ), _V( 1.0, 0.0, 0.0 ) );//R4R
-	AddRCSExhaust( th_att_rcs[10], center + _V( 3.806698, 1.0715, -14.5976 ), _V( 1.0, 0.0, 0.0 ) );//R2R
-	AddRCSExhaust( th_att_rcs[10], center + _V( 3.806698, 1.0715, -14.9278 ), _V( 1.0, 0.0, 0.0 ) );//R3R
-	AddRCSExhaust( th_att_rcs[10], center + _V( 3.806698, 1.0715, -15.258 ), _V( 1.0, 0.0, 0.0 ) );//R1R
-
-	AddRCSExhaust( th_att_lin[7], center + _V( 1.7653, -1.094358, 15.027182 ), _V( 1.0, 0.0, 0.0 ) );//F2R
-	AddRCSExhaust( th_att_lin[7], center + _V( 1.4879066, -1.46215, 14.9754168 ), _V( 1.0, 0.0, 0.0 ) );//F4R
-	AddRCSExhaust( th_att_lin[9], center + _V( -1.7653, -1.094358, 15.027182 ), _V( -1.0, 0.0, 0.0 ) );//F1L
-	AddRCSExhaust( th_att_lin[9], center + _V( -1.4879066, -1.46215, 14.9754168 ), _V( -1.0, 0.0, 0.0 ) );//F3L
-
-	AddRCSExhaust( th_att_lin[10], center + _V( -3.806698, 1.0715, -14.2674 ), _V( -1.0, 0.0, 0.0 ) );//L4L
-	AddRCSExhaust( th_att_lin[10], center + _V( -3.806698, 1.0715, -14.5976 ), _V( -1.0, 0.0, 0.0 ) );//L2L
-	AddRCSExhaust( th_att_lin[10], center + _V( -3.806698, 1.0715, -14.9278 ), _V( -1.0, 0.0, 0.0 ) );//L3L
-	AddRCSExhaust( th_att_lin[10], center + _V( -3.806698, 1.0715, -15.258 ), _V( -1.0, 0.0, 0.0 ) );//L1L
-
-	AddRCSExhaust( th_att_lin[8], center + _V( 3.806698, 1.0715, -14.2674 ), _V( 1.0, 0.0, 0.0 ) );//R4R
-	AddRCSExhaust( th_att_lin[8], center + _V( 3.806698, 1.0715, -14.5976 ), _V( 1.0, 0.0, 0.0 ) );//R2R
-	AddRCSExhaust( th_att_lin[8], center + _V( 3.806698, 1.0715, -14.9278 ), _V( 1.0, 0.0, 0.0 ) );//R3R
-	AddRCSExhaust( th_att_lin[8], center + _V( 3.806698, 1.0715, -15.258 ), _V( 1.0, 0.0, 0.0 ) );//R1R
-
-	// RL, RR
-	if (!bRCSDefined) {
-		th_att_rcs[11] = CreateThruster(_V(1.6, 0, 15.5), _V( -0.601815, 0.798636, 0.0 ), RCS_THRUST, ph_frcs, RCS_ISP0, RCS_ISP1);
-		th_att_rcs[12] = CreateThruster(_V(-2.7, 0, -15.5), _V(0, -1, 0), RCS_THRUST, ph_lrcs, RCS_ISP0, RCS_ISP1);
-		th_att_rcs[13] = CreateThruster(_V(2.7, 0, -15.5), _V(-0.2844, 0.9481, 0.1422), RCS_THRUST, ph_rrcs, RCS_ISP0, RCS_ISP1);
-		th_att_rcs[14] = CreateThruster(_V(-1.6, 0, 15.5), _V( 0.601815, 0.798636, 0.0 ), RCS_THRUST, ph_frcs, RCS_ISP0, RCS_ISP1);
-		th_att_rcs[15] = CreateThruster(_V(-2.7, 0, -15.5), _V(0.2844, 0.9481, 0.1422), RCS_THRUST, ph_lrcs, RCS_ISP0, RCS_ISP1);
-		th_att_rcs[16] = CreateThruster(_V(2.7, 0, -15.5), _V(0, -1, 0), RCS_THRUST, ph_rrcs, RCS_ISP0, RCS_ISP1);
-		thg_rollleft = CreateThrusterGroup(th_att_rcs + 11, 3, static_cast<THGROUP_TYPE>(THGROUP_USER + 8));
-		thg_rollright = CreateThrusterGroup(th_att_rcs + 14, 3, static_cast<THGROUP_TYPE>(THGROUP_USER + 9));
-	}
-	else { // update thruster positions
-		SetThrusterRef(th_att_rcs[11], _V(1.6, 0, 15.5));
-		SetThrusterRef(th_att_rcs[12], _V(-2.7, 0, -15.5));
-		SetThrusterRef(th_att_rcs[13], _V(2.7, 0, -15.5));
-		SetThrusterRef(th_att_rcs[14], _V(-1.6, 0, 15.5));
-		SetThrusterRef(th_att_rcs[15], _V(-2.7, 0, -15.5));
-		SetThrusterRef(th_att_rcs[16], _V(2.7, 0, -15.5));
-	}
-
-	AddRCSExhaust( th_att_rcs[11], center + _V( 1.560068, -1.52057, 15.759464 ), _V( 0.601815, -0.798636, 0.0 ) );//F2D
-	AddRCSExhaust( th_att_rcs[11], center + _V( 1.682242, -1.482724, 15.388624 ), _V( 0.601815, -0.798636, 0.0 ) );//F4D
-
-	AddRCSExhaust( th_att_rcs[14], center + _V( -1.560068, -1.52057, 15.759464 ), _V( -0.601815, -0.798636, 0.0 ) );//F1D
-	AddRCSExhaust( th_att_rcs[14], center + _V( -1.682242, -1.482724, 15.388624 ), _V( -0.601815, -0.798636, 0.0 ) );//F3D
-
-	AddRCSExhaust( th_att_rcs[12], center + _V( -3.3528, 1.6176, -14.2674 ), _V( 0.0, 1.0, 0.0 ) );//L4U
-	AddRCSExhaust( th_att_rcs[12], center + _V( -3.3528, 1.6176, -14.5976 ), _V( 0.0, 1.0, 0.0 ) );//L2U
-	AddRCSExhaust( th_att_rcs[12], center + _V( -3.3528, 1.6176, -14.9278 ), _V( 0.0, 1.0, 0.0 ) );//L1U
-
-	AddRCSExhaust( th_att_rcs[16], center + _V( 3.3528, 1.6176, -14.2674 ), _V( 0.0, 1.0, 0.0 ) );//R4U
-	AddRCSExhaust( th_att_rcs[16], center + _V( 3.3528, 1.6176, -14.5976 ), _V( 0.0, 1.0, 0.0 ) );//R2U
-	AddRCSExhaust( th_att_rcs[16], center + _V( 3.3528, 1.6176, -14.9278 ), _V( 0.0, 1.0, 0.0 ) );//R1U
-
-	AddRCSExhaust( th_att_rcs[15], center + _V( -2.84353, 0.52286, -14.2674 ), _V( -0.2844, -0.9481, -0.1422 ) );//L4D
-	AddRCSExhaust( th_att_rcs[15], center + _V( -2.84353, 0.52286, -14.5976 ), _V( -0.2844, -0.9481, -0.1422 ) );//L2D
-	AddRCSExhaust( th_att_rcs[15], center + _V( -2.84353, 0.52286, -14.9278 ), _V( -0.2844, -0.9481, -0.1422 ) );//L3D
-
-	AddRCSExhaust( th_att_rcs[13], center + _V( 2.84353, 0.52286, -14.2674 ), _V( 0.2844, -0.9481, -0.1422 ) );//R4D
-	AddRCSExhaust( th_att_rcs[13], center + _V( 2.84353, 0.52286, -14.5976 ), _V( 0.2844, -0.9481, -0.1422 ) );//R2D
-	AddRCSExhaust( th_att_rcs[13], center + _V( 2.84353, 0.52286, -14.9278 ), _V( 0.2844, -0.9481, -0.1422 ) );//R3D
-
-	// +X, -X
-	if (!bRCSDefined) {
-		th_att_lin[11] = CreateThruster(_V(-3.3, 0, -16), _V(0.0, -0.173648, 0.984808), RCS_THRUST, ph_lrcs, RCS_ISP0, RCS_ISP1);
-		th_att_lin[12] = CreateThruster(_V(3.3, 0, -16), _V(0.0, -0.173648, 0.984808), RCS_THRUST, ph_rrcs, RCS_ISP0, RCS_ISP1);
-		th_att_lin[13] = CreateThruster(_V(0, 0, 16), _V(0, 0, -1), RCS_THRUST, ph_frcs, RCS_ISP0, RCS_ISP1);
-		thg_transfwd = CreateThrusterGroup(th_att_lin + 11, 2, static_cast<THGROUP_TYPE>(THGROUP_USER + 10));
-		thg_transaft = CreateThrusterGroup(th_att_lin + 13, 1, static_cast<THGROUP_TYPE>(THGROUP_USER + 11));
-	}
-	else { // update thruster positions
-		SetThrusterRef(th_att_lin[11], _V(-3.3, 0, -16));
-		SetThrusterRef(th_att_lin[12], _V(3.3, 0, -16));
-		SetThrusterRef(th_att_lin[13], _V(0, 0, 16));
-	}
-
-	AddRCSExhaust( th_att_lin[11], center + _V( -3.1496, 1.428624, -15.265366 ), _V( 0.0, 0.173648, -0.984808 ) );//L1A
-	AddRCSExhaust( th_att_lin[11], center + _V( -3.4798, 1.428624, -15.265366 ), _V( 0.0, 0.173648, -0.984808 ) );//L3A
-
-	AddRCSExhaust( th_att_lin[12], center + _V( 3.1496, 1.428624, -15.265366 ), _V( 0.0, 0.173648, -0.984808 ) );//R1A
-	AddRCSExhaust( th_att_lin[12], center + _V( 3.4798, 1.428624, -15.265366 ), _V( 0.0, 0.173648, -0.984808 ) );//R3A
-
-	AddRCSExhaust( th_att_lin[13], center + _V( 0.0, -0.56807, 16.448312 ), _V( 0.0, 0.0, 1.0 ) );//F3F
-	AddRCSExhaust( th_att_lin[13], center + _V( -0.3722116, -0.606043, 16.448312 ), _V( 0.0, 0.0, 1.0 ) );//F1F
-	AddRCSExhaust( th_att_lin[13], center + _V( 0.3722116, -0.606043, 16.448312 ), _V( 0.0, 0.0, 1.0 ) );//F2F
-
 	bRCSDefined = true;
+	rcsTolApplied = false;
+	ApplyRCSTolerances();
 }
 
 void Atlantis::AddRCSExhaust(THRUSTER_HANDLE thX, const VECTOR3& pos, const VECTOR3& dir)
@@ -3310,7 +3009,7 @@ void Atlantis::AddVRCSExhaust(THRUSTER_HANDLE thX, const VECTOR3& pos, const VEC
 	const double eh = 0.5754;             // exhaust length scale
 	const double ew1 = 0.1; // exhaust width scales
 	AddRCSFlame( thX, pos, dir, eh, ew1, true );
-	vExStreamRCS.push_back(AddExhaustStream(thX, pos, &RCS_PSSpec));
+	vExStreamRCS.push_back(AddExhaustStream(thX, pos, &RCS_VPSSpec));
 }
 
 void Atlantis::AddRCSFlame( THRUSTER_HANDLE thX, const VECTOR3& pos, const VECTOR3& dir, double length, double width, bool followsLevel )
@@ -3336,7 +3035,67 @@ void Atlantis::AddRCSFlame( THRUSTER_HANDLE thX, const VECTOR3& pos, const VECTO
 
 double Atlantis::RCSThrustReduction( void ) const
 {
-	return rcsmath::ThrustReduction( oapiGetTimeAcceleration(), GetOptions()->RCSFullThrustAcceleration() );
+	return rcsmath::ThrustReduction( oapiGetTimeAcceleration() );
+}
+
+double Atlantis::RCSPropellantTotal( void ) const
+{
+	return GetPropellantMass( ph_frcs ) + GetPropellantMass( ph_lrcs ) + GetPropellantMass( ph_rrcs );
+}
+
+flightlog::Writer* Atlantis::HydLog( void )
+{
+	if (!GetOptions()->FlightDataLog())
+	{
+		hydLogFile.Close();
+		return NULL;
+	}
+	if (!hydLogFile.IsOpen())
+	{
+		char tag[64];
+		sprintf_s( tag, sizeof( tag ), "%s_hyd", GetName() );
+		if (!hydLogFile.Open( tag )) return NULL;
+		hydLogFile.Line( "# SSV flight data log of the hydraulics, built %s %s", __DATE__, __TIME__ );
+		hydLogFile.Line( "# APU: state of an APU (when the switches or the state change, and every 10 s of simulated time while it works or is hot); temperatures in F, pressures in psi, speed in %%" );
+		hydLogFile.Line( "# SURF: aerosurfaces once a second in the air: q [Pa], pressures of the 3 systems, system and number of elevons that feed each elevon (LOB,LIB,RIB,ROB), commands and positions [deg]," );
+		hydLogFile.Line( "#       limited = share of the steps in which the rate limit of the actuator held the elevons back, motor = output of the rudder/speedbrake and body flap drive (1 = 3 motors)" );
+		hydLogFile.Line( "# BRAKE: once a second while a pedal is pressed: seat of the view (0 = CDR, 1 = PLT), the pedals, MNA/MNB/MNC, anti-skid, protection of the touchdown, pressures, power of the hydraulics, brake level applied, WOW (NLG,LMG,RMG), roll/yaw AUTO" );
+	}
+	return &hydLogFile;
+}
+
+flightlog::Writer* Atlantis::RotLog( void )
+{
+	if (!GetOptions()->FlightDataLog())
+	{
+		rotLogFile.Close();
+		return NULL;
+	}
+	if (!rotLogFile.IsOpen())
+	{
+		char tag[64];
+		sprintf_s( tag, sizeof( tag ), "%s_rot", GetName() );
+		if (!rotLogFile.Open( tag )) return NULL;
+		rotLogFile.Line( "# SSV flight data log of the rotation, built %s %s", __DATE__, __TIME__ );
+		rotLogFile.Line( "# ROT: angular rate w (deg/s, axes of Orbiter: x pitch, y yaw, z roll) once a second of simulated time while it changes or every 10 s; acc = time acceleration, mass in kg, pmi in m^2, cog in m" );
+		rotLogFile.Line( "# PMI, COG: a change of the moments of inertia or of the c.g. (the arm and its payload move): angular rate (w0 before, w1 after the call), velocity of the vessel (v0, v1, m/s), old and new values" );
+	}
+	return &rotLogFile;
+}
+
+bool Atlantis::RCSRailsConsume( double dt, double kgPerHour )
+{
+	PROPELLANT_HANDLE tanks[3] = {ph_frcs, ph_lrcs, ph_rrcs};
+	double total = 0.0;
+	for (int i = 0; i < 3; i++) total += GetPropellantMass( tanks[i] );
+	const double use = kgPerHour * dt / 3600.0;
+	if (total <= use) return false;// the propellant is gone: the attitude is not held for nothing
+	for (int i = 0; i < 3; i++)
+	{
+		const double m = GetPropellantMass( tanks[i] );
+		SetPropellantMass( tanks[i], m - (use * m / total) );// from every tank in proportion
+	}
+	return true;
 }
 
 void Atlantis::UpdateRCSFlames( void )
@@ -4089,42 +3848,173 @@ void Atlantis::ClearMeshes()
 	mesh_vc = MESH_UNDEFINED;
 }
 
-void Atlantis::EnableThrusters(const int Thrusters[], int nThrusters)
+void Atlantis::SetRotationJets( int axis, bool nose, bool aft )
 {
-	for (int i = 0; i < nThrusters; i++)
+	if ((axis < 0) || (axis > 2)) return;
+	rcsNoseOn[axis] = nose;
+	rcsAftOn[axis] = aft;
+}
+
+void Atlantis::SetJetFailed( int jet, bool failed )
+{
+	if ((jet < 0) || (jet >= rcsjets::COUNT)) return;
+	if (failed) rcsFailed |= rcsjets::Bit( jet );
+	else rcsFailed &= ~rcsjets::Bit( jet );
+	oapiWriteLogV( "(SSV_OV) [INFO] RCS jet %s %s", rcsjets::Jets()[jet].name, failed ? "failed" : "repaired" );
+}
+
+/** Applies the tolerances of the parts of every jet (thrust, Isp, valve delays) when the options or the seed change. */
+void Atlantis::ApplyRCSTolerances( void )
+{
+	const disp::Mode dm = GetRCSDispersion();
+	const uint64_t seed = GetToleranceSeed();
+	if (rcsTolApplied && (rcsTolOn == dm.tolerances) && (rcsTolScale == dm.scale) && (rcsTolSeed == seed)) return;
+	rcsTolApplied = true;
+	rcsTolOn = dm.tolerances;
+	rcsTolScale = dm.scale;
+	rcsTolSeed = seed;
+	for (int j = 0; j < rcsjets::COUNT; j++)
 	{
-		switch (Thrusters[i])
+		const uint32_t base = disp::id::RCS_JET + (16u * static_cast<uint32_t>(j));
+		rcsTolThrust[j] = dm.tolerances ? disp::Rel( 1.0, rcsjets::SIGMA_THRUST, disp::Fixed( seed, base + rcsjets::TOL_THRUST ), dm.scale ) : 1.0;
+		rcsTolIsp[j] = dm.tolerances ? disp::Rel( 1.0, rcsjets::SIGMA_ISP, disp::Fixed( seed, base + rcsjets::TOL_ISP ), dm.scale ) : 1.0;
+		rcsTolDelay[j] = dm.tolerances ? disp::Rel( 1.0, rcsjets::SIGMA_DELAY, disp::Fixed( seed, base + rcsjets::TOL_DELAY ), dm.scale ) : 1.0;
+	}
+	// the installation (direction) is applied to the existing thrusters
+	if (bRCSDefined)
+	{
+		for (int j = 0; j < rcsjets::COUNT; j++)
 		{
-			case 0:
-			case 3:
-			case 6:
-			case 8:
-			case 10:
-			case 13:
-				SetThrusterResource(th_att_rcs[Thrusters[i]], ph_frcs);
-				break;
-			case 1:
-			case 4:
-			case 7:
-			case 11:
-			case 14:
-				SetThrusterResource(th_att_rcs[Thrusters[i]], ph_lrcs);
-				break;
-			case 2:
-			case 5:
-			case 9:
-			case 12:
-			case 15:
-				SetThrusterResource(th_att_rcs[Thrusters[i]], ph_rrcs);
-				break;
+			SetThrusterDir( th_rcs[j], rcsjets::InstalledDirection( j, seed, dm ) );
 		}
 	}
 }
 
-void Atlantis::DisableThrusters(const int Thrusters[], int nThrusters)
+uint64_t Atlantis::RCSRotationSet( int axis, int sign, int k, bool vernier )
 {
-	for (int i = 0; i < nThrusters; i++) {
-		SetThrusterResource(th_att_rcs[Thrusters[i]], NULL);
+	uint64_t excluded = rcsFailed;
+	if (!rcsNoseOn[axis]) excluded |= rcsjets::RegionMask( true );
+	if (!rcsAftOn[axis]) excluded |= rcsjets::RegionMask( false );
+	const std::tuple<int, int, int, int, uint64_t> key( axis, sign, k, vernier ? 1 : 0, excluded );
+	const auto it = rcsSelections.find( key );
+	if (it != rcsSelections.end()) return it->second;
+	const uint64_t set = rcsjets::SelectRotation( axis, sign, k, vernier, excluded, _V( 0.0, 0.0, 0.0 ) );
+	rcsSelections[key] = set;
+	return set;
+}
+
+uint64_t Atlantis::RCSTranslationSet( int axis, int sign )
+{
+	const std::tuple<int, int, int, int, uint64_t> key( axis + 10, sign, 0, 0, rcsFailed );
+	const auto it = rcsSelections.find( key );
+	if (it != rcsSelections.end()) return it->second;
+	const uint64_t set = rcsjets::SelectTranslation( axis, sign, rcsFailed, _V( 0.0, 0.0, 0.0 ) );
+	rcsSelections[key] = set;
+	return set;
+}
+
+/**
+ * Commands of the DAP to the jets. Rotation: sign and level (1/3, 2/3 and 1 of the primary jets for 1, 2 and 3 couples; 0.1 for the vernier
+ * jets, all divided by the reduction of the thrust with time acceleration); translation: sign. The jets are selected from their geometry
+ * (the ones that work), and every jet has its valve: delays, minimum on-time, tolerances and noise of each firing.
+ */
+void Atlantis::UpdateRCSJets( double simt, double simdt )
+{
+	using namespace rcsjets;
+	const double red = RCSThrustReduction();// >= 1
+	uint64_t on = 0;
+
+	// diagnostics of the RCS with time acceleration: the hand controller is deflected and no jet is commanded
+	{
+		static double lastRCSLog = -100.0;
+		const double acc = oapiGetTimeAcceleration();
+		const double defl = fabs( LeftRHC[0] ) + fabs( LeftRHC[1] ) + fabs( LeftRHC[2] ) + fabs( RightRHC[0] ) + fabs( RightRHC[1] ) + fabs( RightRHC[2] ) + fabs( AftRHC[0] ) + fabs( AftRHC[1] ) + fabs( AftRHC[2] );
+		const double cmd = fabs( RotThrusterCommands[PITCH].GetVoltage() ) + fabs( RotThrusterCommands[YAW].GetVoltage() ) + fabs( RotThrusterCommands[ROLL].GetVoltage() );
+		if ((acc > 1.0) && (defl > 0.3) && (cmd < 0.0001) && ((simt - lastRCSLog) > 10.0))
+		{
+			lastRCSLog = simt;
+			oapiWriteLogV( "(SSV_OV) [INFO] RCS: time acceleration x%.1f, hand controller deflected (L %.2f %.2f %.2f, R %.2f %.2f %.2f, A %.2f %.2f %.2f) and no rotation jet commanded (ControlRMS %d)", acc,
+				LeftRHC[0], LeftRHC[1], LeftRHC[2], RightRHC[0], RightRHC[1], RightRHC[2], AftRHC[0], AftRHC[1], AftRHC[2], ControlRMS ? 1 : 0 );
+		}
+	}
+
+	ApplyRCSTolerances();
+
+	// rotation
+	const int rotAxis[3] = {PITCH, YAW, ROLL};
+	for (int i = 0; i < 3; i++)
+	{
+		const double cmd = RotThrusterCommands[rotAxis[i]].GetVoltage();
+		if (fabs( cmd ) > 0.0001)
+		{
+			const int sign = (cmd > 0.0) ? 1 : -1;
+			const double mag = fabs( cmd ) * red;// level of the DAP without the reduction with time acceleration
+			bool vernier;
+			const int k = RotationJetCount( i, mag, vernier );
+			on |= RCSRotationSet( i, sign, k, vernier );
+			if (lastRotCommand[rotAxis[i]] != sign)
+			{
+				lastRotCommand[rotAxis[i]] = sign;
+				SoundPlay( pXRSound, vernier ? VRCS_SOUND : PRCS_SOUND );
+			}
+		}
+		else lastRotCommand[rotAxis[i]] = 0;
+	}
+
+	// SERC: the jets of the roll of the SERC logic
+	{
+		static const char* const rollLeft[] = {"L1U", "L2U", "L4U", "R2D", "R3D", "R4D", "F2R", "F4R", "R1R", "R2R", "R3R", "R4R"};
+		static const char* const rollRight[] = {"R1U", "R2U", "R4U", "L2D", "L3D", "L4D", "F1L", "F3L", "L1L", "L2L", "L3L", "L4L"};
+		const double serc = RotThrusterCommands[3].GetVoltage();
+		if (fabs( serc ) > 0.0001)
+		{
+			const char* const* names = (serc > 0.0) ? rollLeft : rollRight;
+			for (int n = 0; n < 12; n++) on |= Bit( Find( names[n] ) );
+		}
+	}
+
+	// translation: 0 = forward (+), 1 = right (+), 2 = down (+)
+	for (int i = 0; i < 3; i++)
+	{
+		const double cmd = TransThrusterCommands[i].GetVoltage();
+		if (fabs( cmd ) > 0.0001)
+		{
+			const int sign = (cmd > 0.0) ? 1 : -1;
+			on |= RCSTranslationSet( i, (i == 2) ? -sign : sign );
+			if (lastTransCommand[i] != sign)
+			{
+				lastTransCommand[i] = sign;
+				SoundPlay( pXRSound, PRCS_SOUND );
+			}
+		}
+		else lastTransCommand[i] = 0;
+	}
+
+	// the valves of the jets
+	const rcsjets::Def* jets = Jets();
+	const disp::Mode dm = GetRCSDispersion();
+	for (int j = 0; j < COUNT; j++)
+	{
+		const bool command = ((on & Bit( j )) != 0) && ((rcsFailed & Bit( j )) == 0);
+		if (command && !rcsValve[j].requested)
+		{
+			// a new firing: the noise of this firing
+			if (jets[j].vernier) rcsUse.pulsesVernier++;
+			else rcsUse.pulsesPrimary++;
+			rcsFireThrust[j] = dm.noise ? disp::Rel( 1.0, NOISE_THRUST, rcsNoise.Normal(), dm.scale ) : 1.0;
+			rcsFireIsp[j] = dm.noise ? disp::Rel( 1.0, NOISE_ISP, rcsNoise.Normal(), dm.scale ) : 1.0;
+			rcsFireDelay[j] = dm.noise ? disp::Rel( 1.0, NOISE_DELAY, rcsNoise.Normal(), dm.scale ) : 1.0;
+			const double isp0 = (jets[j].vernier ? VERNIER_ISP : PRIMARY_ISP) * 9.80665 * rcsTolIsp[j] * rcsFireIsp[j];
+			SetThrusterIsp( th_rcs[j], isp0, isp0 * 0.75 );
+		}
+		const double delayFactor = rcsTolDelay[j] * rcsFireDelay[j];
+		const double onDelay = (jets[j].vernier ? VERNIER_DELAY_ON : PRIMARY_DELAY_ON) * delayFactor;
+		const double offDelay = (jets[j].vernier ? VERNIER_DELAY_OFF : PRIMARY_DELAY_OFF) * delayFactor;
+		const double share = StepValve( rcsValve[j], command, simdt, onDelay, offDelay );
+		if (jets[j].vernier) rcsUse.onTimeVernier += share * simdt;
+		else rcsUse.onTimePrimary += share * simdt;
+		const double level = share * rcsTolThrust[j] * rcsFireThrust[j] / (RCS_THRUST_ROOM * red);
+		SetThrusterLevel( th_rcs[j], (level > 1.0) ? 1.0 : level );
 	}
 }
 
@@ -4342,19 +4232,27 @@ void Atlantis::UpdateControllers( double dt )
 			RightRHCTrim[i] = 0;
 		}
 
-		const double rhcpitch = HCAxis( HandControllers::RHC_PITCH, GetManualControlLevel( THGROUP_ATT_PITCHUP ) - GetManualControlLevel( THGROUP_ATT_PITCHDOWN ) );
+		// Shift: fine adjustment, the deflection of the keys is a fifth (not of the game controllers)
+		constexpr float RMS_FINE_DEFLECTION = 0.2f;
+		const float fine = rmsFineKey ? RMS_FINE_DEFLECTION : 1.0f;
+		const auto keyLevel = [&]( THGROUP_TYPE plus, THGROUP_TYPE minus ) -> double
+		{
+			return (fine * (GetManualControlLevel( plus, MANCTRL_ATTMODE, MANCTRL_KEYBOARD ) - GetManualControlLevel( minus, MANCTRL_ATTMODE, MANCTRL_KEYBOARD ))) + (GetManualControlLevel( plus, MANCTRL_ATTMODE, MANCTRL_JOYSTICK ) - GetManualControlLevel( minus, MANCTRL_ATTMODE, MANCTRL_JOYSTICK ));
+		};
+		const double keyPitch = GetManualControlLevel( THGROUP_ATT_PITCHUP, MANCTRL_ATTMODE, MANCTRL_KEYBOARD ) - GetManualControlLevel( THGROUP_ATT_PITCHDOWN, MANCTRL_ATTMODE, MANCTRL_KEYBOARD );
+		const double rhcpitch = HCAxis( HandControllers::RHC_PITCH, keyLevel( THGROUP_ATT_PITCHUP, THGROUP_ATT_PITCHDOWN ) );
 		RMS_RHCInput[PITCH].SetLine( 5.0f * static_cast<float>(rhcpitch) );
-		RMS_RHCInput[YAW].SetLine( 5.0f * static_cast<float>(HCAxis( HandControllers::RHC_YAW, GetManualControlLevel( THGROUP_ATT_YAWRIGHT ) - GetManualControlLevel( THGROUP_ATT_YAWLEFT ) )) );
-		RMS_RHCInput[ROLL].SetLine( 5.0f * static_cast<float>(HCAxis( HandControllers::RHC_ROLL, GetManualControlLevel( THGROUP_ATT_BANKRIGHT ) - GetManualControlLevel( THGROUP_ATT_BANKLEFT ) )) );
+		RMS_RHCInput[YAW].SetLine( 5.0f * static_cast<float>(HCAxis( HandControllers::RHC_YAW, keyLevel( THGROUP_ATT_YAWRIGHT, THGROUP_ATT_YAWLEFT ) )) );
+		RMS_RHCInput[ROLL].SetLine( 5.0f * static_cast<float>(HCAxis( HandControllers::RHC_ROLL, keyLevel( THGROUP_ATT_BANKRIGHT, THGROUP_ATT_BANKLEFT ) )) );
 		if (GetAttitudeMode() == RCS_ROT) { // use arrow, Ins/Del keys for translation input
-			RMS_THCInput[0].SetLine( 5.0f * static_cast<float>(THC_AltInput.x) );
-			RMS_THCInput[1].SetLine( 5.0f * static_cast<float>(THC_AltInput.y) );
-			RMS_THCInput[2].SetLine( 5.0f * static_cast<float>(THC_AltInput.z)) ;
+			RMS_THCInput[0].SetLine( 5.0f * fine * static_cast<float>(THC_AltInput.x) );
+			RMS_THCInput[1].SetLine( 5.0f * fine * static_cast<float>(THC_AltInput.y) );
+			RMS_THCInput[2].SetLine( 5.0f * fine * static_cast<float>(THC_AltInput.z)) ;
 		}
 		else {
-			RMS_THCInput[0].SetLine( 5.0f * static_cast<float>(GetManualControlLevel( THGROUP_ATT_BACK ) - GetManualControlLevel( THGROUP_ATT_FORWARD )) );
-			RMS_THCInput[1].SetLine( 5.0f * static_cast<float>(GetManualControlLevel( THGROUP_ATT_RIGHT ) - GetManualControlLevel( THGROUP_ATT_LEFT )) );
-			RMS_THCInput[2].SetLine( 5.0f * static_cast<float>(GetManualControlLevel( THGROUP_ATT_UP ) - GetManualControlLevel( THGROUP_ATT_DOWN )) );
+			RMS_THCInput[0].SetLine( 5.0f * fine * static_cast<float>(keyLevel( THGROUP_ATT_BACK, THGROUP_ATT_FORWARD )) );
+			RMS_THCInput[1].SetLine( 5.0f * fine * static_cast<float>(keyLevel( THGROUP_ATT_RIGHT, THGROUP_ATT_LEFT )) );
+			RMS_THCInput[2].SetLine( 5.0f * fine * static_cast<float>(keyLevel( THGROUP_ATT_UP, THGROUP_ATT_DOWN )) );
 		}
 
 		// THC axes of the game controllers
@@ -4365,15 +4263,13 @@ void Atlantis::UpdateControllers( double dt )
 			if (pHC->HasInput( HandControllers::THC_Z )) RMS_THCInput[2].SetLine( 5.0f * static_cast<float>(pHC->GetAxis( HandControllers::THC_Z )) );
 		}
 
-		// use RHC pitch commands to drive single joint input
-		// in theory, these discrete lines should only be set if RMS is in SINGLE or DIRECT mode
-		// in practice, RMS code only looks at these discrete lines if in appropriate mode
-		if (rhcpitch > 0.5) {
+		// the keys drive the single joint (SINGLE, DIRECT), the game controllers do not: a stick that does not center would move the joint
+		if (keyPitch > 0.5) {
 			RMSDrivePlus.SetLine();
 			RMSDriveMinus.ResetLine();
 			lastRMSSJCommand = 1;
 		}
-		else if (rhcpitch < -0.5) {
+		else if (keyPitch < -0.5) {
 			RMSDrivePlus.ResetLine();
 			RMSDriveMinus.SetLine();
 			lastRMSSJCommand = -1;
@@ -5570,6 +5466,9 @@ void Atlantis::SetupSound( void )
 	pXRSound->LoadWav( APU_1_SHUTDOWN, APU_SHUTDOWN_FILE, XRSound::PlaybackType::BothViewMedium );
 	pXRSound->LoadWav( APU_2_SHUTDOWN, APU_SHUTDOWN_FILE, XRSound::PlaybackType::BothViewMedium );
 	pXRSound->LoadWav( APU_3_SHUTDOWN, APU_SHUTDOWN_FILE, XRSound::PlaybackType::BothViewMedium );
+	pXRSound->LoadWav( APU_1_BANG, APU_BANG_FILE, XRSound::PlaybackType::Wind );// outside only
+	pXRSound->LoadWav( APU_2_BANG, APU_BANG_FILE, XRSound::PlaybackType::Wind );
+	pXRSound->LoadWav( APU_3_BANG, APU_BANG_FILE, XRSound::PlaybackType::Wind );
 
 	// VC
 	pXRSound->LoadWav( SWITCH_GUARD_SOUND, SWITCH_GUARD_FILE, XRSound::PlaybackType::InternalOnly );
@@ -5648,8 +5547,9 @@ void Atlantis::UpdateRMSControl( void )
 	// for the RCS everywhere else (Ctrl+A inverts it, until the station is changed)
 	const bool focused = oapiCameraInternal() && (oapiGetFocusObject() == GetHandle());
 	const bool inStation = (pRMS != NULL) && focused && (VCMode == VC_RMSSTATION);
-	// in an external view there is no station: the hand controllers go to the arm if it is selected and has power (RCS otherwise), Ctrl+A gives the other one
-	const bool external = (pRMS != NULL) && !oapiCameraInternal() && (oapiGetFocusObject() == GetHandle()) && pRMS->IsPowered();
+	// in an external view nobody sits in a station: the last one counts (VCMode stays as it was), so the hand controllers go to the arm if the last place was the
+	// aft station of the RMS and to the RCS otherwise; Ctrl+A gives the other one, in the external view too
+	const bool external = (pRMS != NULL) && !oapiCameraInternal() && (oapiGetFocusObject() == GetHandle()) && (VCMode == VC_RMSSTATION);
 	if (VCMode != RMSControlStation)
 	{
 		const bool changed = (RMSControlStation != -1);
@@ -5995,7 +5895,15 @@ void Atlantis::UpdateMassAndCoG( bool bUpdateAttachedVessels )
 		}
 		if ((fabs( newPMI.x - appliedPMI.x ) > (0.002 * appliedPMI.x)) || (fabs( newPMI.y - appliedPMI.y ) > (0.002 * appliedPMI.y)) || (fabs( newPMI.z - appliedPMI.z ) > (0.002 * appliedPMI.z)))
 		{
+			VECTOR3 w0, w1, v0, v1;
+			GetAngularVel( w0 );
+			GetGlobalVel( v0 );
 			SetPMI( newPMI );
+			GetAngularVel( w1 );
+			GetGlobalVel( v1 );
+			if (flightlog::Writer* rl = RotLog())
+				rl->Line( "PMI simt=%.2f acc=%.1f w0=%.5f,%.5f,%.5f w1=%.5f,%.5f,%.5f dv=%.6f old=%.2f,%.2f,%.2f new=%.2f,%.2f,%.2f", oapiGetSimTime(), oapiGetTimeAcceleration(),
+					w0.x * DEG, w0.y * DEG, w0.z * DEG, w1.x * DEG, w1.y * DEG, w1.z * DEG, length( v1 - v0 ), appliedPMI.x, appliedPMI.y, appliedPMI.z, newPMI.x, newPMI.y, newPMI.z );
 			appliedPMI = newPMI;
 		}
 	}
@@ -6003,18 +5911,37 @@ void Atlantis::UpdateMassAndCoG( bool bUpdateAttachedVessels )
 	if (length( newCoG - currentCoG ) > 0.1)// to avoid rounding errors during launch, only shift CG when magnitude of change is large enough
 	{
 		VECTOR3 CoGShift = newCoG - currentCoG;
+		VECTOR3 w0, w1, v0, v1;
+		const auto tStart = std::chrono::steady_clock::now();
+		GetAngularVel( w0 );
+		GetGlobalVel( v0 );
 		ShiftCG( CoGShift );
+		GetAngularVel( w1 );
+		GetGlobalVel( v1 );
+		if (flightlog::Writer* rl = RotLog())
+			rl->Line( "COG simt=%.2f acc=%.1f w0=%.5f,%.5f,%.5f w1=%.5f,%.5f,%.5f dv=%.6f shift=%.3f,%.3f,%.3f old=%.3f,%.3f,%.3f new=%.3f,%.3f,%.3f", oapiGetSimTime(), oapiGetTimeAcceleration(),
+				w0.x * DEG, w0.y * DEG, w0.z * DEG, w1.x * DEG, w1.y * DEG, w1.z * DEG, length( v1 - v0 ), CoGShift.x, CoGShift.y, CoGShift.z, currentCoG.x, currentCoG.y, currentCoG.z, newCoG.x, newCoG.y, newCoG.z );
 		currentCoG = newCoG;
 		orbiter_ofs = -currentCoG;
 		oapiWriteLogV( "(SSV_OV) [INFO] OV Mass: %flbs CoG: Xo%+f Yo%+f Zo%+f", totalMass * KG2LBM, (24.239 - newCoG.z) / IN2M, newCoG.x / IN2M, (newCoG.y + 10.5871) / IN2M );
 
+		const auto tShift = std::chrono::steady_clock::now();
 		DefineTouchdownPoints();
+		const auto tTouch = std::chrono::steady_clock::now();
 
 		CreateAttControls_RCS( orbiter_ofs ); // update RCS thruster positions
+		const auto tRCS = std::chrono::steady_clock::now();
 
 		psubsystems->ShiftCG( -CoGShift );
+		const auto tSub = std::chrono::steady_clock::now();
 
 		if (hStackAirfoil) EditAirfoil( hStackAirfoil, 1, CoGShift, NULL, 0.0, 0.0, 0.0 );
+		if (flightlog::Writer* rl = RotLog())
+		{
+			// wall time of the parts of the change of the c.g. (a freeze of the simulation when the arm moves would show here)
+			const auto ms = []( std::chrono::steady_clock::time_point a, std::chrono::steady_clock::time_point b ) { return std::chrono::duration<double, std::milli>( b - a ).count(); };
+			rl->Line( "COGTIME simt=%.2f ms: ShiftCG=%.2f touchdown=%.2f rcs=%.2f subsystems=%.2f total=%.2f", oapiGetSimTime(), ms( tStart, tShift ), ms( tShift, tTouch ), ms( tTouch, tRCS ), ms( tRCS, tSub ), ms( tStart, std::chrono::steady_clock::now() ) );
+		}
 		//if (hOVAirfoilV) EditAirfoil( hOVAirfoilV, 1, orbiter_ofs, NULL, 0.0, 0.0, 0.0 );
 		//if (hOVAirfoilH) EditAirfoil( hOVAirfoilH, 1, orbiter_ofs, NULL, 0.0, 0.0, 0.0 );
 

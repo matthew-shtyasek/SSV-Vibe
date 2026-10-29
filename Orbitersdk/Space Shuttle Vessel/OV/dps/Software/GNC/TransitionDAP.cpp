@@ -167,7 +167,7 @@ namespace dps
 		Error = -Error * DEG;
 
 		VECTOR3 Limits;
-		double timeAcc = rcsmath::ThrustReduction( oapiGetTimeAcceleration(), STS()->GetOptions()->RCSFullThrustAcceleration() );// 1 up to the time acceleration of the option
+		double timeAcc = rcsmath::ThrustReduction( oapiGetTimeAcceleration() );// the time acceleration (1 in real time)
 		double MaxThrusterLevel = 1.0/timeAcc;
 
 		VECTOR3 Torque;// HACK probably should use other values because of the ET

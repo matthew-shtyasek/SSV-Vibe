@@ -130,6 +130,7 @@ class LandingGear:public AtlantisSubsystem
 		double RMG;
 
 		bool NLG_NoWOW;
+		double brakeLogTime = -100.0;// flight data log of the brakes
 		bool LMG_NoWOW;
 		bool RMG_NoWOW;
 

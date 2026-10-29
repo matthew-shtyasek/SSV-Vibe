@@ -40,6 +40,7 @@
 
 
 #include <cmath>
+#include "Dispersion.h"
 
 
 namespace hydmodel
@@ -126,6 +127,12 @@ namespace hydmodel
 		double hydLeak;// [1/s] of the reservoir (a leak of the system, apart from the seals)
 		// results of the last step
 		double hydDuty, oilDuty;// spray of the boiler [0, 1] (share of the flow)
+		// dispersions of the parts of this system (1 = nominal, 0 = no offset), see ApplyTolerances
+		double tolOilHeat, tolHydHeat;// factors of the heating of the lube oil and of the hydraulic fluid
+		double tolOilCool, tolHydCool;// factors of the flow of the spray bars (cooling and water use)
+		double tolOilSet, tolHydSet;// [F] offsets of the set points of the controller of the boiler
+		double noiseCool;// factor of the flow of the spray at this moment (noise of each spray, changed by the caller)
+		double tolFreeze;// [F] offset of the temperature of the thermostats of the heaters of the water lines and of the vent
 	};
 
 	struct Input
@@ -167,7 +174,50 @@ namespace hydmodel
 		s.n2Leak = 0.0;
 		s.hydLeak = 0.0;
 		s.hydDuty = s.oilDuty = 0.0;
+		s.tolOilHeat = s.tolHydHeat = s.tolOilCool = s.tolHydCool = 1.0;
+		s.tolOilSet = s.tolHydSet = 0.0;
+		s.noiseCool = 1.0;
+		s.tolFreeze = 0.0;
 		return s;
+	}
+
+	// dispersions (1 sigma) of the parts of a system; the real ones are not published: estimates (the set points are in the manual with no tolerance)
+	inline constexpr double SIGMA_HEAT = 0.04;// relative; heating of the oil and of the fluid
+	inline constexpr double SIGMA_COOL = 0.06;// relative; flow of the spray bars
+	inline constexpr double SIGMA_OIL_SET = 3.0;// [F]
+	inline constexpr double SIGMA_HYD_SET = 1.5;// [F]
+	inline constexpr double SIGMA_NOISE_COOL = 0.03;// relative; flow of each spray (the pulses of 200 ms)
+	/** Parameters of a system in the identifiers of the tolerances (disp::id::HYD_WSB + 16 * system + parameter). */
+	enum TolParam {TOL_OIL_HEAT = 0, TOL_HYD_HEAT, TOL_OIL_COOL, TOL_HYD_COOL, TOL_OIL_SET, TOL_HYD_SET, TOL_FREEZE, TOL_WATER, TOL_N2, TOL_QTY};
+	inline constexpr double SIGMA_FREEZE = 3.0;// [F] thermostats of the heaters (the manual gives 55-65 F for the lines: +-5 F at 3 sigma would be 1.7); estimate
+	inline constexpr double SIGMA_WATER = 0.7;// [lb] water loaded in the tank of 142 lb; estimate
+	inline constexpr double SIGMA_N2 = 0.01;// relative; nitrogen of the tank of the boiler (2400 psi at 70 F); estimate
+	inline constexpr double SIGMA_QTY = 0.02;// share of the reservoir; fluid loaded in the reservoir (60%); estimate
+
+	/** Sets the tolerances of the parts of a system (0, 1, 2) of this vehicle; without them all the factors are 1 and the offsets 0. */
+	inline void ApplyTolerances( State& s, uint64_t seed, int system, const disp::Mode& mode )
+	{
+		const uint32_t base = disp::id::HYD_WSB + (16u * static_cast<uint32_t>(system));
+		const bool on = mode.tolerances;
+		s.tolOilHeat = on ? disp::Rel( 1.0, SIGMA_HEAT, disp::Fixed( seed, base + TOL_OIL_HEAT ), mode.scale ) : 1.0;
+		s.tolHydHeat = on ? disp::Rel( 1.0, SIGMA_HEAT, disp::Fixed( seed, base + TOL_HYD_HEAT ), mode.scale ) : 1.0;
+		s.tolOilCool = on ? disp::Rel( 1.0, SIGMA_COOL, disp::Fixed( seed, base + TOL_OIL_COOL ), mode.scale ) : 1.0;
+		s.tolHydCool = on ? disp::Rel( 1.0, SIGMA_COOL, disp::Fixed( seed, base + TOL_HYD_COOL ), mode.scale ) : 1.0;
+		s.tolOilSet = on ? disp::Abs( 0.0, SIGMA_OIL_SET, disp::Fixed( seed, base + TOL_OIL_SET ), mode.scale ) : 0.0;
+		s.tolHydSet = on ? disp::Abs( 0.0, SIGMA_HYD_SET, disp::Fixed( seed, base + TOL_HYD_SET ), mode.scale ) : 0.0;
+		s.tolFreeze = on ? disp::Abs( 0.0, SIGMA_FREEZE, disp::Fixed( seed, base + TOL_FREEZE ), mode.scale ) : 0.0;
+	}
+
+	/** Loads the boiler and the reservoir of a vehicle that starts new (not from a scenario) with the tolerances of its loading. */
+	inline void ApplyLoading( State& s, uint64_t seed, int system, const disp::Mode& mode )
+	{
+		if (!mode.tolerances) return;
+		const uint32_t base = disp::id::HYD_WSB + (16u * static_cast<uint32_t>(system));
+		s.water = disp::Abs( WATER_TANK, SIGMA_WATER, disp::Fixed( seed, base + TOL_WATER ), mode.scale );
+		s.water = (s.water > WATER_TANK) ? WATER_TANK : s.water;// the tank is full to the limit
+		s.n2 = disp::Rel( 1.0, SIGMA_N2, disp::Fixed( seed, base + TOL_N2 ), mode.scale );
+		s.n2 = (s.n2 > 1.0) ? 1.0 : s.n2;
+		s.hydQty = disp::Abs( QTY_INITIAL, SIGMA_QTY, disp::Fixed( seed, base + TOL_QTY ), mode.scale );
 	}
 
 	inline double Clamp01( double x )
@@ -211,10 +261,10 @@ namespace hydmodel
 	}
 
 	/** Temperature that the hydraulic fluid would have with no cooling at the load and the speed (steady state). */
-	inline double HydSteadyNoCooling( const Input& in )
+	inline double HydSteadyNoCooling( const Input& in, double heatFactor = 1.0 )
 	{
 		const double load = Clamp01( in.load );
-		return in.ambient + (HYD_RISE_MAX * (0.25 + (0.75 * load)) * (in.pumpNorm ? 1.0 : LOW_PRESSURE_HEAT) * Clamp01( in.speed ));
+		return in.ambient + (heatFactor * HYD_RISE_MAX * (0.25 + (0.75 * load)) * (in.pumpNorm ? 1.0 : LOW_PRESSURE_HEAT) * Clamp01( in.speed ));
 	}
 
 	/** Quantity of the reservoir [share of the reservoir]: the volume at the ambient temperature and the expansion (or contraction) of the fluid with the temperature. */
@@ -301,7 +351,7 @@ namespace hydmodel
 		if (s.hyd >= CIRC_GPC_ON + 5.0) s.circHold = false;
 
 		// the water lines and the vent freeze in the cold with no heater (the spray valves are then blocked)
-		if ((in.env < FREEZE) && !in.heater) s.ventFreeze += dt;
+		if ((in.env < (FREEZE + s.tolFreeze)) && !in.heater) s.ventFreeze += dt;
 		else s.ventFreeze -= (in.heater ? VENT_THAW_RATE : 1.0) * dt;
 		if (s.ventFreeze > VENT_FREEZE_TIME) s.ventFreeze = VENT_FREEZE_TIME;
 		if (s.ventFreeze <= 0.0)
@@ -314,8 +364,8 @@ namespace hydmodel
 		// heating, or the cooling of the stopped system by the surroundings
 		if (speed > 0.02)
 		{
-			s.hyd += (HydSteadyNoCooling( in ) - s.hyd) * (dt / HYD_HEAT_TAU);
-			s.oil += ((OIL_HEAT * speed) - ((s.oil - in.ambient) / OIL_AMBIENT_TAU)) * dt;
+			s.hyd += (HydSteadyNoCooling( in, s.tolHydHeat ) - s.hyd) * (dt / HYD_HEAT_TAU);
+			s.oil += ((OIL_HEAT * s.tolOilHeat * speed) - ((s.oil - in.ambient) / OIL_AMBIENT_TAU)) * dt;
 		}
 		else
 		{
@@ -327,17 +377,18 @@ namespace hydmodel
 
 		// the boiler
 		const bool ctrl = ControllerWorks( s, in );
-		if (ctrl) s.through = BypassLogic( s.through, s.hyd );
+		if (ctrl) s.through = BypassLogic( s.through, s.hyd - s.tolHydSet );
 		const double n2eff = N2Effect( s.n2, in.n2Open );
 		const bool water = (s.water > 0.0);
-		s.hydDuty = (ctrl && s.through && !s.iceHyd && !s.ventIce && water) ? (HydSprayCommand( s.hyd ) * n2eff) : 0.0;
-		s.oilDuty = (ctrl && !s.iceOil && !s.ventIce && water) ? (OilSprayCommand( s.oil ) * n2eff) : 0.0;
-		s.hyd -= HYD_COOL_MAX * s.hydDuty * dt;
-		s.oil -= OIL_COOL_MAX * s.oilDuty * dt;
+		s.hydDuty = (ctrl && s.through && !s.iceHyd && !s.ventIce && water) ? (HydSprayCommand( s.hyd - s.tolHydSet ) * n2eff) : 0.0;
+		s.oilDuty = (ctrl && !s.iceOil && !s.ventIce && water) ? (OilSprayCommand( s.oil - s.tolOilSet ) * n2eff) : 0.0;
+		const double hydFlow = s.tolHydCool * s.noiseCool, oilFlow = s.tolOilCool * s.noiseCool;
+		s.hyd -= HYD_COOL_MAX * hydFlow * s.hydDuty * dt;
+		s.oil -= OIL_COOL_MAX * oilFlow * s.oilDuty * dt;
 		const double coolest = (in.env < in.ambient) ? in.env : in.ambient;// the spray does not cool below the surroundings
 		if (s.hyd < coolest) s.hyd = coolest;
 		if (s.oil < coolest) s.oil = coolest;
-		const double used = ((HYD_SPRAY * s.hydDuty) + (OIL_SPRAY * s.oilDuty)) * dt / 60.0;// [lb] of water
+		const double used = ((HYD_SPRAY * hydFlow * s.hydDuty) + (OIL_SPRAY * oilFlow * s.oilDuty)) * dt / 60.0;// [lb] of water
 		s.water -= used;
 		if (s.water < 0.0) s.water = 0.0;
 		s.n2 -= (s.n2Leak * dt) + (used * N2_PER_LB);// the nitrogen expands as the water goes out

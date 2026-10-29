@@ -404,6 +404,7 @@ private:
 	rmsreact::AccelEstimator reactEst;// acceleration of the payload relative to the orbiter (option RMSReaction)
 	rmsreact::AccelEstimator reactArmEst;// acceleration of the center of mass of the arm relative to the orbiter (option RMSReaction)
 	VESSEL* reactPayload;
+	double reactLogTime = -1.0e9;// [s] simulated time of the last RMSR line of the log of the rotation
 	VECTOR3 posArmCoM;// center of mass of the arm (frame of the mesh)
 	VECTOR3 armInertia;// inertia of the links of the arm about its center of mass [kg m^2]
 	DiscInPort AutoSeqProceed;// AUTO SEQ switch in PROCEED

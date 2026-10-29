@@ -66,6 +66,11 @@ inline constexpr int APU_2_SHUTDOWN = 10;
 inline constexpr int APU_3_SHUTDOWN = 11;
 const static char* APU_SHUTDOWN_FILE = "Sound\\_CustomVesselsSounds\\SSV\\APU_shut_down.wav";
 
+inline constexpr int APU_1_BANG = 25;// muffled bang of an APU that explodes (heard outside)
+inline constexpr int APU_2_BANG = 26;
+inline constexpr int APU_3_BANG = 27;
+const static char* APU_BANG_FILE = "Sound\\_CustomVesselsSounds\\SSV\\APU_bang.wav";
+
 inline constexpr int SSME_START = 12;
 const static char* SSME_START_FILE = "Sound\\_CustomVesselsSounds\\SSV\\SSME_ignition.wav";
 

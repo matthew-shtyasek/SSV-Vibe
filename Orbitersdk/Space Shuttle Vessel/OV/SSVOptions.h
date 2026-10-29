@@ -138,6 +138,12 @@ class SSVOptions
 			values[i] = settings::Clamp( i, v );
 		}
 
+		/** @return true if the data of the DAP are saved to the folder of the flight logs (see FlightLog.h) */
+		bool FlightDataLog( void ) const
+		{
+			return values[settings::FLIGHT_DATA_LOG] != 0.0;
+		}
+
 		bool EIUDataRecorder( void ) const
 		{
 			return values[settings::EIU_DATA_RECORDER] != 0.0;
@@ -224,11 +230,11 @@ class SSVOptions
 			return values[settings::HYDRAULIC_THERMAL] != 0.0;
 		}
 
-		/** @return time acceleration up to which the DAPs do not reduce the thrust of the RCS (1: reduced from the first acceleration) */
-		double RCSFullThrustAcceleration( void ) const
+		/** @return time acceleration from which the orbit DAP holds the attitude on rails (0: never) */
+		double RCSRailsAbove( void ) const
 		{
-			const int i = static_cast<int>(values[settings::RCS_FULL_THRUST] + 0.5);
-			return ((i >= 0) && (i < settings::RCS_FULL_THRUST_COUNT)) ? settings::RCS_FULL_THRUST_ACC[i] : 1.0;
+			const int i = static_cast<int>(values[settings::RCS_RAILS_ABOVE] + 0.5);
+			return ((i >= 0) && (i < settings::RCS_RAILS_COUNT)) ? settings::RCS_RAILS_ACC[i] : 0.0;
 		}
 
 		/** @return self illumination of the panels when the lamps of the cabin are off [0, 1] (1 = as in the meshes) */
@@ -249,6 +255,44 @@ class SSVOptions
 		{
 			const int i = static_cast<int>(values[settings::HYDRAULIC_RANDOM_FAILURES] + 0.5);
 			return ((i >= 0) && (i < settings::HYD_FAILURE_RATE_COUNT)) ? settings::HYD_FAILURE_RATES[i] : 0.0;
+		}
+
+		/** @return rate of the random fire of each APU [1/hour of running in the air], 0 if off */
+		double APURandomFireRate( void ) const
+		{
+			const int i = static_cast<int>(values[settings::APU_RANDOM_FIRE] + 0.5);
+			return ((i >= 0) && (i < settings::HYD_FAILURE_RATE_COUNT)) ? settings::HYD_FAILURE_RATES[i] : 0.0;
+		}
+
+		/** @return true if the hydraulic parts of the vehicle have tolerances (fixed for the vehicle) */
+		bool HydraulicTolerances( void ) const
+		{
+			return values[settings::HYDRAULIC_TOLERANCES] != 0.0;
+		}
+
+		/** @return true if the hydraulic parts have noise of each use */
+		bool HydraulicNoise( void ) const
+		{
+			return values[settings::HYDRAULIC_NOISE] != 0.0;
+		}
+
+		/** @return true if the jets of the RCS have tolerances (fixed for the vehicle) */
+		bool RCSTolerances( void ) const
+		{
+			return values[settings::RCS_TOLERANCES] != 0.0;
+		}
+
+		/** @return true if the jets of the RCS have noise of each firing */
+		bool RCSNoise( void ) const
+		{
+			return values[settings::RCS_NOISE] != 0.0;
+		}
+
+		/** @return scale of all the dispersions (tolerances and noise), 1 = the estimated real values */
+		double ToleranceScale( void ) const
+		{
+			const double v = values[settings::TOLERANCE_SCALE];
+			return (v < 0.0) ? 0.0 : v;
 		}
 };
 

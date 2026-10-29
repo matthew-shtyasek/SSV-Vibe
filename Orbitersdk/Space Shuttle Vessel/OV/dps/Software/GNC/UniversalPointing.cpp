@@ -1755,6 +1755,24 @@ namespace dps
 		return MNVR_TRACK_OPTION;
 	}
 
+	UniversalPointing::LogInfo UniversalPointing::GetLogInfo() const
+	{
+		LogInfo info;
+		info.option = OPT_CUR;
+		info.targetId = (OPT_CUR != 0) ? TGT_ID_C : 0;
+		info.ra = TGT_RA * DEG;
+		info.dec = TGT_DEC * DEG;
+		info.lat = TGT_LAT * DEG;
+		info.lon = TGT_LON * DEG;
+		info.alt = TGT_ALT;
+		info.bodyVectorId = BODV_ID;
+		info.bodyPitch = BODV_PITCH * DEG;
+		info.bodyYaw = BODV_YAW * DEG;
+		info.omicron = OMICRON * DEG;
+		info.threeAxis = THREE_AXIS_C;
+		return info;
+	}
+
 	void UniversalPointing::GetRequiredQuaternion(double& QS, VECTOR3& QV) const
 	{
 		QS = Q_RBOD_M50_S;
