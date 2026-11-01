@@ -35,6 +35,27 @@ SettingsMFD::~SettingsMFD()
 	SetPage( settings::PAGE_SETTINGS );
 }
 
+SettingsMFD::Saved SettingsMFD::saved = {NULL, 0, 0, 0, {0, 0}, false};
+
+void SettingsMFD::StoreStatus( void ) const
+{
+	saved.vessel = sts;
+	saved.page = page;
+	saved.failRow = failRow;
+	saved.ctrlRow = ctrlRow;
+	editor.GetState( saved.cursors, &saved.dirty );
+}
+
+void SettingsMFD::RecallStatus( void )
+{
+	if (saved.vessel != sts) return;
+	if ((saved.page < 0) || (saved.page >= settings::PAGE_COUNT)) return;
+	failRow = saved.failRow;
+	ctrlRow = saved.ctrlRow;
+	editor.SetState( saved.cursors, saved.dirty );
+	SetPage( saved.page );
+}
+
 void SettingsMFD::SetPage( int newPage )
 {
 	HandControllers* hc = sts->GetHandControllers();

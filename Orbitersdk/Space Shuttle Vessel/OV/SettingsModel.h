@@ -297,6 +297,17 @@ namespace settings
 			return n;
 		}
 
+		/** Selected lines of the two lists and the mark of the unsaved change: kept when the MFD is created again (a change of its size). */
+		void GetState( int* cur, bool* d ) const { cur[0] = cursors[0]; cur[1] = cursors[1]; *d = dirty; }
+		void SetState( const int* cur, bool d )
+		{
+			for (int l = 0; l < 2; l++)
+			{
+				if ((cur[l] >= 0) && (cur[l] < COUNT) && (IsRealismGroup( ITEMS[cur[l]].group ) == (l == 1))) cursors[l] = cur[l];
+			}
+			dirty = d;
+		}
+
 		/** True after a change that was not written to the file. */
 		bool IsDirty( void ) const { return dirty; }
 		void MarkSaved( void ) { dirty = false; }

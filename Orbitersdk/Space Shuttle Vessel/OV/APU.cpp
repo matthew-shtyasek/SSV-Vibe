@@ -281,18 +281,22 @@ void APU::CreateEffects( void )
 	VECTOR3 dir = FX_DIR[ID - 1];
 	dir = dir / length( dir );
 	static SURFHANDLE texFlame = oapiRegisterParticleTexture( "SSV\\OV\\SSMEstream" );
-	static SURFHANDLE texSmoke = oapiRegisterParticleTexture( "contrail1" );
+	static SURFHANDLE texSmoke = oapiRegisterParticleTexture( "SSV\\OV\\APUSmoke" );// dark grey: the smoke of a fire (burnt insulation, oil)
+	static SURFHANDLE texVapor = oapiRegisterParticleTexture( "contrail1" );// white: the vapour of the leak
 	static PARTICLESTREAMSPEC flash = {0, 0.8, 80, 8, 0.6, 0.7, 10, 3, PARTICLESTREAMSPEC::EMISSIVE, PARTICLESTREAMSPEC::LVL_FLAT, 1, 1, PARTICLESTREAMSPEC::ATM_FLAT, 1, 1, 0};
 	static PARTICLESTREAMSPEC fire = {0, 0.35, 40, 4, 0.3, 1.0, 3, 4, PARTICLESTREAMSPEC::EMISSIVE, PARTICLESTREAMSPEC::LVL_FLAT, 1, 1, PARTICLESTREAMSPEC::ATM_FLAT, 1, 1, 0};
-	static PARTICLESTREAMSPEC smoke = {0, 0.6, 20, 5, 0.35, 10, 2.5, 4, PARTICLESTREAMSPEC::DIFFUSE, PARTICLESTREAMSPEC::LVL_FLAT, 1, 1, PARTICLESTREAMSPEC::ATM_FLAT, 1, 1, 0};
+	static PARTICLESTREAMSPEC smoke = {0, 0.6, 20, 3.5, 0.3, 12, 2.5, 0.6, PARTICLESTREAMSPEC::DIFFUSE, PARTICLESTREAMSPEC::LVL_FLAT, 1, 1, PARTICLESTREAMSPEC::ATM_FLAT, 1, 1, 0};
 	static PARTICLESTREAMSPEC vapor = {0, 0.15, 12, 3, 0.4, 4, 0.8, 2, PARTICLESTREAMSPEC::DIFFUSE, PARTICLESTREAMSPEC::LVL_FLAT, 1, 1, PARTICLESTREAMSPEC::ATM_FLAT, 1, 1, 0};
 	flash.tex = texFlame;
 	fire.tex = texFlame;
 	smoke.tex = texSmoke;
-	vapor.tex = texSmoke;
+	vapor.tex = texVapor;
 	psFlash = STS()->AddParticleStream( &flash, pos, dir, &lvFlash );
 	psFire = STS()->AddParticleStream( &fire, pos, dir, &lvFire );
-	psSmoke = STS()->AddParticleStream( &smoke, pos, dir, &lvSmoke );
+	// the smoke is hot and rises: it leaves mostly upwards, and it slows down little, so that it climbs also when the vessel stands still (the streams have no buoyancy)
+	VECTOR3 dirUp = (dir * 0.35) + _V( 0.0, 1.0, 0.0 );
+	dirUp = dirUp / length( dirUp );
+	psSmoke = STS()->AddParticleStream( &smoke, pos, dirUp, &lvSmoke );
 	psVapor = STS()->AddParticleStream( &vapor, pos, dir, &lvVapor );
 	COLOUR4 diff = {1.0f, 0.55f, 0.2f, 0.0f}, zero = {0.0f, 0.0f, 0.0f, 0.0f}, amb = {0.3f, 0.15f, 0.05f, 0.0f};
 	fxLight = STS()->AddPointLight( pos, 40.0, 1.0, 0.05, 0.002, diff, zero, amb );
@@ -423,9 +427,17 @@ void APU::OnPreStep(double simt, double simdt, double mjd)
 
 	APU_UnderspeedLight.ResetLine();
 	APU_OverspeedLight.ResetLine();
+	// the light stays on after the auto shutdown (the trip is latched until the APU OPERATE switch goes to OFF): the C&W counts the discrete over several
+	// cycles, and the check below is made only while the APU runs, so without the latch the light would be a pulse of one step
+	if (autoShutdownLatch)
+	{
+		if (overspeedShutdown) APU_OverspeedLight.SetLine();
+		else APU_UnderspeedLight.SetLine();
+	}
 
 	switch(State) {
 		case SHUTDOWN:
+			failure = 0;// the fault of a training scenario ends with the shutdown, also with the auto shutdown inhibited (the crew shut the APU down by hand)
 			if (SoundIsPlaying( STS()->GetSound(), APU_1_SHUTDOWN + ID - 1 ))
 			{
 				SoundStop( STS()->GetSound(), APU_1_START + ID - 1 );
@@ -663,6 +675,7 @@ void APU::OnSaveState(FILEHANDLE scn) const
 		sprintf_s( leak, sizeof( leak ), "%.3f %.1f %d", leakFactor, leakTime, leakFireChecked ? 1 : 0 );
 		oapiWriteScenario_string( scn, "Leak", leak );
 	}
+	if (burning) oapiWriteScenario_int( scn, "Fire", 1 );
 	if (overspeedShutdown) oapiWriteScenario_int( scn, "Overspeed", 1 );
 	if (failed) oapiWriteScenario_int( scn, "Failed", 1 );
 	if (failure != 0) oapiWriteScenario_int( scn, "Failure", failure );
@@ -743,6 +756,13 @@ bool APU::OnParseLine(const char *line)
 		sscanf_s( line + 4, "%lf %lf %d", &leakFactor, &leakTime, &checked );
 		leakFireChecked = (checked != 0);
 		leaking = true;
+		return true;
+	}
+	else if (!_strnicmp( line, "Fire", 4 ))
+	{
+		// the leak burns already (trigger of the training scenarios)
+		burning = true;
+		fireOut = 0.0;
 		return true;
 	}
 	else if (!_strnicmp( line, "Overspeed", 9 ))

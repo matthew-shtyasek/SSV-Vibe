@@ -44,6 +44,8 @@ public:
 	bool ConsumeKeyBuffered( DWORD key ) override;
 	bool ConsumeButton( int bt, int event ) override;
 	bool Update( oapi::Sketchpad* skp ) override;
+	void StoreStatus( void ) const override;// Orbiter creates the MFD again when its size changes
+	void RecallStatus( void ) override;
 	static int MsgProc( UINT msg, UINT mfd, WPARAM wparam, LPARAM lparam );
 
 private:
@@ -65,6 +67,15 @@ private:
 	int lastLearning;// input that was waiting for an assignment at the last update
 	char status[48];
 	double statusTime;
+
+	/** State kept between the instances (the MFD is deleted and created again when the window changes its size). */
+	struct Saved
+	{
+		const VESSEL* vessel;
+		int page, failRow, ctrlRow, cursors[2];
+		bool dirty;
+	};
+	static Saved saved;
 };
 
 #endif// _SETTINGSMFD_H_
